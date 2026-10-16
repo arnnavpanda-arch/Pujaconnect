@@ -218,6 +218,8 @@ function saveSession(user, token) {
 
 /* ---------- modal ---------- */
 function openModal(title, html, onMount, wide = false) {
+  const drawer = $('#nav-drawer');
+  if (drawer) drawer.classList.remove('open');
   $('#modal-root').innerHTML = `<div class="modal-backdrop" data-action="modalBackdrop"><div class="modal ${wide ? 'modal-wide' : ''}"><div class="modal-head"><h3>${esc(title)}</h3><button data-action="closeModal" aria-label="Close"><span class="material-icons">close</span></button></div><div class="modal-body">${html}</div></div></div>`;
   if (onMount) onMount($('#modal-root .modal'));
 }
@@ -803,6 +805,7 @@ async function userDash(root) {
   S.bookings = bookings;
   const tab = S.dashTab || 'bookings';
   const upcoming = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').length;
+  const pendingPayments = bookings.filter((b) => b.paymentStatus !== 'Paid' && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')).length;
   const initial = (S.user.name || 'D').charAt(0).toUpperCase();
 
   root.innerHTML = `
@@ -821,28 +824,65 @@ async function userDash(root) {
       </div>
     </div>
 
+    <!-- Quick Stat Cards (Tappable on both Mobile & Desktop) -->
     <div class="stats">
-      <div class="stat"><b>${bookings.length}</b><span>Total Bookings</span></div>
-      <div class="stat"><b>${upcoming}</b><span>Upcoming Rituals</span></div>
-      <div class="stat"><b>${longs.length}</b><span>Multi-Day Requests</span></div>
+      <div class="stat" data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view all bookings">
+        <b>${bookings.length}</b>
+        <span>Total Bookings</span>
+      </div>
+      <div class="stat" data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view upcoming rituals">
+        <b style="color:var(--ochre)">${upcoming}</b>
+        <span>Upcoming Rituals</span>
+      </div>
+      <div class="stat" data-action="dashTab" data-tab="long" style="cursor:pointer" title="Click to view multi-day requests">
+        <b>${longs.length}</b>
+        <span>Multi-Day Requests</span>
+      </div>
     </div>
 
-    <!-- Devotee Subtabs -->
+    <!-- Devotee Navigation: Button Cards Grid on Mobile & Clean Bar on Desktop -->
     <div class="dash-subtabs">
       <button class="subtab ${tab === 'bookings' ? 'active' : ''}" data-action="dashTab" data-tab="bookings">
-        <span class="material-icons">event</span> My Bookings <span class="subtab-badge">${bookings.length}</span>
+        <span class="subtab-icon-wrap"><span class="material-icons">event</span></span>
+        <div class="subtab-info">
+          <span class="subtab-title">My Bookings</span>
+          <span class="subtab-sub">${bookings.length} Registered</span>
+        </div>
+        <span class="subtab-badge">${bookings.length}</span>
       </button>
+
       <button class="subtab ${tab === 'payments' ? 'active' : ''}" data-action="dashTab" data-tab="payments">
-        <span class="material-icons">payments</span> Payment Tracking
+        <span class="subtab-icon-wrap"><span class="material-icons">payments</span></span>
+        <div class="subtab-info">
+          <span class="subtab-title">Payment Tracking</span>
+          <span class="subtab-sub">${pendingPayments > 0 ? `${pendingPayments} To Pay` : 'All Clear'}</span>
+        </div>
+        ${pendingPayments > 0 ? `<span class="subtab-badge alert">${pendingPayments}</span>` : ''}
       </button>
+
       <button class="subtab ${tab === 'explore' ? 'active' : ''}" data-action="dashTab" data-tab="explore">
-        <span class="material-icons">spa</span> Explore All Pujas
+        <span class="subtab-icon-wrap"><span class="material-icons">spa</span></span>
+        <div class="subtab-info">
+          <span class="subtab-title">Explore All Pujas</span>
+          <span class="subtab-sub">Browse Rituals</span>
+        </div>
       </button>
+
       <button class="subtab ${tab === 'long' ? 'active' : ''}" data-action="dashTab" data-tab="long">
-        <span class="material-icons">event_note</span> Multi-Day Yajnas <span class="subtab-badge">${longs.length}</span>
+        <span class="subtab-icon-wrap"><span class="material-icons">local_fire_department</span></span>
+        <div class="subtab-info">
+          <span class="subtab-title">Multi-Day Yajnas</span>
+          <span class="subtab-sub">${longs.length} Requests</span>
+        </div>
+        <span class="subtab-badge">${longs.length}</span>
       </button>
+
       <button class="subtab ${tab === 'profile' ? 'active' : ''}" data-action="dashTab" data-tab="profile">
-        <span class="material-icons">account_circle</span> My Profile
+        <span class="subtab-icon-wrap"><span class="material-icons">account_circle</span></span>
+        <div class="subtab-info">
+          <span class="subtab-title">My Profile</span>
+          <span class="subtab-sub">Account Details</span>
+        </div>
       </button>
     </div>
 
@@ -1005,7 +1045,20 @@ function renderDevoteeBookingsTab(bookings) {
             </div>
           </div>
           <div class="booking-card-footer">
-            <button class="btn btn-dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}"><span class="material-icons">print</span> Slip</button>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}"><span class="material-icons">print</span> Slip</button>
+              ${b.paymentStatus === 'Paid' ? `
+                <button class="btn btn-gold btn-sm" data-action="viewBill" data-id="${esc(b.bookingId)}">
+                  <span class="material-icons">receipt_long</span> Bill
+                </button>
+              ` : b.paymentStatus === 'Verification Pending' ? `
+                <span class="badge amber" style="font-size:11px"><span class="material-icons" style="font-size:13px">hourglass_top</span> Verifying</span>
+              ` : (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved') ? `
+                <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
+                  <span class="material-icons">payments</span> Pay (${inr(Math.max(0, (b.fee || 1500) - (b.advancePaid ? (b.advanceAmount || 0) : 0)))})
+                </button>
+              ` : ''}
+            </div>
             <div style="display:flex;gap:6px">
               ${['Confirmed', 'In Progress'].includes(b.status) ? `
                 <button class="btn btn-outline dark btn-sm" data-action="reschedule" data-id="${esc(b.bookingId)}">Reschedule</button>
@@ -1873,16 +1926,38 @@ function openPujaEditor(id) {
 /* ---------- action dispatcher ---------- */
 const ACTIONS = {
   nav: (d) => showView(d.view),
-  toggleMenu: () => $('#nav-links').classList.toggle('open'),
+  toggleMenu: () => {
+    const drawer = $('#nav-drawer');
+    if (drawer) drawer.classList.toggle('open');
+  },
   closeModal,
-  login: () => openAuth('login'),
+  login: () => {
+    const drawer = $('#nav-drawer');
+    if (drawer) drawer.classList.remove('open');
+    openAuth('login');
+  },
   adminPanel: openAdminDirect,
   refreshDbStatus: () => renderDashboard(),
   showLogin: () => openAuth('login'),
   showRegister: () => openAuth('register'),
-  logout: () => { saveSession(null); showView('home'); toast('Logged out'); },
-  bookCta: () => { S.filters.service = ''; showView('pandits'); },
-  panditRegister: openPanditRegister,
+  logout: () => {
+    const drawer = $('#nav-drawer');
+    if (drawer) drawer.classList.remove('open');
+    saveSession(null);
+    showView('home');
+    toast('Logged out');
+  },
+  bookCta: () => {
+    const drawer = $('#nav-drawer');
+    if (drawer) drawer.classList.remove('open');
+    S.filters.service = '';
+    showView('pandits');
+  },
+  panditRegister: () => {
+    const drawer = $('#nav-drawer');
+    if (drawer) drawer.classList.remove('open');
+    openPanditRegister();
+  },
   pujaTab: (d) => { S.pujaTab = d.type; renderPujas(); },
   findFor: (d) => { S.filters.service = d.name; showView('pandits'); },
   planLong: (d) => { S.longPreset = d.name; showView('long'); },
@@ -1921,6 +1996,14 @@ const ACTIONS = {
       : (S.me.workingDistricts || [S.me.district]);
     const districtPrices = formState ? formState.districtPrices : (S.me.districtPrices || {});
 
+    // Bank & UPI details
+    const bankAccount = $('#p-bank-acc') ? $('#p-bank-acc').value.trim() : (S.me.bankAccount || '');
+    const ifscCode = $('#p-bank-ifsc') ? $('#p-bank-ifsc').value.trim().toUpperCase() : (S.me.ifscCode || '');
+    const upiId = $('#p-bank-upi') ? $('#p-bank-upi').value.trim() : (S.me.upiId || '');
+    const bankName = $('#p-bank-name') ? $('#p-bank-name').value.trim() : (S.me.bankName || '');
+    const accountHolder = $('#p-bank-holder') ? $('#p-bank-holder').value.trim() : (S.me.accountHolder || S.me.name);
+    const qrCode = $('#p-qr-val') ? $('#p-qr-val').value.trim() : (S.me.qrCode || '');
+
     try {
       const updated = await api('/pandits/' + S.me._id, {
         method: 'PUT',
@@ -1930,11 +2013,17 @@ const ACTIONS = {
           fee,
           workingState,
           workingDistricts,
-          districtPrices
+          districtPrices,
+          bankAccount,
+          ifscCode,
+          upiId,
+          bankName,
+          accountHolder,
+          qrCode
         }
       });
       S.me = updated;
-      toast('Availability, working districts & per-district fees saved successfully! 🙏');
+      toast('Availability, districts & bank payout details saved successfully! 🙏');
       renderDashboard();
     } catch (e) {
       toast(e.message, true);
@@ -2014,7 +2103,274 @@ const ACTIONS = {
   assign: (d) => openAssign(d.id),
   editPuja: (d) => openPujaEditor(d.id),
   delPuja: async (d) => { if (!confirm('Delete this puja from the catalog?')) return; try { await api('/pujas/' + d.id, { method: 'DELETE' }); toast('Deleted'); renderDashboard(); } catch (e) { toast(e.message, true); } },
-  modalBackdrop: (d, el, ev) => { if (ev.target === el) closeModal(); }
+  modalBackdrop: (d, el, ev) => { if (ev.target === el) closeModal(); },
+  payBooking: async (d) => {
+    try {
+      const bId = d && d.id;
+      if (!bId) return toast('Missing booking identifier', true);
+
+      let b = (S.bookings || []).find((x) => x.bookingId === bId || x._id === bId);
+      if (!b) {
+        try {
+          b = await api('/bookings/' + encodeURIComponent(bId));
+        } catch {}
+      }
+      if (!b) {
+        try {
+          const list = await api('/bookings?bookingId=' + encodeURIComponent(bId));
+          b = list && list[0];
+        } catch {}
+      }
+      if (!b) return toast('Booking record not found for ' + bId, true);
+
+      // Fetch assigned Pandit's bank details
+      let pandit = null;
+      if (b.panditEmail) {
+        try {
+          const pandits = await api('/pandits?email=' + encodeURIComponent(b.panditEmail));
+          if (pandits && pandits.length) pandit = pandits[0];
+        } catch (err) {}
+      }
+      if (!pandit && b.panditName) {
+        try {
+          const pandits = await api('/pandits');
+          pandit = (pandits || []).find((p) => p.name && p.name.trim().toLowerCase() === b.panditName.trim().toLowerCase());
+        } catch (err) {}
+      }
+
+      const fee = Number(b.fee) || 1500;
+      const advance = Number(b.advanceAmount) || 0;
+      const remaining = Math.max(0, fee - (b.advancePaid ? advance : 0));
+
+      const displayUpi = (pandit && pandit.upiId) ||
+        (b.panditEmail && b.panditEmail.includes('@') ? b.panditEmail.replace('@', '.') + '@upi' : 'pujaconnect.pandit@upi');
+
+      const qrImgHtml = (pandit && pandit.qrCode)
+        ? `<div class="qr-preview-card" style="margin:16px 0;text-align:center">
+             <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:var(--mahogany)">
+               <span class="material-icons" style="font-size:16px;vertical-align:middle;color:var(--ochre)">qr_code_scanner</span>
+               Scan to Pay Pandit Directly (PhonePe / GPay / Paytm / BHIM)
+             </div>
+             <img src="${esc(pandit.qrCode)}" class="qr-img" alt="Pandit UPI QR Code">
+             <div class="muted" style="font-size:11px;margin-top:6px">Tap and hold or scan with your banking app</div>
+           </div>`
+        : '';
+
+      openModal(`Pay Dakshina – ${esc(b.service || 'Puja')}`, `
+        <div style="max-width:520px;margin:0 auto">
+          <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:12px;padding:16px;margin-bottom:18px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <span class="booking-id-tag">${esc(b.bookingId || bId)}</span>
+              <span class="badge green">Pandit Approved ✅</span>
+            </div>
+            <div style="font-size:14px;color:var(--mahogany)"><b>${esc(b.service || 'Sacred Ritual')}</b></div>
+            <div style="font-size:13px;color:var(--muted);margin-top:4px">
+              📅 ${esc(b.date || 'Scheduled Date')} · ⏰ ${esc(b.time || '10:00 AM')} · Pandit: <b>${esc(b.panditName || 'Assigned Purohit')}</b>
+            </div>
+            <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #ebd9c2;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:13px;font-weight:600">Remaining Amount to Pay:</span>
+              <span style="font-size:22px;font-weight:700;color:var(--ochre)">${inr(remaining)}</span>
+            </div>
+          </div>
+
+          <!-- Pandit Bank Details Box -->
+          <div class="bank-details-box">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-weight:700;color:var(--mahogany);font-size:14.5px">
+              <span class="material-icons" style="color:var(--ochre)">account_balance</span>
+              Assigned Pandit Bank &amp; UPI Details
+            </div>
+            <div class="bank-info-grid">
+              <div class="bank-info-item">
+                <label>Account Holder Name</label>
+                <b>${esc((pandit && pandit.accountHolder) || b.panditName || 'Vedic Purohit')}</b>
+              </div>
+              <div class="bank-info-item">
+                <label>Bank Name</label>
+                <b>${esc((pandit && pandit.bankName) || 'State Bank of India')}</b>
+              </div>
+              <div class="bank-info-item">
+                <label>Bank Account Number</label>
+                <b style="font-family:monospace;letter-spacing:1px">${esc((pandit && pandit.bankAccount) || '987654321012')}</b>
+              </div>
+              <div class="bank-info-item">
+                <label>IFSC Code</label>
+                <b style="font-family:monospace;letter-spacing:1px">${esc((pandit && pandit.ifscCode) || 'SBIN0001234')}</b>
+              </div>
+              <div class="bank-info-item" style="grid-column: 1 / -1">
+                <label>UPI ID / UI Number</label>
+                <b style="font-family:monospace;color:var(--ochre);font-size:14px">${esc(displayUpi)}</b>
+              </div>
+            </div>
+            ${qrImgHtml}
+          </div>
+
+          <!-- Submit Payment Verification Form -->
+          <div style="margin-top:18px">
+            <div style="font-weight:700;margin-bottom:8px;font-size:14px;color:var(--mahogany)">
+              <span class="material-icons" style="font-size:16px;vertical-align:middle;color:var(--green)">verified</span>
+              Submit Transfer Reference for Verification
+            </div>
+            <p class="muted" style="font-size:12.5px;margin-bottom:12px">
+              After completing the transfer via UPI, GPay, PhonePe, or Bank Transfer, enter your Transaction UTR / Ref Number below. The Admin will verify and your official bill will be generated.
+            </p>
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Payment Mode Used</label>
+              <select id="pay-mode" style="margin-bottom:10px">
+                <option value="UPI (PhonePe / GPay / Paytm)">UPI (PhonePe / GPay / Paytm / BHIM)</option>
+                <option value="Direct Bank Transfer (IMPS/NEFT)">Direct Bank Transfer (IMPS / NEFT)</option>
+                <option value="Cash Paid to Pandit">Cash Paid Directly to Pandit</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Transaction UTR / Reference ID / UPI Ref Number *</label>
+              <input type="text" id="pay-proof" placeholder="e.g. 423456789012 or UPI/345678" style="margin-bottom:14px">
+            </div>
+            <button class="btn btn-gold btn-lg" id="btn-submit-payment-proof" style="width:100%">
+              <span class="material-icons">send</span> Submit Payment for Verification
+            </button>
+          </div>
+        </div>
+      `, (m) => {
+        const submitBtn = $('#btn-submit-payment-proof', m);
+        if (submitBtn) {
+          submitBtn.onclick = async () => {
+            const proof = $('#pay-proof', m).value.trim();
+            const mode = $('#pay-mode', m).value;
+            if (!proof) return toast('Please enter the Transaction UTR or Reference Number', true);
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Submitting...';
+            try {
+              const targetBookingId = b.bookingId || bId;
+              await api('/bookings/' + encodeURIComponent(targetBookingId) + '/submit-payment', {
+                method: 'POST',
+                body: { paymentProof: proof, paymentMethod: mode }
+              });
+              closeModal();
+              toast('Payment submitted! Awaiting Admin verification. 🙏');
+              renderDashboard();
+            } catch (err) {
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = '<span class="material-icons">send</span> Submit Payment for Verification';
+              toast(err.message, true);
+            }
+          };
+        }
+      });
+    } catch (e) {
+      console.error('Error in payBooking:', e);
+      toast('Could not open payment window: ' + e.message, true);
+    }
+  },
+  viewBill: async (d) => {
+    try {
+      const bId = d && d.id;
+      if (!bId) return toast('Missing booking identifier', true);
+      let b = (S.bookings || []).find((x) => x.bookingId === bId || x._id === bId);
+      if (!b) {
+        try {
+          b = await api('/bookings/' + encodeURIComponent(bId));
+        } catch {}
+      }
+      if (!b) {
+        try {
+          const list = await api('/bookings?bookingId=' + encodeURIComponent(bId));
+          b = list && list[0];
+        } catch {}
+      }
+      if (!b) return toast('Booking record not found', true);
+
+    const invDate = b.invoiceGeneratedAt ? new Date(b.invoiceGeneratedAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : new Date().toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+    const invId = b.invoiceId || ('INV-' + b.bookingId.replace('PUJA-', '') + '-9901');
+
+    openModal('Official Ritual Dakshina Receipt', `
+      <div class="invoice-container">
+        <div class="invoice-head">
+          <div>
+            <div class="invoice-brand"><span class="om">ॐ</span> PujaConnect</div>
+            <div style="font-size:12px;color:var(--muted)">Authentic Vedic Ceremonies &amp; Ritual Logistics</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">Govt. Registered Vedic Purohit Network · India</div>
+          </div>
+          <div style="text-align:right">
+            <div class="invoice-num">${esc(invId)}</div>
+            <div style="font-size:12px;color:var(--muted)">Issue Date: <b>${invDate}</b></div>
+            <div style="font-size:12px;color:var(--muted)">Booking ID: <b>${esc(b.bookingId)}</b></div>
+          </div>
+        </div>
+
+        <div class="invoice-parties">
+          <div class="invoice-party">
+            <label>Billed To (Devotee)</label>
+            <b>${esc(b.userName)}</b>
+            <div>${esc(b.userEmail)}</div>
+            <div>📞 ${esc(b.userPhone || 'Registered Mobile')}</div>
+            ${b.address ? `<div>📍 ${esc(b.address)}</div>` : ''}
+          </div>
+          <div class="invoice-party" style="text-align:right">
+            <label>Ceremony Performed By (Vedic Purohit)</label>
+            <b>${esc(b.panditName)}</b>
+            <div>${esc(b.panditEmail)}</div>
+            <div>Verified Vedic Acharya</div>
+          </div>
+        </div>
+
+        <table class="invoice-table">
+          <thead>
+            <tr>
+              <th>Item / Sacred Service</th>
+              <th>Date &amp; Time</th>
+              <th style="text-align:right">Dakshina Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <b>${esc(b.service)}</b>
+                <div style="font-size:11.5px;color:var(--muted);margin-top:2px">Vedic chanting, havan sankalpa, samagri consultation &amp; rituals</div>
+              </td>
+              <td>${esc(b.date)}<br><small class="muted">${esc(b.time || '10:00 AM')}</small></td>
+              <td style="text-align:right;font-weight:700">${inr(b.fee || 1500)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="invoice-summary">
+          <div class="invoice-total-row">
+            <span>Subtotal</span>
+            <span>${inr(b.fee || 1500)}</span>
+          </div>
+          <div class="invoice-total-row">
+            <span>Platform &amp; Coordination Fee</span>
+            <span>₹0 (Waived)</span>
+          </div>
+          <div class="invoice-total-row grand">
+            <span>Total Dakshina Received</span>
+            <span>${inr(b.fee || 1500)}</span>
+          </div>
+        </div>
+
+        <div class="invoice-footer">
+          <div class="invoice-stamp">PAID &amp; VERIFIED</div>
+          <div style="font-size:12px;color:var(--muted);line-height:1.5">
+            <b>Payment Mode:</b> ${esc(b.paymentMethod || 'UPI / Bank Transfer')}<br>
+            <b>Transaction Ref / UTR:</b> <code style="font-size:11px">${esc(b.paymentProof || 'VERIFIED')}</code><br>
+            <b>Verification Status:</b> Verified by PujaConnect Super Admin<br>
+            <span style="font-style:italic;color:var(--ochre)">"May Lord Ganesha and the Divine Deities bestow health, peace &amp; prosperity on your family."</span>
+          </div>
+        </div>
+
+        <div class="invoice-actions">
+          <button class="btn btn-gold" onclick="window.print()">
+            <span class="material-icons">print</span> Print Official Bill
+          </button>
+          <button class="btn btn-outline" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    `);
+    } catch (e) {
+      console.error('Error in viewBill:', e);
+      toast('Could not generate bill: ' + e.message, true);
+    }
+  }
 };
 
 document.addEventListener('click', (ev) => {
@@ -2032,6 +2388,7 @@ document.addEventListener('click', (ev) => {
   renderNav();
   await loadPujas();
   renderHomePujas();
+  renderHomePandits();
   setupHeroFilter();
   const hash = location.hash.replace('#', '');
   if (['pandits', 'pujas', 'long', 'about', 'dashboard'].includes(hash)) showView(hash);

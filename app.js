@@ -235,7 +235,14 @@ app.get('/api/pandits', wrap(async (req, res) => {
   if (req.query.district) q.$or = [{ district: req.query.district }, { workingDistricts: req.query.district }];
   if (req.query.state) q.$and = [{ $or: [{ state: req.query.state }, { workingState: req.query.state }] }];
   if (req.query.service) q.services = req.query.service;
-  res.json(await Pandit.find(q).sort({ experience: -1 }));
+  res.json(await Pandit.find(q).sort({ experience: -1 }).lean());
+}));
+
+app.get('/api/pandits/:id', wrap(async (req, res) => {
+  const query = req.params.id.match(/^[0-9a-fA-F]{24}$/) ? { _id: req.params.id } : { email: lc(req.params.id) };
+  const p = await Pandit.findOne(query).lean();
+  if (!p) return res.status(404).json({ error: 'Pandit not found' });
+  res.json(p);
 }));
 
 app.post('/api/pandits/register', wrap(async (req, res) => {
@@ -262,17 +269,19 @@ app.post('/api/pandits/register', wrap(async (req, res) => {
 app.put('/api/pandits/:id/status', adminOnly, wrap(async (req, res) => {
   const { status } = req.body;
   if (!['Verified', 'Rejected', 'Pending Review'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
-  const p = await Pandit.findByIdAndUpdate(req.params.id, { status, verified: status === 'Verified' }, { new: true });
+  const query = req.params.id.match(/^[0-9a-fA-F]{24}$/) ? { _id: req.params.id } : { email: lc(req.params.id) };
+  const p = await Pandit.findOneAndUpdate(query, { status, verified: status === 'Verified' }, { new: true });
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
   if (status !== 'Pending Review') await sendSafe('PANDIT_VERIFIED', p.email, { panditName: p.name, status });
   res.json(p);
 }));
 
 app.put('/api/pandits/:id', wrap(async (req, res) => {
-  const allowed = ['name', 'phone', 'state', 'district', 'city', 'location', 'workingState', 'workingDistricts', 'experience', 'exp', 'specialty', 'bio', 'fee', 'services', 'availableDays', 'daySlots', 'timeSlots', 'districtPrices', 'photo', 'documentUrl', 'idDoc'];
+  const allowed = ['name', 'phone', 'state', 'district', 'city', 'location', 'workingState', 'workingDistricts', 'experience', 'exp', 'specialty', 'bio', 'fee', 'services', 'availableDays', 'daySlots', 'timeSlots', 'districtPrices', 'photo', 'documentUrl', 'idDoc', 'bankAccount', 'ifscCode', 'upiId', 'bankName', 'accountHolder', 'qrCode'];
   const update = {};
   allowed.forEach((k) => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
-  const p = await Pandit.findByIdAndUpdate(req.params.id, update, { new: true });
+  const query = req.params.id.match(/^[0-9a-fA-F]{24}$/) ? { _id: req.params.id } : { email: lc(req.params.id) };
+  const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
   res.json(p);
 }));
@@ -286,11 +295,26 @@ async function uniqueId(Model, field, prefix) {
   return `${prefix}-${Date.now().toString().slice(-6)}`;
 }
 
+const bookingFindQuery = (param) => ({
+  $or: [
+    { bookingId: param },
+    { _id: String(param).match(/^[0-9a-fA-F]{24}$/) ? param : null }
+  ]
+});
+
 app.get('/api/bookings', wrap(async (req, res) => {
   const q = {};
   if (req.query.userEmail) q.userEmail = lc(req.query.userEmail);
   if (req.query.panditEmail) q.panditEmail = lc(req.query.panditEmail);
+  if (req.query.paymentStatus) q.paymentStatus = req.query.paymentStatus;
+  if (req.query.bookingId) q.bookingId = req.query.bookingId;
   res.json(await Booking.find(q).sort({ transactionDate: -1 }));
+}));
+
+app.get('/api/bookings/:id', wrap(async (req, res) => {
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  res.json(b);
 }));
 
 app.post('/api/bookings', wrap(async (req, res) => {
@@ -311,6 +335,8 @@ app.post('/api/bookings', wrap(async (req, res) => {
     panditEmail: pandit.email, panditName: pandit.name,
     fee, advanceAmount, advancePaid: advanceAmount > 0,
     paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= fee ? 'Paid' : 'Partial',
+    panditApproval: 'Pending',
+    adminApproval: 'Approved',
     bookingType: b.bookingType || 'Standard'
   });
   const mail = { ...booking.toObject(), address: booking.address || booking.district };
@@ -323,15 +349,82 @@ app.post('/api/bookings', wrap(async (req, res) => {
 app.put('/api/bookings/:id/status', wrap(async (req, res) => {
   const { status } = req.body;
   if (!['Confirmed', 'Completed', 'Cancelled', 'In Progress'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
-  const b = await Booking.findOneAndUpdate({ bookingId: req.params.id }, { status }, { new: true });
+  const isApproved = ['Confirmed', 'In Progress'].includes(status);
+  const b = await Booking.findOneAndUpdate(
+    bookingFindQuery(req.params.id),
+    { status, panditApproval: isApproved ? 'Approved' : status === 'Cancelled' ? 'Rejected' : 'Approved' },
+    { new: true }
+  );
   if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  // Notification email to user on Pandit response
+  if (isApproved) {
+    sendSafe('PANDIT_CONFIRMED_BOOKING', b.userEmail, { bookingId: b.bookingId, userName: b.userName, panditName: b.panditName, service: b.service, date: b.date, time: b.time, address: b.address, fee: b.fee });
+  } else if (status === 'Cancelled') {
+    sendSafe('PANDIT_REJECTED_BOOKING', b.userEmail, { bookingId: b.bookingId, userName: b.userName, panditName: b.panditName, service: b.service, date: b.date });
+  }
+
   res.json(b);
+}));
+
+app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
+  const { paymentProof, paymentMethod } = req.body;
+  if (!paymentProof) return res.status(400).json({ error: 'Payment Transaction Ref / ID is required' });
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  b.paymentStatus = 'Verification Pending';
+  b.paymentProof = String(paymentProof).trim();
+  b.paymentMethod = paymentMethod || 'UPI/Bank Transfer';
+  b.paymentDate = new Date();
+  await b.save();
+  res.json({ ok: true, booking: b });
+}));
+
+app.post('/api/bookings/:id/verify-payment', wrap(async (req, res) => {
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  b.paymentStatus = 'Paid';
+  b.advanceAmount = b.fee;
+  b.advancePaid = true;
+  if (!b.invoiceId) {
+    b.invoiceId = 'INV-' + b.bookingId.replace('PUJA-', '') + '-' + Date.now().toString().slice(-4);
+    b.invoiceGeneratedAt = new Date();
+  }
+  await b.save();
+
+  // Notify registered pandit email to check bank account for credited Dakshina
+  const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
+  if (pandit) {
+    sendSafe('PANDIT_PAYMENT_CREDITED', pandit.email, {
+      bookingId: b.bookingId,
+      service: b.service,
+      panditName: pandit.name,
+      userName: b.userName,
+      amount: b.fee,
+      upiId: pandit.upiId,
+      bankAccount: pandit.bankAccount,
+      paymentProof: b.paymentProof
+    });
+  }
+
+  // Send formal payment receipt email to devotee
+  sendSafe('PAYMENT_RECEIPT', b.userEmail, {
+    userName: b.userName,
+    reference: b.invoiceId || b.bookingId,
+    service: b.service,
+    total: b.fee,
+    amount: b.fee
+  });
+
+  res.json({ ok: true, booking: b });
 }));
 
 app.put('/api/bookings/:id/reschedule', wrap(async (req, res) => {
   const { date, time } = req.body;
   if (!date || !time) return res.status(400).json({ error: 'Date and time are required' });
-  const b = await Booking.findOne({ bookingId: req.params.id });
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
   if (!['Confirmed', 'In Progress'].includes(b.status)) return res.status(400).json({ error: 'Only active bookings can be rescheduled' });
   const clash = await Booking.findOne({ bookingId: { $ne: b.bookingId }, panditEmail: b.panditEmail, date, time, status: { $in: ['Confirmed', 'In Progress'] } });

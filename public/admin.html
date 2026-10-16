@@ -272,6 +272,9 @@
       <button class="admin-tab" data-tab="longs" onclick="switchAdminTab('longs')">
         <span class="material-icons">event_note</span> Multi-Day Requests <span id="badge-long-count" class="admin-tab-pill">0</span>
       </button>
+      <button class="admin-tab" data-tab="payments" onclick="switchAdminTab('payments')">
+        <span class="material-icons">payments</span> Payment Verifications <span id="badge-payments-count" class="admin-tab-pill">0</span>
+      </button>
       <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">
         <span class="material-icons">group</span> Devotees
       </button>
@@ -353,23 +356,25 @@
       }
     }
 
-    let S = { adminPandits: [], adminLongs: [], pujas: [], users: [], stats: {} };
+    let S = { adminPandits: [], adminLongs: [], pujas: [], users: [], bookings: [], stats: {} };
 
     async function loadData() {
       await checkDb();
       try {
-        const [stats, pandits, longs, users, pujas] = await Promise.all([
+        const [stats, pandits, longs, users, pujas, bookings] = await Promise.all([
           api('/admin/stats').catch(() => ({ users: 0, pandits: 0, verifiedPandits: 0, pendingPandits: 0, bookings: 0, completed: 0, revenue: 0, longRequests: 0, pendingLong: 0 })),
           api('/pandits').catch(() => []),
           api('/long-puja-requests').catch(() => []),
           api('/users').catch(() => []),
-          api('/pujas').catch(() => [])
+          api('/pujas').catch(() => []),
+          api('/bookings').catch(() => [])
         ]);
         S.stats = stats;
         S.adminPandits = pandits;
         S.adminLongs = longs;
         S.users = users;
         S.pujas = pujas;
+        S.bookings = bookings;
 
         renderKpis();
         renderActiveTab();
@@ -382,19 +387,22 @@
       const s = S.stats;
       const pendKyc = S.adminPandits.filter(p => p.status === 'Pending Review').length;
       const pendLong = S.adminLongs.filter(l => l.status === 'Pending Admin').length;
+      const pendPayments = (S.bookings || []).filter(b => b.paymentStatus === 'Verification Pending').length;
 
       document.getElementById('badge-kyc-count').textContent = pendKyc;
       document.getElementById('badge-long-count').textContent = pendLong;
+      const payBadge = document.getElementById('badge-payments-count');
+      if (payBadge) payBadge.textContent = pendPayments;
 
       const kpis = [
         { label: 'Registered Devotees', val: s.users || 0, icon: 'people' },
         { label: 'Verified Pandits', val: s.verifiedPandits || 0, icon: 'verified' },
         { label: 'Pending KYC Review', val: pendKyc, icon: 'pending_actions', alert: pendKyc > 0 },
+        { label: 'Pending Payment Verification', val: pendPayments, icon: 'receipt_long', alert: pendPayments > 0 },
         { label: 'Total Ceremonies', val: s.bookings || 0, icon: 'event' },
         { label: 'Completed Pujas', val: s.completed || 0, icon: 'task_alt' },
         { label: 'Booked Dakshina', val: inr(s.revenue || 0), icon: 'payments' },
-        { label: 'Custom Mahayajnas', val: `${pendLong}/${s.longRequests || 0}`, icon: 'auto_stories' },
-        { label: 'Total Pandits', val: s.pandits || 0, icon: 'badge' }
+        { label: 'Custom Mahayajnas', val: `${pendLong}/${s.longRequests || 0}`, icon: 'auto_stories' }
       ];
 
       document.getElementById('admin-kpi-root').innerHTML = `
@@ -424,6 +432,7 @@
       else if (CURRENT_TAB === 'pandits') renderPanditsDirectory(root);
       else if (CURRENT_TAB === 'pujas') renderPujaCatalog(root);
       else if (CURRENT_TAB === 'longs') renderLongRequests(root);
+      else if (CURRENT_TAB === 'payments') renderPaymentsVerification(root);
       else if (CURRENT_TAB === 'users') renderDevoteesDirectory(root);
     }
 
@@ -736,6 +745,222 @@
           } catch (e) { toast(e.message, true); }
         };
       });
+    }
+
+    let PAY_FILTER = 'pending';
+    function setPaymentFilter(f) {
+      PAY_FILTER = f;
+      renderPaymentsVerification(document.getElementById('admin-view-root'));
+    }
+
+    async function verifyBookingPayment(id) {
+      if (!confirm(`Verify payment for booking ${id} and issue official bill?\n\nThis will confirm the booking, generate the invoice/bill for the devotee, and send an email alert to the assigned Pandit to check their bank account for credited Dakshina.`)) return;
+      try {
+        await api('/bookings/' + id + '/verify-payment', { method: 'POST' });
+        toast('Payment verified! Bill issued and Pandit credit alert email sent. 🙏');
+        loadData();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    }
+
+    function viewAdminBill(id) {
+      const b = (S.bookings || []).find(x => x.bookingId === id);
+      if (!b) return toast('Booking record not found', true);
+
+      const invDate = b.invoiceGeneratedAt ? new Date(b.invoiceGeneratedAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : new Date().toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+      const invId = b.invoiceId || ('INV-' + b.bookingId.replace('PUJA-', '') + '-9901');
+
+      openModal('Official Ritual Dakshina Receipt', `
+        <div class="invoice-container">
+          <div class="invoice-head">
+            <div>
+              <div class="invoice-brand"><span class="om">ॐ</span> PujaConnect</div>
+              <div style="font-size:12px;color:var(--muted)">Authentic Vedic Ceremonies &amp; Ritual Logistics</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">Govt. Registered Vedic Purohit Network · India</div>
+            </div>
+            <div style="text-align:right">
+              <div class="invoice-num">${esc(invId)}</div>
+              <div style="font-size:12px;color:var(--muted)">Issue Date: <b>${invDate}</b></div>
+              <div style="font-size:12px;color:var(--muted)">Booking ID: <b>${esc(b.bookingId)}</b></div>
+            </div>
+          </div>
+
+          <div class="invoice-parties">
+            <div class="invoice-party">
+              <label>Billed To (Devotee)</label>
+              <b>${esc(b.userName)}</b>
+              <div>${esc(b.userEmail)}</div>
+              <div>📞 ${esc(b.userPhone || 'Registered Mobile')}</div>
+              ${b.address ? `<div>📍 ${esc(b.address)}</div>` : ''}
+            </div>
+            <div class="invoice-party" style="text-align:right">
+              <label>Ceremony Performed By (Vedic Purohit)</label>
+              <b>${esc(b.panditName)}</b>
+              <div>${esc(b.panditEmail)}</div>
+              <div>Verified Vedic Acharya</div>
+            </div>
+          </div>
+
+          <table class="invoice-table">
+            <thead>
+              <tr>
+                <th>Item / Sacred Service</th>
+                <th>Date &amp; Time</th>
+                <th style="text-align:right">Dakshina Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <b>${esc(b.service)}</b>
+                  <div style="font-size:11.5px;color:var(--muted);margin-top:2px">Vedic chanting, havan sankalpa, samagri consultation &amp; rituals</div>
+                </td>
+                <td>${esc(b.date)}<br><small class="muted">${esc(b.time || '10:00 AM')}</small></td>
+                <td style="text-align:right;font-weight:700">${inr(b.fee || 1500)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="invoice-summary">
+            <div class="invoice-total-row">
+              <span>Subtotal</span>
+              <span>${inr(b.fee || 1500)}</span>
+            </div>
+            <div class="invoice-total-row">
+              <span>Platform &amp; Coordination Fee</span>
+              <span>₹0 (Waived)</span>
+            </div>
+            <div class="invoice-total-row grand">
+              <span>Total Dakshina Received</span>
+              <span>${inr(b.fee || 1500)}</span>
+            </div>
+          </div>
+
+          <div class="invoice-footer">
+            <div class="invoice-stamp">PAID &amp; VERIFIED</div>
+            <div style="font-size:12px;color:var(--muted);line-height:1.5">
+              <b>Payment Mode:</b> ${esc(b.paymentMethod || 'UPI / Bank Transfer')}<br>
+              <b>Transaction Ref / UTR:</b> <code style="font-size:11px">${esc(b.paymentProof || 'VERIFIED')}</code><br>
+              <b>Verification Status:</b> Verified by PujaConnect Super Admin<br>
+              <span style="font-style:italic;color:var(--ochre)">"May Lord Ganesha and the Divine Deities bestow health, peace &amp; prosperity on your family."</span>
+            </div>
+          </div>
+
+          <div class="invoice-actions">
+            <button class="btn btn-gold" onclick="window.print()">
+              <span class="material-icons">print</span> Print Official Bill
+            </button>
+            <button class="btn btn-outline" onclick="closeModal()">Close</button>
+          </div>
+        </div>
+      `);
+    }
+
+    function renderPaymentsVerification(root) {
+      const allBookings = S.bookings || [];
+      const pending = allBookings.filter(b => b.paymentStatus === 'Verification Pending');
+      const paid = allBookings.filter(b => b.paymentStatus === 'Paid');
+
+      root.innerHTML = `
+        <div class="admin-panel">
+          <div class="admin-panel-head">
+            <h3><span class="material-icons" style="color:var(--admin-gold)">payments</span> Devotee Payment Verifications &amp; Billing</h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              ${pending.length ? `<span class="badge red">${pending.length} pending verification</span>` : '<span class="badge green">All payments verified</span>'}
+            </div>
+          </div>
+
+          <div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm ${PAY_FILTER === 'pending' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('pending')">
+              Pending Verification (${pending.length})
+            </button>
+            <button class="btn btn-sm ${PAY_FILTER === 'paid' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('paid')">
+              Verified &amp; Paid (${paid.length})
+            </button>
+            <button class="btn btn-sm ${PAY_FILTER === 'all' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('all')">
+              All Bookings (${allBookings.length})
+            </button>
+          </div>
+
+          ${(() => {
+            const list = PAY_FILTER === 'pending' ? pending : PAY_FILTER === 'paid' ? paid : allBookings;
+            if (!list.length) {
+              return `<div class="empty" style="padding:40px 20px">No payments found in this category.</div>`;
+            }
+            return `
+              <div class="table-responsive">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Booking ID / Date</th>
+                      <th>Devotee Details</th>
+                      <th>Assigned Pandit</th>
+                      <th>Dakshina</th>
+                      <th>Payment Proof / Ref</th>
+                      <th>Payment Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${list.map(b => {
+                      const isPending = b.paymentStatus === 'Verification Pending';
+                      const isPaid = b.paymentStatus === 'Paid';
+                      return `
+                        <tr>
+                          <td>
+                            <b>${esc(b.bookingId)}</b><br>
+                            <small class="muted">${esc(b.date)} (${esc(b.time || '10:00 AM')})</small><br>
+                            <span style="font-size:12px;color:var(--mahogany)">${esc(b.service)}</span>
+                          </td>
+                          <td>
+                            <b>${esc(b.userName)}</b><br>
+                            <small class="muted">${esc(b.userEmail)}</small><br>
+                            <small class="muted">📞 ${esc(b.userPhone || 'N/A')}</small>
+                          </td>
+                          <td>
+                            <b>${esc(b.panditName)}</b><br>
+                            <small class="muted">${esc(b.panditEmail)}</small>
+                          </td>
+                          <td>
+                            <b style="color:#d99a19">${inr(b.fee || 1500)}</b><br>
+                            <small class="muted">Adv: ${inr(b.advanceAmount || 0)}</small>
+                          </td>
+                          <td>
+                            ${b.paymentProof ? `
+                              <code style="background:#fff8ed;padding:2px 6px;border-radius:4px;border:1px solid #ebd9c2;font-size:11.5px">Ref: ${esc(b.paymentProof)}</code><br>
+                              <small class="muted">${esc(b.paymentMethod || 'UPI/Transfer')}</small>
+                            ` : '<span class="muted">No proof submitted</span>'}
+                          </td>
+                          <td>
+                            ${isPaid ? '<span class="badge green">Paid &amp; Verified</span>' :
+                              isPending ? '<span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100">Verification Pending</span>' :
+                              '<span class="badge">' + esc(b.paymentStatus || 'Pending') + '</span>'}
+                          </td>
+                          <td>
+                            <div style="display:flex;gap:6px;flex-wrap:wrap">
+                              ${isPending ? `
+                                <button class="btn btn-green btn-sm" onclick="verifyBookingPayment('${esc(b.bookingId)}')">
+                                  <span class="material-icons" style="font-size:14px">verified</span> Verify &amp; Issue Bill
+                                </button>
+                              ` : ''}
+                              ${isPaid ? `
+                                <button class="btn btn-outline btn-sm" onclick="viewAdminBill('${esc(b.bookingId)}')">
+                                  <span class="material-icons" style="font-size:14px">receipt</span> View Bill
+                                </button>
+                              ` : ''}
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `;
+          })()}
+        </div>
+      `;
     }
 
     (async function init() {
