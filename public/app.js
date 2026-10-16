@@ -226,33 +226,57 @@ const closeModal = () => ($('#modal-root').innerHTML = '');
 /* ---------- navigation ---------- */
 function renderNav() {
   const u = S.user;
-  const roleLabel = !u ? '' : u.role === 'admin' ? 'Super Admin' : u.role === 'pandit' ? 'Pandit' : 'Devotee';
-  $('#nav-actions').innerHTML =
-    `<button class="btn btn-gold" data-action="bookCta"><span class="material-icons">self_improvement</span> Book a Puja</button>` +
-    (u && u.role === 'pandit' ? '' : `<button class="btn btn-outline" data-action="panditRegister">Pandit Registration</button>`) +
-    (u
-      ? `<span class="role-badge">${roleLabel}</span><button class="btn btn-outline" data-action="nav" data-view="dashboard">My Account</button><button class="btn btn-outline" data-action="logout" title="Logout"><span class="material-icons">logout</span></button>`
-      : `<button class="btn btn-outline" data-action="login">Login / My Account</button>`);
+  const roleLabel = !u ? '' : u.role === 'admin' ? 'Super Admin' : u.role === 'pandit' ? 'Verified Pandit' : 'Devotee Account';
+  const html = `
+    <button class="btn btn-gold" data-action="bookCta"><span class="material-icons">self_improvement</span> Book a Puja</button>
+    ${u && u.role === 'pandit' ? '' : `<button class="btn btn-outline" data-action="panditRegister"><span class="material-icons">badge</span> Pandit Registration</button>`}
+    ${u
+      ? `<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span class="role-badge">${roleLabel}</span><small style="color:#ffd166">${esc(u.name)}</small></div>
+         <button class="btn btn-outline" data-action="nav" data-view="dashboard"><span class="material-icons">dashboard</span> ${u.role === 'pandit' ? 'Pandit Dashboard' : 'My Account / Dashboard'}</button>
+         <button class="btn btn-outline" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>`
+      : `<button class="btn btn-outline" data-action="login"><span class="material-icons">account_circle</span> Login / My Account</button>`}
+  `;
+
+  const drawerEl = $('#drawer-nav-actions');
+  if (drawerEl) drawerEl.innerHTML = html;
+  const navActions = $('#nav-actions');
+  if (navActions) navActions.innerHTML = html;
 }
 
 function showView(name) {
   if (name === 'dashboard' && !S.user) { openAuth(); return; }
   S.view = name;
-  const isDashboard = name === 'dashboard';
-  const navbar = document.querySelector('.navbar');
-  if (navbar) navbar.style.display = isDashboard ? 'none' : 'flex';
+
+  // Close nav drawer if open
+  const drawer = $('#nav-drawer');
+  if (drawer) drawer.classList.remove('open');
+
   document.querySelectorAll('.view-section').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
+  document.querySelectorAll('.drawer-link').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
   document.querySelectorAll('.nav-links a').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
   document.querySelectorAll('.mobile-nav-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === name || (name === 'dashboard' && S.dashTab === 'profile' && b.dataset.action === 'openProfile'));
   });
-  $('#nav-links').classList.remove('open');
+
   history.replaceState(null, '', '#' + name);
   window.scrollTo({ top: 0 });
+  if (name === 'home') renderHomePandits();
   if (name === 'pandits') renderPandits();
   if (name === 'pujas') renderPujas();
   if (name === 'long') renderLongForm();
   if (name === 'dashboard') renderDashboard();
+}
+
+async function renderHomePandits() {
+  const grid = $('#home-pandits-grid');
+  if (!grid) return;
+  grid.innerHTML = '<div class="empty">Finding verified Vedic Pandits…</div>';
+  try {
+    const list = await api('/pandits?verified=true');
+    grid.innerHTML = list.length ? list.slice(0, 6).map(panditCard).join('') : '<div class="empty">No verified Pandits listed yet.</div>';
+  } catch (e) {
+    grid.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
 }
 
 /* ---------- catalog ---------- */
@@ -808,6 +832,9 @@ async function userDash(root) {
       <button class="subtab ${tab === 'bookings' ? 'active' : ''}" data-action="dashTab" data-tab="bookings">
         <span class="material-icons">event</span> My Bookings <span class="subtab-badge">${bookings.length}</span>
       </button>
+      <button class="subtab ${tab === 'payments' ? 'active' : ''}" data-action="dashTab" data-tab="payments">
+        <span class="material-icons">payments</span> Payment Tracking
+      </button>
       <button class="subtab ${tab === 'explore' ? 'active' : ''}" data-action="dashTab" data-tab="explore">
         <span class="material-icons">spa</span> Explore All Pujas
       </button>
@@ -821,9 +848,120 @@ async function userDash(root) {
 
     <div id="dash-tab-content">
       ${tab === 'bookings' ? renderDevoteeBookingsTab(bookings) : ''}
+      ${tab === 'payments' ? renderDevoteePaymentTrackingTab(bookings) : ''}
       ${tab === 'explore' ? renderDevoteeExploreTab() : ''}
       ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
       ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
+    </div>
+  `;
+}
+
+function renderDevoteePaymentTrackingTab(bookings) {
+  if (!bookings.length) {
+    return `
+      <div class="panel empty" style="padding:48px 20px">
+        <span class="material-icons" style="font-size:48px;color:var(--ochre)">payments</span>
+        <h3 style="margin:12px 0 6px">No Payment Records Yet</h3>
+        <p class="muted">Book a ritual with a verified Pandit to track your Dakshina payments and receipts.</p>
+        <button class="btn btn-gold" data-action="bookCta" style="margin-top:8px"><span class="material-icons">search</span> Find a Pandit</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:16px">
+      ${bookings.map((b) => {
+        const fee = b.fee || 1500;
+        const advance = b.advanceAmount || 0;
+        const isPaid = b.paymentStatus === 'Paid';
+        const isVerifying = b.paymentStatus === 'Verification Pending';
+        const remaining = Math.max(0, isPaid ? 0 : fee - (b.advancePaid ? advance : 0));
+        const isPanditApproved = b.status === 'Confirmed' || b.status === 'In Progress' || b.panditApproval === 'Approved';
+
+        let statusSnippet = '';
+        if (isPaid) {
+          statusSnippet = `<span class="badge green"><span class="material-icons" style="font-size:14px">check_circle</span> Paid &amp; Verified</span>`;
+        } else if (isVerifying) {
+          statusSnippet = `<span class="badge amber"><span class="material-icons" style="font-size:14px">hourglass_top</span> Payment Verification Pending</span>`;
+        } else if (b.status === 'Cancelled') {
+          statusSnippet = `<span class="badge red">Ceremony Cancelled</span>`;
+        } else {
+          statusSnippet = `<span class="badge amber">Payment Pending</span>`;
+        }
+
+        let actionButton = '';
+        if (isPaid) {
+          actionButton = `
+            <button class="btn btn-gold btn-sm" data-action="viewBill" data-id="${esc(b.bookingId)}">
+              <span class="material-icons">receipt_long</span> View / Print Bill
+            </button>
+          `;
+        } else if (isVerifying) {
+          actionButton = `
+            <div style="display:flex;align-items:center;gap:6px;color:var(--ochre);font-weight:600;font-size:13px">
+              <span class="material-icons">pending_actions</span> Proof Submitted (Ref: ${esc(b.paymentProof || 'Submitted')})
+            </div>
+          `;
+        } else if (b.status !== 'Cancelled') {
+          if (isPanditApproved) {
+            actionButton = `
+              <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
+                <span class="material-icons">account_balance_wallet</span> Pay Remaining Dakshina (${inr(remaining)})
+              </button>
+            `;
+          } else {
+            actionButton = `
+              <span class="muted" style="font-size:13px">
+                <span class="material-icons" style="font-size:15px;vertical-align:middle">schedule</span> Awaiting Pandit Confirmation before payment
+              </span>
+            `;
+          }
+        }
+
+        return `
+          <div class="payment-card">
+            <div class="payment-card-header">
+              <div>
+                <span class="booking-id-tag">${esc(b.bookingId)}</span>
+                <b style="font-size:17px;color:var(--mahogany);margin-left:8px">${esc(b.service)}</b>
+              </div>
+              <div>${statusSnippet}</div>
+            </div>
+
+            <div class="payment-details-grid">
+              <div class="payment-detail-item">
+                <label>Assigned Pandit</label>
+                <b>${esc(b.panditName)}</b>
+                <small class="muted">${esc(b.panditEmail)}</small>
+              </div>
+              <div class="payment-detail-item">
+                <label>Ceremony Date &amp; Slot</label>
+                <b>${esc(b.date)}</b>
+                <small class="muted">${esc(b.time || '10:00 AM')}</small>
+              </div>
+              <div class="payment-detail-item">
+                <label>Total Dakshina</label>
+                <b style="color:var(--ochre)">${inr(fee)}</b>
+              </div>
+              <div class="payment-detail-item">
+                <label>Advance Paid</label>
+                <b>${inr(b.advancePaid ? advance : 0)}</b>
+              </div>
+              <div class="payment-detail-item">
+                <label>Remaining to Pay</label>
+                <b style="color:${remaining > 0 ? 'var(--red)' : 'var(--green)'}">${inr(remaining)}</b>
+              </div>
+            </div>
+
+            <div class="row" style="margin-top:4px;padding-top:10px;border-top:1px solid var(--border);align-items:center">
+              <div style="font-size:13px;color:var(--muted)">
+                ${b.address ? `<span class="material-icons" style="font-size:14px;vertical-align:middle">place</span> ${esc(b.address)}` : ''}
+              </div>
+              <div>${actionButton}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}
     </div>
   `;
 }
@@ -1312,10 +1450,52 @@ function renderPanditAvailTab(me) {
       </div>
     </div>
 
+    <!-- Pandit Bank & UPI Payout Details Section -->
+    <div class="panel-section-box">
+      <div class="section-box-header">
+        <div class="box-icon"><span class="material-icons">account_balance</span></div>
+        <div style="flex:1">
+          <h4>Bank &amp; UPI Payout Details (For Devotee Payments)</h4>
+          <p class="muted">After ceremony approval, devotees will pay their Dakshina directly to these bank/UPI details.</p>
+        </div>
+      </div>
+
+      <div class="form-grid" style="padding:16px 0 0">
+        <div>
+          <label style="font-weight:600">Bank Account Number</label>
+          <input type="text" id="p-bank-acc" value="${esc(me.bankAccount || '')}" placeholder="e.g. 123456789012">
+        </div>
+        <div>
+          <label style="font-weight:600">IFSC Code</label>
+          <input type="text" id="p-bank-ifsc" value="${esc(me.ifscCode || '')}" placeholder="e.g. SBIN0001234" style="text-transform:uppercase">
+        </div>
+        <div>
+          <label style="font-weight:600">UPI ID / Number (UI Number)</label>
+          <input type="text" id="p-bank-upi" value="${esc(me.upiId || '')}" placeholder="e.g. 9876543210@upi or yourname@okaxis">
+        </div>
+        <div>
+          <label style="font-weight:600">Bank Name</label>
+          <input type="text" id="p-bank-name" value="${esc(me.bankName || '')}" placeholder="e.g. State Bank of India">
+        </div>
+        <div>
+          <label style="font-weight:600">Account Holder Name</label>
+          <input type="text" id="p-bank-holder" value="${esc(me.accountHolder || me.name)}" placeholder="As per bank passbook">
+        </div>
+        <div>
+          <label style="font-weight:600">QR Code Image (Optional)</label>
+          <input type="file" id="p-qr-file" accept="image/*" style="font-size:12px;padding:6px">
+          <input type="hidden" id="p-qr-val" value="${esc(me.qrCode || '')}">
+          <div id="p-qr-preview-wrap" style="${me.qrCode ? 'display:block;' : 'display:none;'}margin-top:8px">
+            <img id="p-qr-preview" src="${esc(me.qrCode || '')}" style="width:100px;height:100px;object-fit:contain;border-radius:8px;border:1px solid var(--border)">
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Prominent Save Action -->
     <div style="margin:20px 0 36px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-gold btn-lg" id="btn-save-all-avail" data-action="saveAvail">
-        <span class="material-icons">save</span> Save Availability &amp; District Fees
+        <span class="material-icons">save</span> Save Availability, Districts &amp; Bank Details
       </button>
     </div>
   `;
@@ -1339,6 +1519,25 @@ function setupAvailTabListeners(me) {
   const checkboxesWrap = $('#district-checkboxes', container);
   const feeTableWrap = $('#district-fee-table', container);
   const slotsWrap = $('#slots-container', container);
+
+  // QR Code file upload preview
+  const qrFile = $('#p-qr-file', container);
+  const qrVal = $('#p-qr-val', container);
+  const qrPreview = $('#p-qr-preview', container);
+  const qrWrap = $('#p-qr-preview-wrap', container);
+  if (qrFile && qrVal && qrPreview && qrWrap) {
+    qrFile.onchange = (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        qrVal.value = evt.target.result;
+        qrPreview.src = evt.target.result;
+        qrWrap.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    };
+  }
 
   if (!stateSelect || !checkboxesWrap || !feeTableWrap || !slotsWrap) return;
 
