@@ -268,8 +268,10 @@ function pujaCard(p, withTags) {
     <button class="btn btn-dark btn-sm" data-action="${isLong ? 'planLong' : 'findFor'}" data-name="${esc(p.name)}">${isLong ? 'Customize' : 'Book Pandit'}</button></div></div></div>`;
 }
 function renderHomePujas() {
+  const el = $('#home-pujas');
+  if (!el) return;
   const list = S.pujas.filter((p) => p.type === 'Short').slice(0, 3);
-  $('#home-pujas').innerHTML = list.length ? list.map((p) => pujaCard(p)).join('') : '<div class="empty">Loading pujas…</div>';
+  el.innerHTML = list.length ? list.map((p) => pujaCard(p)).join('') : '<div class="empty">Loading pujas…</div>';
 }
 function renderPujas() {
   document.querySelectorAll('#view-pujas .tab').forEach((t) => t.classList.toggle('active', t.dataset.type === S.pujaTab));
@@ -280,16 +282,20 @@ function renderPujas() {
 /* ---------- hero filter ---------- */
 function setupHeroFilter() {
   const st = $('#f-state'), di = $('#f-district'), pu = $('#f-puja');
+  if (!st || !di || !pu) return;
   st.innerHTML = opts(Object.keys(LOCATIONS), S.filters.state);
   const fillDistricts = () => (di.innerHTML = opts(LOCATIONS[st.value] || [], '', 'Any District'));
   fillDistricts();
   pu.innerHTML = '<option value="">Any Puja</option>' + S.pujas.filter((p) => p.type === 'Short').map((p) => `<option>${esc(p.name)}</option>`).join('');
   st.onchange = fillDistricts;
-  $('#hero-filter').onsubmit = (e) => {
-    e.preventDefault();
-    S.filters = { state: st.value, district: di.value, service: pu.value };
-    showView('pandits');
-  };
+  const form = $('#hero-filter');
+  if (form) {
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      S.filters = { state: st.value, district: di.value, service: pu.value };
+      showView('pandits');
+    };
+  }
 }
 
 /* ---------- pandits directory ---------- */
@@ -322,12 +328,58 @@ async function renderPandits() {
 
 function panditCard(p) {
   const exp = p.experience >= 10 ? `${p.experience}+ Years Vedic Knowledge` : `${p.experience}+ Years Experience`;
-  return `<div class="card"><div class="head"><img src="${esc(p.photo)}" alt="" onerror="this.style.visibility='hidden'">
-    <div><h3>${esc(p.name)} <span class="material-icons" style="font-size:16px;vertical-align:middle" title="Verified">verified</span></h3><small>${esc(p.location)}</small></div></div>
+  const selectedDistrict = S.filters.district;
+  const prices = p.districtPrices || {};
+  const hasDistrictPrices = Object.keys(prices).length > 0;
+
+  let priceHtml = '';
+  if (selectedDistrict && prices[selectedDistrict]) {
+    priceHtml = `<span class="price">${inr(prices[selectedDistrict])}<small class="muted" style="font-weight:400"> /puja in ${esc(selectedDistrict)}</small></span>`;
+  } else if (hasDistrictPrices) {
+    const nums = Object.values(prices).map(Number).filter((n) => !isNaN(n) && n > 0);
+    const minP = nums.length ? Math.min(...nums) : (p.fee || 1500);
+    const maxP = nums.length ? Math.max(...nums) : (p.fee || 1500);
+    if (minP === maxP) {
+      priceHtml = `<span class="price">${inr(minP)}<small class="muted" style="font-weight:400"> /puja</small></span>`;
+    } else {
+      priceHtml = `<span class="price">${inr(minP)} - ${inr(maxP)}<small class="muted" style="font-weight:400"> by district</small></span>`;
+    }
+  } else {
+    priceHtml = `<span class="price">${inr(p.fee || 1500)}<small class="muted" style="font-weight:400"> /puja</small></span>`;
+  }
+
+  let districtFeesSnippet = '';
+  if (hasDistrictPrices) {
+    districtFeesSnippet = `
+      <div class="district-pricing-block">
+        <div class="district-pricing-header">
+          <span class="material-icons" style="font-size:15px;color:var(--ochre)">payments</span>
+          <b>District-wise Dakshina:</b>
+        </div>
+        <div class="district-fee-tags">
+          ${Object.entries(prices).map(([dist, fee]) => `
+            <span class="district-fee-chip ${dist === selectedDistrict ? 'active-dist' : ''}">
+              <span class="chip-dist-name">${esc(dist)}</span>: <b class="chip-dist-price">${inr(fee)}</b>
+            </span>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  } else {
+    districtFeesSnippet = `
+      <p class="muted" style="font-size:13px;margin:6px 0 10px">
+        <span class="material-icons" style="font-size:14px;vertical-align:middle;color:var(--ochre)">place</span>
+        Serves: <b>${esc((p.workingDistricts || [p.district]).join(', '))}</b>
+      </p>
+    `;
+  }
+
+  return `<div class="card pandit-card"><div class="head"><img src="${esc(p.photo)}" alt="" onerror="this.style.visibility='hidden'">
+    <div><h3>${esc(p.name)} <span class="material-icons" style="font-size:16px;vertical-align:middle" title="Verified">verified</span></h3><small>${esc(p.location || p.district)}</small></div></div>
     <div class="body"><div><span class="badge">${esc(exp)}</span><span class="badge green"><span class="material-icons">verified</span>Verified</span><span class="badge">🗣 Sanskrit, Odia, Hindi</span></div>
     <p style="margin:6px 0;font-size:14px"><strong>${esc(p.specialty)}</strong><br><span class="muted">${esc(p.bio)}</span></p>
-    <p class="muted" style="font-size:13px;margin:4px 0">Serves: ${esc((p.workingDistricts || []).join(', '))}</p>
-    <div class="row"><span class="price">${inr(p.fee)}<small class="muted" style="font-weight:400"> /puja</small></span>
+    ${districtFeesSnippet}
+    <div class="row" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><span class="price-wrap">${priceHtml}</span>
     <button class="btn btn-gold btn-sm" data-action="bookPandit" data-id="${esc(p._id)}">Book Pandit</button></div></div></div>`;
 }
 
@@ -360,7 +412,12 @@ async function openBooking(id) {
       <label class="check" style="margin-top:10px"><input type="checkbox" id="b-adv"> Pay 25% advance now (demo – no real payment is taken)</label></div>
     <button class="btn btn-gold" id="b-submit">Confirm Booking</button>`, (m) => {
     const feeFor = () => (p.districtPrices && p.districtPrices[$('#b-district', m).value]) || p.fee;
-    const paintFee = () => ($('#b-fee', m).textContent = inr(feeFor()));
+    const paintFee = () => {
+      const dist = $('#b-district', m).value;
+      const f = feeFor();
+      const hasCustom = p.districtPrices && p.districtPrices[dist];
+      $('#b-fee', m).innerHTML = `${inr(f)} ${hasCustom ? `<small class="muted" style="font-size:12px;font-weight:400">(${esc(dist)} Rate)</small>` : ''}`;
+    };
     const drawSlots = () => {
       const d = $('#b-date', m).value;
       const box = $('#b-slots', m);
@@ -1029,6 +1086,9 @@ async function panditDash(root) {
       ${tab === 'profile' ? renderPanditProfileTab(me) : ''}
     </div>
   `;
+  if (tab === 'avail') {
+    setupAvailTabListeners(me);
+  }
 }
 
 function renderPanditCeremoniesTab(bookings) {
@@ -1117,20 +1177,356 @@ function renderPanditLongTab(longs, email) {
 }
 
 function renderPanditAvailTab(me) {
+  const isApproved = Boolean(me.verified || me.status === 'Verified');
+  const curState = me.workingState || me.state || 'Odisha';
+
   return `
-    <div class="panel">
-      <h3>Manage Working Availability &amp; Dakshina</h3>
-      <label>Available days for ritual ceremonies</label>
-      <div class="checks" id="av-days" style="margin-bottom:16px">
-        ${DAYS.map((d) => `<label class="check"><input type="checkbox" value="${d}" ${(me.availableDays || []).includes(d) ? 'checked' : ''}>${d}</label>`).join('')}
+    <!-- KYC Stage Tracker -->
+    <div class="kyc-stage-tracker ${isApproved ? 'approved' : 'pending'}">
+      <div class="stage-tracker-header">
+        <div class="stage-tracker-badge">
+          <span class="material-icons">${isApproved ? 'verified' : 'pending_actions'}</span>
+          <span>${isApproved ? 'Verification Status: All Stages Approved' : 'Verification Status: Review in Progress'}</span>
+        </div>
+        <span class="stage-badge-pill ${isApproved ? 'green' : 'amber'}">${isApproved ? 'Active &amp; Verified' : 'Under Review'}</span>
       </div>
-      <label>Time slots (one per line, e.g. 08:00 AM - 11:00 AM)</label>
-      <textarea id="av-slots" rows="3" style="margin-bottom:16px">${esc((me.timeSlots || DEFAULT_SLOTS).join('\n'))}</textarea>
-      <label>Base Dakshina for 1-session Puja (₹)</label>
-      <input id="av-fee" type="number" value="${me.fee || 1500}" style="max-width:240px;margin-bottom:16px">
-      <p><button class="btn btn-gold" data-action="saveAvail"><span class="material-icons">save</span> Save Availability Settings</button></p>
+      <div class="stages-timeline">
+        <div class="stage-step completed">
+          <div class="stage-step-icon"><span class="material-icons">check</span></div>
+          <div class="stage-step-info">
+            <b>Stage 1: Registration</b>
+            <span>Credentials &amp; Profile submitted</span>
+          </div>
+        </div>
+        <div class="stage-step ${isApproved ? 'completed' : 'active'}">
+          <div class="stage-step-icon"><span class="material-icons">${isApproved ? 'check' : 'hourglass_top'}</span></div>
+          <div class="stage-step-info">
+            <b>Stage 2: Admin Lineage &amp; KYC</b>
+            <span>${isApproved ? 'ID and Vedic lineage approved' : 'Admin reviewing credentials'}</span>
+          </div>
+        </div>
+        <div class="stage-step ${isApproved ? 'completed' : ''}">
+          <div class="stage-step-icon"><span class="material-icons">${isApproved ? 'check' : 'lock'}</span></div>
+          <div class="stage-step-info">
+            <b>Stage 3: District Pricing</b>
+            <span>${isApproved ? 'Multi-district pricing activated' : 'Unlocks upon approval'}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Working Districts & District-wise Fees Section -->
+    <div class="panel-section-box">
+      <div class="section-box-header">
+        <div class="box-icon"><span class="material-icons">place</span></div>
+        <div style="flex:1">
+          <h4>Working Districts &amp; District-wise Dakshina Fees</h4>
+          <p class="muted">Select your state, choose the districts you serve, and set your custom ritual Dakshina fee for each district.</p>
+        </div>
+        ${isApproved ? '<span class="badge green"><span class="material-icons">check_circle</span> Approved for Districts</span>' : '<span class="badge amber">Pending Admin Approval</span>'}
+      </div>
+
+      <div style="margin-top:16px">
+        <label for="av-state" style="font-weight:600">Working State</label>
+        <select id="av-state" style="max-width:320px;margin-top:4px">
+          ${opts(Object.keys(LOCATIONS), curState)}
+        </select>
+      </div>
+
+      <div style="margin-top:18px">
+        <div class="row" style="margin-bottom:6px">
+          <label style="margin:0;font-weight:600">Select Districts You Serve in <span id="cur-state-name" style="color:var(--mahogany)">${esc(curState)}</span>:</label>
+          <div style="display:flex;gap:6px">
+            <button type="button" class="btn btn-outline dark btn-sm" id="btn-select-all-dist">Select All</button>
+            <button type="button" class="btn btn-outline dark btn-sm" id="btn-clear-dist">Clear</button>
+          </div>
+        </div>
+        <div class="district-selection-grid" id="district-checkboxes"></div>
+      </div>
+
+      <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:18px">
+        <div class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h4 style="margin:0;font-size:15px;color:var(--mahogany)">Per-District Dakshina Fees (₹)</h4>
+            <small class="muted">Enter custom Dakshina for each selected district</small>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="number" id="quick-fill-fee" placeholder="Amount (e.g. 1500)" style="width:140px;padding:6px 10px;font-size:13px">
+            <button type="button" class="btn btn-gold btn-sm" id="btn-apply-all-fees">Apply to All</button>
+          </div>
+        </div>
+        <div id="district-fee-table" class="district-fees-container"></div>
+      </div>
+    </div>
+
+    <!-- Modern Manage Working Availability & Time Slots -->
+    <div class="panel-section-box">
+      <div class="section-box-header">
+        <div class="box-icon"><span class="material-icons">schedule</span></div>
+        <div>
+          <h4>Manage Working Availability &amp; Ritual Time Slots</h4>
+          <p class="muted">Choose your available days and manage interactive time slots for puja bookings.</p>
+        </div>
+      </div>
+
+      <!-- Weekly Available Days Toggle Pills -->
+      <label style="margin-top:16px;display:block;font-weight:600">Available Days of the Week</label>
+      <div class="day-pills-wrap" id="av-days">
+        ${DAYS.map((d) => `
+          <label class="day-toggle-pill">
+            <input type="checkbox" value="${d}" ${(me.availableDays || []).includes(d) ? 'checked' : ''}>
+            <span class="day-pill-text">${d}</span>
+          </label>
+        `).join('')}
+      </div>
+
+      <!-- Active Time Slots Chips Manager -->
+      <div style="margin-top:22px">
+        <div class="row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <label style="margin:0;font-weight:600">Configured Ritual Time Slots</label>
+          <div class="slot-preset-group">
+            <button type="button" class="btn btn-outline dark btn-sm" id="preset-all-slots">All Standard Slots</button>
+            <button type="button" class="btn btn-outline dark btn-sm" id="preset-morning">Morning Only</button>
+            <button type="button" class="btn btn-outline dark btn-sm" id="preset-evening">Evening Only</button>
+          </div>
+        </div>
+
+        <div class="active-slots-grid" id="slots-container"></div>
+
+        <div class="add-slot-bar">
+          <div class="add-slot-input-group">
+            <span class="material-icons">access_time</span>
+            <input type="text" id="new-slot-input" placeholder="e.g. 06:30 AM - 09:30 AM" class="slot-text-input">
+          </div>
+          <button type="button" class="btn btn-gold btn-sm" id="btn-add-slot">
+            <span class="material-icons">add</span> Add Custom Slot
+          </button>
+        </div>
+      </div>
+
+      <!-- Default Base Fee Fallback -->
+      <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
+        <label style="font-weight:600" for="av-fee">Default Base Dakshina (₹)</label>
+        <input id="av-fee" type="number" value="${me.fee || 1500}" style="max-width:240px;margin-top:4px" placeholder="1500">
+        <small class="muted" style="display:block;margin-top:4px">Standard Dakshina applied if a district doesn't have a custom rate set.</small>
+      </div>
+    </div>
+
+    <!-- Prominent Save Action -->
+    <div style="margin:20px 0 36px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-gold btn-lg" id="btn-save-all-avail" data-action="saveAvail">
+        <span class="material-icons">save</span> Save Availability &amp; District Fees
+      </button>
     </div>
   `;
+}
+
+function setupAvailTabListeners(me) {
+  const container = $('#dash-tab-content');
+  if (!container) return;
+
+  let curState = me.workingState || me.state || 'Odisha';
+  let curDistricts = new Set(
+    Array.isArray(me.workingDistricts) && me.workingDistricts.length
+      ? me.workingDistricts
+      : [me.district || (LOCATIONS[curState] && LOCATIONS[curState][0]) || 'Khordha']
+  );
+  let curPrices = { ...(me.districtPrices || {}) };
+  let slots = [...(me.timeSlots && me.timeSlots.length ? me.timeSlots : DEFAULT_SLOTS)];
+
+  const stateSelect = $('#av-state', container);
+  const stateLabel = $('#cur-state-name', container);
+  const checkboxesWrap = $('#district-checkboxes', container);
+  const feeTableWrap = $('#district-fee-table', container);
+  const slotsWrap = $('#slots-container', container);
+
+  if (!stateSelect || !checkboxesWrap || !feeTableWrap || !slotsWrap) return;
+
+  function renderSlots() {
+    if (!slots.length) {
+      slotsWrap.innerHTML = '<span class="muted" style="font-size:13px">No time slots added. Use presets or add custom slots below.</span>';
+      return;
+    }
+    slotsWrap.innerHTML = slots.map((s, idx) => `
+      <div class="slot-card-chip">
+        <span class="material-icons clock-icon">schedule</span>
+        <span>${esc(s)}</span>
+        <button type="button" class="slot-remove-btn" data-slot-idx="${idx}" title="Remove slot">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+    `).join('');
+
+    slotsWrap.querySelectorAll('.slot-remove-btn').forEach((btn) => {
+      btn.onclick = () => {
+        const i = +btn.dataset.slotIdx;
+        slots.splice(i, 1);
+        renderSlots();
+      };
+    });
+  }
+
+  function renderDistrictCheckboxes() {
+    const list = LOCATIONS[curState] || [];
+    checkboxesWrap.innerHTML = list.map((d) => `
+      <label class="district-check">
+        <input type="checkbox" value="${esc(d)}" ${curDistricts.has(d) ? 'checked' : ''}>
+        <span>${esc(d)}</span>
+      </label>
+    `).join('') || '<span class="muted">No districts available for this state.</span>';
+
+    checkboxesWrap.querySelectorAll('input[type="checkbox"]').forEach((chk) => {
+      chk.onchange = () => {
+        const d = chk.value;
+        if (chk.checked) {
+          curDistricts.add(d);
+          if (!curPrices[d]) curPrices[d] = +$('#av-fee', container).value || me.fee || 1500;
+        } else {
+          curDistricts.delete(d);
+        }
+        renderDistrictFeeInputs();
+      };
+    });
+  }
+
+  function renderDistrictFeeInputs() {
+    const distArr = Array.from(curDistricts);
+    if (!distArr.length) {
+      feeTableWrap.innerHTML = '<div class="empty" style="padding:20px;grid-column:1/-1"><span class="muted">No districts selected. Select districts above to configure fees.</span></div>';
+      return;
+    }
+    feeTableWrap.innerHTML = distArr.map((d) => {
+      const price = curPrices[d] !== undefined ? curPrices[d] : (me.fee || 1500);
+      return `
+        <div class="district-fee-row">
+          <span class="district-fee-row-name">
+            <span class="material-icons">place</span>
+            ${esc(d)}
+          </span>
+          <div class="district-fee-input-wrap">
+            <span>₹</span>
+            <input type="number" class="dist-fee-input" data-district="${esc(d)}" value="${price}" min="100" step="50">
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    feeTableWrap.querySelectorAll('.dist-fee-input').forEach((inp) => {
+      inp.onchange = () => {
+        const d = inp.dataset.district;
+        curPrices[d] = Number(inp.value) || me.fee || 1500;
+      };
+    });
+  }
+
+  // State Change
+  stateSelect.onchange = () => {
+    curState = stateSelect.value;
+    if (stateLabel) stateLabel.textContent = curState;
+    const newStateDistricts = LOCATIONS[curState] || [];
+    curDistricts = new Set(Array.from(curDistricts).filter((d) => newStateDistricts.includes(d)));
+    if (!curDistricts.size && newStateDistricts.length) {
+      curDistricts.add(newStateDistricts[0]);
+    }
+    renderDistrictCheckboxes();
+    renderDistrictFeeInputs();
+  };
+
+  // Select All & Clear
+  const btnSelectAll = $('#btn-select-all-dist', container);
+  if (btnSelectAll) {
+    btnSelectAll.onclick = () => {
+      const allD = LOCATIONS[curState] || [];
+      allD.forEach((d) => {
+        curDistricts.add(d);
+        if (!curPrices[d]) curPrices[d] = +$('#av-fee', container).value || me.fee || 1500;
+      });
+      renderDistrictCheckboxes();
+      renderDistrictFeeInputs();
+    };
+  }
+
+  const btnClear = $('#btn-clear-dist', container);
+  if (btnClear) {
+    btnClear.onclick = () => {
+      curDistricts.clear();
+      renderDistrictCheckboxes();
+      renderDistrictFeeInputs();
+    };
+  }
+
+  // Quick fill all fees
+  const btnApplyAll = $('#btn-apply-all-fees', container);
+  if (btnApplyAll) {
+    btnApplyAll.onclick = () => {
+      const val = +$('#quick-fill-fee', container).value;
+      if (!val || val <= 0) return toast('Please enter a valid amount', true);
+      curDistricts.forEach((d) => { curPrices[d] = val; });
+      renderDistrictFeeInputs();
+      toast(`Applied ₹${val.toLocaleString('en-IN')} to all ${curDistricts.size} selected districts!`);
+    };
+  }
+
+  // Slot Presets
+  const btnAllSlots = $('#preset-all-slots', container);
+  if (btnAllSlots) {
+    btnAllSlots.onclick = () => {
+      slots = ['06:00 AM - 09:00 AM', '09:00 AM - 12:00 PM', '01:00 PM - 04:00 PM', '04:00 PM - 07:00 PM', '07:00 PM - 10:00 PM'];
+      renderSlots();
+    };
+  }
+  const btnMorning = $('#preset-morning', container);
+  if (btnMorning) {
+    btnMorning.onclick = () => {
+      slots = ['06:00 AM - 09:00 AM', '09:00 AM - 12:00 PM'];
+      renderSlots();
+    };
+  }
+  const btnEvening = $('#preset-evening', container);
+  if (btnEvening) {
+    btnEvening.onclick = () => {
+      slots = ['04:00 PM - 07:00 PM', '07:00 PM - 10:00 PM'];
+      renderSlots();
+    };
+  }
+
+  // Add Custom Slot
+  const btnAddSlot = $('#btn-add-slot', container);
+  const newSlotInput = $('#new-slot-input', container);
+  if (btnAddSlot && newSlotInput) {
+    const addFn = () => {
+      const val = newSlotInput.value.trim();
+      if (!val) return toast('Please enter time slot text (e.g. 07:00 AM - 10:00 AM)', true);
+      if (slots.includes(val)) return toast('This time slot is already added', true);
+      slots.push(val);
+      newSlotInput.value = '';
+      renderSlots();
+    };
+    btnAddSlot.onclick = addFn;
+    newSlotInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addFn(); } };
+  }
+
+  // Initial Renders
+  renderSlots();
+  renderDistrictCheckboxes();
+  renderDistrictFeeInputs();
+
+  // Expose current state for saveAvail
+  S._availFormState = () => {
+    feeTableWrap.querySelectorAll('.dist-fee-input').forEach((inp) => {
+      curPrices[inp.dataset.district] = Number(inp.value) || me.fee || 1500;
+    });
+    const cleanPrices = {};
+    curDistricts.forEach((d) => {
+      cleanPrices[d] = curPrices[d] || +$('#av-fee', container).value || me.fee || 1500;
+    });
+    return {
+      curState,
+      workingDistricts: Array.from(curDistricts),
+      districtPrices: cleanPrices,
+      slots
+    };
+  };
 }
 
 function renderPanditProfileTab(me) {
@@ -1309,10 +1705,41 @@ const ACTIONS = {
   setStatus: async (d) => { try { await api(`/bookings/${d.id}/status`, { method: 'PUT', body: { status: d.status } }); toast('Updated'); renderDashboard(); } catch (e) { toast(e.message, true); } },
   longResp: async (d) => { try { await api(`/long-puja-requests/${d.id}/pandit-response`, { method: 'PUT', body: { panditEmail: S.user.email, response: d.resp } }); toast('Response recorded'); renderDashboard(); } catch (e) { toast(e.message, true); } },
   saveAvail: async () => {
+    if (!S.me) return;
     const days = [...document.querySelectorAll('#av-days input:checked')].map((i) => i.value);
-    const slots = $('#av-slots').value.split('\n').map((s) => s.trim()).filter(Boolean);
-    if (!days.length || !slots.length) return toast('Select at least one day and one slot', true);
-    try { await api('/pandits/' + S.me._id, { method: 'PUT', body: { availableDays: days, timeSlots: slots, fee: +$('#av-fee').value || S.me.fee } }); toast('Availability saved'); } catch (e) { toast(e.message, true); }
+    const formState = typeof S._availFormState === 'function' ? S._availFormState() : null;
+    const slots = formState && formState.slots && formState.slots.length
+      ? formState.slots
+      : ($('#av-slots') ? $('#av-slots').value.split('\n').map((s) => s.trim()).filter(Boolean) : DEFAULT_SLOTS);
+
+    if (!days.length) return toast('Please select at least one available day', true);
+    if (!slots.length) return toast('Please configure at least one time slot', true);
+
+    const fee = +$('#av-fee').value || S.me.fee || 1500;
+    const workingState = formState ? formState.curState : (S.me.workingState || S.me.state || 'Odisha');
+    const workingDistricts = formState && formState.workingDistricts && formState.workingDistricts.length
+      ? formState.workingDistricts
+      : (S.me.workingDistricts || [S.me.district]);
+    const districtPrices = formState ? formState.districtPrices : (S.me.districtPrices || {});
+
+    try {
+      const updated = await api('/pandits/' + S.me._id, {
+        method: 'PUT',
+        body: {
+          availableDays: days,
+          timeSlots: slots,
+          fee,
+          workingState,
+          workingDistricts,
+          districtPrices
+        }
+      });
+      S.me = updated;
+      toast('Availability, working districts & per-district fees saved successfully! 🙏');
+      renderDashboard();
+    } catch (e) {
+      toast(e.message, true);
+    }
   },
   dashTab: (d) => {
     S.dashTab = d.tab;

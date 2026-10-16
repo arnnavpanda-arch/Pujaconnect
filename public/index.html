@@ -16,10 +16,8 @@
     <a class="brand" data-action="nav" data-view="home" href="#home"><span class="om">ॐ</span> PujaConnect <span class="dot"></span></a>
     <button class="menu-toggle" data-action="toggleMenu" aria-label="Menu"><span class="material-icons">menu</span></button>
     <nav id="nav-links" class="nav-links">
-      <a href="#pandits" data-action="nav" data-view="pandits">Find Pandits</a>
       <a href="#pujas" data-action="nav" data-view="pujas">Pujas &amp; Rituals</a>
       <a href="#long" data-action="nav" data-view="long">Multi-Day Pujas</a>
-      <a href="#about" data-action="nav" data-view="about">About Us</a>
     </nav>
     <div id="nav-actions" class="nav-actions"></div>
   </header>
@@ -30,21 +28,41 @@
         <div class="hero-glow"></div>
         <div class="hero-om">ॐ</div>
         <h1>Sacred Rituals, Divine Blessings at Your Doorstep</h1>
-        <p>Book verified Vedic Pandits for home pujas, temple ceremonies and multi-day yajnas across India.</p>
-        <form id="hero-filter" class="filter-bar">
-          <select id="f-state" aria-label="State"></select>
-          <select id="f-district" aria-label="District"></select>
-          <select id="f-puja" aria-label="Puja type"></select>
-          <button class="btn btn-gold" type="submit"><span class="material-icons">search</span> Find Pandits</button>
-        </form>
+        <p>Book verified Vedic Pandits for sacred ceremonies and multi-day rituals across India.</p>
       </div>
       <div class="container">
-        <h2 class="section-title">Popular Pujas</h2>
-        <div id="home-pujas" class="grid"></div>
-        <div class="trust">
-          <div><span class="material-icons">verified</span><h4>Verified Pandits</h4><p>Every Pandit is KYC-verified by our team.</p></div>
-          <div><span class="material-icons">event_available</span><h4>Live Slot Booking</h4><p>Choose a morning or evening slot instantly.</p></div>
-          <div><span class="material-icons">mail</span><h4>Instant Confirmation</h4><p>Email confirmations for devotee and Pandit.</p></div>
+        <div class="main-options-grid">
+          <div class="main-option-card">
+            <div class="option-icon-wrapper">
+              <span class="material-icons">spa</span>
+            </div>
+            <h3>Pujas &amp; Rituals</h3>
+            <p>Single-day sacred ceremonies for home, office, and temple — Ganesha Puja, Griha Pravesh, Satyanarayan Katha, Navagraha Shanti, and festive rituals.</p>
+            <ul class="option-highlights">
+              <li><span class="material-icons">check_circle</span> Verified Vedic Pandits</li>
+              <li><span class="material-icons">check_circle</span> Morning &amp; Evening live slots</li>
+              <li><span class="material-icons">check_circle</span> Complete samagri list provided</li>
+            </ul>
+            <a href="#pujas" data-action="nav" data-view="pujas" class="btn btn-gold btn-lg">
+              <span class="material-icons">temple_hindu</span> View Pujas &amp; Rituals
+            </a>
+          </div>
+
+          <div class="main-option-card">
+            <div class="option-icon-wrapper">
+              <span class="material-icons">local_fire_department</span>
+            </div>
+            <h3>Multi-Day Pujas</h3>
+            <p>Grand multi-day spiritual ceremonies, Mahayajnas, Srimad Bhagavata Saptaha, Navchandi, and customized temple anushthans spanning 2 to 9 days.</p>
+            <ul class="option-highlights">
+              <li><span class="material-icons">check_circle</span> Multi-priest team assignment</li>
+              <li><span class="material-icons">check_circle</span> Custom day-by-day ritual plan</li>
+              <li><span class="material-icons">check_circle</span> Dedicated coordination support</li>
+            </ul>
+            <a href="#long" data-action="nav" data-view="long" class="btn btn-gold btn-lg">
+              <span class="material-icons">auto_awesome</span> View Multi-Day Pujas
+            </a>
+          </div>
         </div>
       </div>
     </section>
@@ -93,6 +111,9 @@
   </main>
 
   <footer class="footer">
+    <div class="footer-links">
+      <a href="#about" data-action="nav" data-view="about">About Us</a>
+    </div>
     <p>© <span id="yr"></span> PujaConnect. Vedic Ritual Platform. All rights reserved.</p>
   </footer>
 
@@ -106,15 +127,15 @@
         </button>
       </li>
       <li>
-        <button class="mobile-nav-btn" data-action="nav" data-view="pandits">
-          <span class="material-icons">person_search</span>
-          <span>Pandits</span>
-        </button>
-      </li>
-      <li>
         <button class="mobile-nav-btn" data-action="nav" data-view="pujas">
           <span class="material-icons">spa</span>
           <span>Pujas</span>
+        </button>
+      </li>
+      <li>
+        <button class="mobile-nav-btn" data-action="nav" data-view="long">
+          <span class="material-icons">local_fire_department</span>
+          <span>Multi-Day</span>
         </button>
       </li>
       <li>
