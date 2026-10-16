@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PujaConnect – Book Verified Vedic Pandits</title>
+  <meta name="description" content="Book verified Vedic Pandits for home pujas, temple ceremonies and multi-day rituals across India.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="navbar">
+    <a class="brand" data-action="nav" data-view="home" href="#home"><span class="om">ॐ</span> PujaConnect <span class="dot"></span></a>
+    <button class="menu-toggle" data-action="toggleMenu" aria-label="Menu"><span class="material-icons">menu</span></button>
+    <nav id="nav-links" class="nav-links">
+      <a href="#pandits" data-action="nav" data-view="pandits">Find Pandits</a>
+      <a href="#pujas" data-action="nav" data-view="pujas">Pujas &amp; Rituals</a>
+      <a href="#long" data-action="nav" data-view="long">Multi-Day Pujas</a>
+      <a href="#about" data-action="nav" data-view="about">About Us</a>
+    </nav>
+    <div id="nav-actions" class="nav-actions"></div>
+  </header>
+
+  <main>
+    <section id="view-home" class="view-section active">
+      <div class="hero">
+        <div class="hero-glow"></div>
+        <div class="hero-om">ॐ</div>
+        <h1>Sacred Rituals, Divine Blessings at Your Doorstep</h1>
+        <p>Book verified Vedic Pandits for home pujas, temple ceremonies and multi-day yajnas across India.</p>
+        <form id="hero-filter" class="filter-bar">
+          <select id="f-state" aria-label="State"></select>
+          <select id="f-district" aria-label="District"></select>
+          <select id="f-puja" aria-label="Puja type"></select>
+          <button class="btn btn-gold" type="submit"><span class="material-icons">search</span> Find Pandits</button>
+        </form>
+      </div>
+      <div class="container">
+        <h2 class="section-title">Popular Pujas</h2>
+        <div id="home-pujas" class="grid"></div>
+        <div class="trust">
+          <div><span class="material-icons">verified</span><h4>Verified Pandits</h4><p>Every Pandit is KYC-verified by our team.</p></div>
+          <div><span class="material-icons">event_available</span><h4>Live Slot Booking</h4><p>Choose a morning or evening slot instantly.</p></div>
+          <div><span class="material-icons">mail</span><h4>Instant Confirmation</h4><p>Email confirmations for devotee and Pandit.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-pandits" class="view-section">
+      <div class="container">
+        <h2 class="section-title">Verified Pandits</h2>
+        <div id="pandit-filters" class="filter-bar light"></div>
+        <div id="pandit-list" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="view-pujas" class="view-section">
+      <div class="container">
+        <h2 class="section-title">Sacred Puja Services</h2>
+        <div class="tabs">
+          <button class="tab active" data-action="pujaTab" data-type="Short">Popular Home Pujas</button>
+          <button class="tab" data-action="pujaTab" data-type="Long">Multi-Day Mahayajnas</button>
+        </div>
+        <div id="puja-list" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="view-long" class="view-section">
+      <div class="container narrow">
+        <h2 class="section-title">Multi-Day Puja Customizer</h2>
+        <p class="muted">Design a multi-day ritual. Our team assigns verified Pandits and confirms by email.</p>
+        <form id="long-form" class="card form-grid"></form>
+      </div>
+    </section>
+
+    <section id="view-about" class="view-section">
+      <div class="container narrow">
+        <h2 class="section-title">About PujaConnect</h2>
+        <div class="card prose">
+          <p><strong>PujaConnect</strong> connects devotees with verified Vedic Pandits across India for home rituals, temple ceremonies and multi-day spiritual events.</p>
+          <p>Every Pandit submits an identity document that our admin team reviews before they can receive bookings. Devotees get transparent Dakshina, live slot selection and automated email confirmations.</p>
+          <p>Are you a Pandit? Use <em>Pandit Registration</em> in the menu to join the platform.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-dashboard" class="view-section">
+      <div class="container" id="dashboard-root"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="brand"><span class="om">ॐ</span> PujaConnect</div>
+    <p>Sacred rituals, divine blessings at your doorstep. · <a href="/admin" style="color:#b88628;text-decoration:none;font-size:12px">Admin Portal</a></p>
+    <small>© <span id="yr"></span> PujaConnect. All rights reserved.</small>
+  </footer>
+
+  <div id="modal-root"></div>
+  <div id="toast" class="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
