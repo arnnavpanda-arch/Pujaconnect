@@ -119,7 +119,7 @@ app.post('/api/auth/pandit/send-otp', wrap(async (req, res) => {
   } catch (err) {
     console.warn('Pandit OTP email notification:', err.message);
   }
-  res.json({ ok: true, message: `OTP sent to ${p.email}`, devOtp: code, email: p.email });
+  res.json({ ok: true, message: `Verification code sent to ${p.email}`, email: p.email });
 }));
 
 // Pandit Login Step 2: Verify OTP
@@ -191,6 +191,25 @@ app.get('/api/db-status', wrap(async (req, res) => {
 app.get('/api/users', adminOnly, wrap(async (req, res) => {
   const users = await User.find({ role: 'user' }).select('-password').sort({ createdAt: -1 });
   res.json(users);
+}));
+
+app.get('/api/users/profile', auth, wrap(async (req, res) => {
+  const user = await User.findOne({ email: lc(req.auth.email) });
+  if (!user) return res.status(404).json({ error: 'Devotee profile not found' });
+  res.json(publicUser(user));
+}));
+
+app.put('/api/users/profile', auth, wrap(async (req, res) => {
+  const { name, phone, state, district, city } = req.body;
+  const user = await User.findOne({ email: lc(req.auth.email) });
+  if (!user) return res.status(404).json({ error: 'Devotee profile not found' });
+  if (name) user.name = name;
+  if (phone) user.phone = phone;
+  if (state !== undefined) user.state = state;
+  if (district !== undefined) user.district = district;
+  if (city !== undefined) user.city = city;
+  await user.save();
+  res.json(publicUser(user));
 }));
 
 // ---- Pujas catalog ----

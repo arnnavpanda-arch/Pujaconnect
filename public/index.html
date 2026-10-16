@@ -93,10 +93,91 @@
   </main>
 
   <footer class="footer">
-    <div class="brand"><span class="om">ॐ</span> PujaConnect</div>
-    <p>Sacred rituals, divine blessings at your doorstep. · <a href="/admin" style="color:#b88628;text-decoration:none;font-size:12px">Admin Portal</a></p>
-    <small>© <span id="yr"></span> PujaConnect. All rights reserved.</small>
+    <div class="footer-container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <h3><span class="om">ॐ</span> PujaConnect</h3>
+          <p>Connecting devotees with verified Vedic Pandits across India for authentic home pujas, temple ceremonies, and multi-day Mahayajnas.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-gold btn-sm" data-action="bookCta"><span class="material-icons">self_improvement</span> Book a Puja</button>
+            <button class="btn btn-outline btn-sm" data-action="panditRegister">Pandit Registration</button>
+          </div>
+        </div>
+        <div class="footer-col">
+          <h4>Explore</h4>
+          <ul class="footer-links">
+            <li><a href="#home" data-action="nav" data-view="home"><span class="material-icons">home</span> Home</a></li>
+            <li><a href="#pandits" data-action="nav" data-view="pandits"><span class="material-icons">person_search</span> Find Pandits</a></li>
+            <li><a href="#pujas" data-action="nav" data-view="pujas"><span class="material-icons">spa</span> Puja Catalog</a></li>
+            <li><a href="#long" data-action="nav" data-view="long"><span class="material-icons">event_note</span> Multi-Day Yajnas</a></li>
+            <li><a href="#about" data-action="nav" data-view="about"><span class="material-icons">info</span> About PujaConnect</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Account &amp; Profile</h4>
+          <ul class="footer-links">
+            <li><button data-action="openProfile"><span class="material-icons">account_circle</span> <b>My Profile</b></button></li>
+            <li><button data-action="nav" data-view="dashboard"><span class="material-icons">dashboard</span> My Dashboard</button></li>
+            <li><button data-action="login"><span class="material-icons">login</span> Devotee / Pandit Login</button></li>
+            <li><button data-action="registerDevotee"><span class="material-icons">how_to_reg</span> Create Devotee Account</button></li>
+            <li><button data-action="panditRegister"><span class="material-icons">badge</span> Join as a Pandit</button></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Administration</h4>
+          <ul class="footer-links">
+            <li><a href="/admin" target="_blank" rel="noopener"><span class="material-icons">admin_panel_settings</span> Super Admin Portal</a></li>
+            <li><a href="/api/health" target="_blank" rel="noopener"><span class="material-icons">health_and_safety</span> API &amp; DB Health</a></li>
+            <li><a href="/api/ping" target="_blank" rel="noopener"><span class="material-icons">network_ping</span> System Diagnostics</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <div>© <span id="yr"></span> PujaConnect. Vedic Ritual Platform. All rights reserved.</div>
+        <div style="display:flex;gap:16px;align-items:center">
+          <button data-action="openProfile" style="color:var(--gold);background:none;border:none;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:4px"><span class="material-icons" style="font-size:14px">account_circle</span> My Profile</button>
+          <span>•</span>
+          <a href="/admin" style="color:#b88628;text-decoration:none;font-size:12px">Admin Access</a>
+        </div>
+      </div>
+    </div>
   </footer>
+
+  <!-- Sticky Mobile Bottom App Bar -->
+  <nav class="mobile-nav-bar" aria-label="Mobile Navigation">
+    <ul class="mobile-nav-items">
+      <li>
+        <button class="mobile-nav-btn" data-action="nav" data-view="home">
+          <span class="material-icons">home</span>
+          <span>Home</span>
+        </button>
+      </li>
+      <li>
+        <button class="mobile-nav-btn" data-action="nav" data-view="pandits">
+          <span class="material-icons">person_search</span>
+          <span>Pandits</span>
+        </button>
+      </li>
+      <li>
+        <button class="mobile-nav-btn" data-action="nav" data-view="pujas">
+          <span class="material-icons">spa</span>
+          <span>Pujas</span>
+        </button>
+      </li>
+      <li>
+        <button class="mobile-nav-btn" data-action="nav" data-view="dashboard">
+          <span class="material-icons">dashboard</span>
+          <span>Dashboard</span>
+        </button>
+      </li>
+      <li>
+        <button class="mobile-nav-btn" data-action="openProfile">
+          <span class="material-icons">account_circle</span>
+          <span>My Profile</span>
+        </button>
+      </li>
+    </ul>
+  </nav>
 
   <div id="modal-root"></div>
   <div id="toast" class="toast"></div>

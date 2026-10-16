@@ -240,6 +240,9 @@ function showView(name) {
   S.view = name;
   document.querySelectorAll('.view-section').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
   document.querySelectorAll('.nav-links a').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
+  document.querySelectorAll('.mobile-nav-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === name || (name === 'dashboard' && S.dashTab === 'profile' && b.dataset.action === 'openProfile'));
+  });
   $('#nav-links').classList.remove('open');
   history.replaceState(null, '', '#' + name);
   window.scrollTo({ top: 0 });
@@ -491,8 +494,8 @@ function openAuth(mode = 'login') {
           $('#pandit-submit', m).disabled = false;
           btn.textContent = 'Resend OTP';
           btn.disabled = false;
-          $('#pandit-otp-msg', m).textContent = 'Code sent to ' + email + (res.devOtp ? ` (Dev OTP: ${res.devOtp})` : '');
-          toast('OTP sent to your email! 🙏 Check inbox/spam.');
+          $('#pandit-otp-msg', m).innerHTML = 'A 6-digit verification code was sent to <b>' + esc(email) + '</b>.<br><span style="font-size:12px;color:var(--muted)">Please check your inbox or spam folder.</span>';
+          toast('Verification code sent to your email! 🙏 Check inbox/spam.');
         } catch (e) {
           btn.disabled = false;
           btn.textContent = 'Send OTP';
@@ -709,44 +712,414 @@ async function renderDashboard() {
 
 async function userDash(root) {
   const e = encodeURIComponent(S.user.email);
-  const [bookings, longs] = await Promise.all([api('/bookings?userEmail=' + e), api('/long-puja-requests?userEmail=' + e)]);
+  const [bookings, longs] = await Promise.all([
+    api('/bookings?userEmail=' + e).catch(() => []),
+    api('/long-puja-requests?userEmail=' + e).catch(() => [])
+  ]);
   S.bookings = bookings;
+  const tab = S.dashTab || 'bookings';
   const upcoming = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').length;
-  root.innerHTML = `<h2 class="section-title">Namaste, ${esc(S.user.name)} 🙏</h2>
-    <div class="stats"><div class="stat"><b>${bookings.length}</b><span>Total bookings</span></div><div class="stat"><b>${upcoming}</b><span>Upcoming rituals</span></div><div class="stat"><b>${longs.length}</b><span>Multi-day requests</span></div></div>
-    <div class="panel"><h3>My Bookings</h3>${bookings.length ? `<table><tr><th>ID</th><th>Ritual</th><th>Pandit</th><th>When</th><th>Dakshina</th><th>Status</th><th></th></tr>${bookings.map((b) => `<tr>
-      <td>${esc(b.bookingId)}</td><td>${esc(b.service)}<br><small class="muted">${esc(b.district)}</small></td><td>${esc(b.panditName)}</td><td>${esc(b.date)}<br><small>${esc(b.time)}</small></td>
-      <td>${inr(b.fee)}<br><small class="muted">${esc(b.paymentStatus)}</small></td><td>${statusBadge(b.status)}</td>
-      <td><button class="btn btn-dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}">Slip</button>${['Confirmed', 'In Progress'].includes(b.status) ? `<button class="btn btn-outline dark btn-sm" data-action="reschedule" data-id="${esc(b.bookingId)}">Reschedule</button><button class="btn btn-red btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>` : ''}</td></tr>`).join('')}</table>`
-      : '<p class="muted">No bookings yet. <a href="#pandits" data-action="nav" data-view="pandits" style="color:var(--ochre);font-weight:600">Find a Pandit</a></p>'}</div>
-    <div class="panel"><h3>Multi-Day Pujas</h3>${longs.length ? `<table><tr><th>ID</th><th>Ritual</th><th>Dates</th><th>Pandits</th><th>Estimate</th><th>Status</th></tr>${longs.map((l) => `<tr>
-      <td>${esc(l.id)}</td><td>${esc(l.pujaName)}<br><small class="muted">${esc(l.district)}</small></td><td>${esc(l.fromDate)} → ${esc(l.toDate)}<br><small>${l.totalDays}d × ${l.dailyHours}h</small></td>
-      <td>${l.assignedPandits.length}/${l.requiredPandits}<br><small class="muted">${l.assignedPandits.map(esc).join('<br>') || 'Awaiting assignment'}</small></td>
-      <td>${inr(l.estimatedCost)}${l.advancePaid ? `<br><small class="muted">Advance ${inr(l.advanceAmount)}</small>` : ''}</td><td>${statusBadge(l.status)}</td></tr>`).join('')}</table>` : '<p class="muted">No multi-day requests yet.</p>'}</div>`;
+  const initial = (S.user.name || 'D').charAt(0).toUpperCase();
+
+  root.innerHTML = `
+    <div class="dash-banner">
+      <div class="dash-user-info">
+        <div class="dash-avatar">${initial}</div>
+        <div class="dash-title-wrap">
+          <h2>Namaste, ${esc(S.user.name)} 🙏</h2>
+          <p>${esc(S.user.email)} · ${esc(S.user.phone || 'No phone')} · <span class="badge green" style="margin:0">Devotee Account</span></p>
+        </div>
+      </div>
+      <div>
+        <button class="btn btn-gold btn-sm" data-action="bookCta"><span class="material-icons">self_improvement</span> Book a Puja</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><b>${bookings.length}</b><span>Total Bookings</span></div>
+      <div class="stat"><b>${upcoming}</b><span>Upcoming Rituals</span></div>
+      <div class="stat"><b>${longs.length}</b><span>Multi-Day Requests</span></div>
+    </div>
+
+    <!-- Devotee Subtabs -->
+    <div class="dash-subtabs">
+      <button class="subtab ${tab === 'bookings' ? 'active' : ''}" data-action="dashTab" data-tab="bookings">
+        <span class="material-icons">event</span> My Bookings <span class="subtab-badge">${bookings.length}</span>
+      </button>
+      <button class="subtab ${tab === 'long' ? 'active' : ''}" data-action="dashTab" data-tab="long">
+        <span class="material-icons">event_note</span> Multi-Day Yajnas <span class="subtab-badge">${longs.length}</span>
+      </button>
+      <button class="subtab ${tab === 'profile' ? 'active' : ''}" data-action="dashTab" data-tab="profile">
+        <span class="material-icons">account_circle</span> My Profile
+      </button>
+    </div>
+
+    <div id="dash-tab-content">
+      ${tab === 'bookings' ? renderDevoteeBookingsTab(bookings) : ''}
+      ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
+      ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
+    </div>
+  `;
+}
+
+function renderDevoteeBookingsTab(bookings) {
+  if (!bookings.length) {
+    return `
+      <div class="panel empty" style="padding:48px 20px">
+        <span class="material-icons" style="font-size:48px;color:var(--ochre)">self_improvement</span>
+        <h3 style="margin:12px 0 6px">No rituals booked yet</h3>
+        <p class="muted">Connect with verified Vedic Pandits for authentic home pujas and blessings.</p>
+        <button class="btn btn-gold" data-action="bookCta" style="margin-top:8px"><span class="material-icons">search</span> Find a Pandit</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="booking-cards-grid">
+      ${bookings.map((b) => `
+        <div class="booking-card">
+          <div>
+            <div class="booking-card-top">
+              <span class="booking-id-tag">${esc(b.bookingId)}</span>
+              ${statusBadge(b.status)}
+            </div>
+            <h4>${esc(b.service)}</h4>
+            <div class="booking-meta-row" style="margin-top:8px">
+              <span class="material-icons">person</span>
+              <span><strong>${esc(b.panditName)}</strong></span>
+            </div>
+            <div class="booking-meta-row">
+              <span class="material-icons">schedule</span>
+              <span>${esc(b.date)} at <b>${esc(b.time || '10:00 AM')}</b></span>
+            </div>
+            <div class="booking-meta-row">
+              <span class="material-icons">place</span>
+              <span>${esc(b.address || b.district)}</span>
+            </div>
+            <div class="booking-meta-row">
+              <span class="material-icons">payments</span>
+              <span>Dakshina: <b>${inr(b.fee)}</b> <small class="muted">(${esc(b.paymentStatus || 'Pending')})</small></span>
+            </div>
+          </div>
+          <div class="booking-card-footer">
+            <button class="btn btn-dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}"><span class="material-icons">print</span> Slip</button>
+            <div style="display:flex;gap:6px">
+              ${['Confirmed', 'In Progress'].includes(b.status) ? `
+                <button class="btn btn-outline dark btn-sm" data-action="reschedule" data-id="${esc(b.bookingId)}">Reschedule</button>
+                <button class="btn btn-red btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderDevoteeLongTab(longs) {
+  if (!longs.length) {
+    return `
+      <div class="panel empty" style="padding:48px 20px">
+        <span class="material-icons" style="font-size:48px;color:var(--ochre)">event_note</span>
+        <h3 style="margin:12px 0 6px">No multi-day ritual requests yet</h3>
+        <p class="muted">Planning a multi-day ceremony like Chandi Path, Bhagavat Katha, or Mahayajna?</p>
+        <button class="btn btn-gold" data-action="nav" data-view="long" style="margin-top:8px"><span class="material-icons">add</span> Customize Multi-Day Puja</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="booking-cards-grid">
+      ${longs.map((l) => `
+        <div class="booking-card">
+          <div>
+            <div class="booking-card-top">
+              <span class="booking-id-tag">${esc(l.id)}</span>
+              ${statusBadge(l.status)}
+            </div>
+            <h4>${esc(l.pujaName)}</h4>
+            <div class="booking-meta-row" style="margin-top:8px">
+              <span class="material-icons">calendar_today</span>
+              <span>${esc(l.fromDate)} → ${esc(l.toDate)} <small class="muted">(${l.totalDays} days × ${l.dailyHours}h/day)</small></span>
+            </div>
+            <div class="booking-meta-row">
+              <span class="material-icons">place</span>
+              <span>District: <b>${esc(l.district)}</b></span>
+            </div>
+            <div class="booking-meta-row">
+              <span class="material-icons">groups</span>
+              <span>Pandits: <b>${l.assignedPandits.length}/${l.requiredPandits} assigned</b></span>
+            </div>
+            <div class="booking-meta-row">
+              <span class="material-icons">payments</span>
+              <span>Estimated Dakshina: <b>${inr(l.estimatedCost)}</b> ${l.advancePaid ? '<span class="badge green">Advance Paid</span>' : ''}</span>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderDevoteeProfileTab(totalBookings) {
+  const u = S.user;
+  const initial = (u.name || 'D').charAt(0).toUpperCase();
+  return `
+    <div class="profile-card">
+      <div class="profile-hero">
+        <div class="profile-avatar-lg">${initial}</div>
+        <div style="flex:1">
+          <h3 style="margin:0 0 6px;color:var(--gold);font-size:24px">${esc(u.name)}</h3>
+          <span class="role-badge" style="background:#fffcf5;color:#351605">Devotee Account</span>
+          <p style="margin:8px 0 0;color:#f1d9aa;font-size:13.5px">Registered Devotee · PujaConnect Blessed Member 🙏</p>
+        </div>
+        <button class="btn btn-gold btn-sm" data-action="editDevoteeProfile"><span class="material-icons">edit</span> Edit Profile</button>
+      </div>
+      <div class="profile-grid-details">
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">person</span> Full Name</div>
+          <div class="profile-field-value">${esc(u.name)}</div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">email</span> Registered Email</div>
+          <div class="profile-field-value">${esc(u.email)} <span class="badge green" style="font-size:10px;padding:1px 6px">Verified</span></div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">phone</span> Contact Phone</div>
+          <div class="profile-field-value">${esc(u.phone || 'Not set')}</div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">map</span> State &amp; District</div>
+          <div class="profile-field-value">${esc(u.district || '')}${u.state ? ', ' + esc(u.state) : (u.district ? '' : 'Not set')}</div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">location_city</span> City / Town</div>
+          <div class="profile-field-value">${esc(u.city || 'Not set')}</div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">self_improvement</span> Rituals Booked</div>
+          <div class="profile-field-value"><b>${totalBookings}</b> completed/scheduled</div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 async function panditDash(root) {
   const email = S.user.email;
-  const [plist, bookings, longs] = await Promise.all([api('/pandits?email=' + encodeURIComponent(email)), api('/bookings?panditEmail=' + encodeURIComponent(email)), api('/long-puja-requests?panditEmail=' + encodeURIComponent(email))]);
+  const [plist, bookings, longs] = await Promise.all([
+    api('/pandits?email=' + encodeURIComponent(email)).catch(() => []),
+    api('/bookings?panditEmail=' + encodeURIComponent(email)).catch(() => []),
+    api('/long-puja-requests?panditEmail=' + encodeURIComponent(email)).catch(() => [])
+  ]);
   const me = plist[0];
-  if (!me) { root.innerHTML = '<div class="empty">Pandit profile not found.</div>'; return; }
+  if (!me) { root.innerHTML = '<div class="empty">Pandit profile not found. Please ensure you are registered.</div>'; return; }
   S.me = me;
+  const tab = S.dashTab || 'ceremonies';
   const earned = bookings.filter((b) => b.status === 'Completed').reduce((s, b) => s + (b.fee || 0), 0);
-  const pending = bookings.filter((b) => b.status === 'Confirmed').reduce((s, b) => s + (b.fee || 0), 0);
-  root.innerHTML = `<h2 class="section-title">Pandit Portal – ${esc(me.name)} ${statusBadge(me.status)}</h2>
-    ${me.verified ? '' : '<div class="panel"><strong>Your profile is awaiting admin verification.</strong> You will receive bookings after approval.</div>'}
-    <div class="stats"><div class="stat"><b>${inr(earned)}</b><span>Dakshina earned</span></div><div class="stat"><b>${inr(pending)}</b><span>Upcoming Dakshina</span></div><div class="stat"><b>${bookings.length}</b><span>Ceremonies</span></div></div>
-    <div class="panel"><h3>Availability</h3>
-      <label>Available days</label><div class="checks" id="av-days">${DAYS.map((d) => `<label class="check"><input type="checkbox" value="${d}" ${(me.availableDays || []).includes(d) ? 'checked' : ''}>${d.slice(0, 3)}</label>`).join('')}</div>
-      <label style="margin-top:12px">Time slots (one per line)</label><textarea id="av-slots" rows="3">${esc((me.timeSlots || DEFAULT_SLOTS).join('\n'))}</textarea>
-      <label style="margin-top:12px">Base Dakshina (₹)</label><input id="av-fee" type="number" value="${me.fee}" style="max-width:200px">
-      <p><button class="btn btn-dark" data-action="saveAvail">Save Availability</button></p></div>
-    <div class="panel"><h3>Ceremony Requests</h3>${bookings.length ? `<table><tr><th>ID</th><th>Devotee</th><th>Ritual</th><th>When</th><th>Venue</th><th>Dakshina</th><th>Status</th><th></th></tr>${bookings.map((b) => `<tr>
-      <td>${esc(b.bookingId)}</td><td>${esc(b.userName)}<br><small>${esc(b.phone)}</small></td><td>${esc(b.service)}</td><td>${esc(b.date)}<br><small>${esc(b.time)}</small></td>
-      <td>${esc(b.address || b.district)}</td><td>${inr(b.fee)}</td><td>${statusBadge(b.status)}</td>
-      <td>${b.status === 'Confirmed' ? `<button class="btn btn-green btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="In Progress">Accept</button><button class="btn btn-red btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="Cancelled">Decline</button>` : ''}${b.status === 'In Progress' ? `<button class="btn btn-dark btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="Completed">Mark Completed</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">No ceremonies yet.</p>'}</div>
-    <div class="panel"><h3>Multi-Day Assignments</h3>${longs.length ? `<table><tr><th>ID</th><th>Ritual</th><th>Dates</th><th>District</th><th>My response</th><th></th></tr>${longs.map((l) => { const st = (l.panditStatuses || {})[email] || 'Assigned'; return `<tr><td>${esc(l.id)}</td><td>${esc(l.pujaName)}</td><td>${esc(l.fromDate)} → ${esc(l.toDate)}<br><small>${l.dailyHours}h/day</small></td><td>${esc(l.district)}</td><td>${statusBadge(st)}</td>
-      <td>${st === 'Assigned' ? `<button class="btn btn-green btn-sm" data-action="longResp" data-id="${esc(l.id)}" data-resp="Accepted">Accept</button><button class="btn btn-red btn-sm" data-action="longResp" data-id="${esc(l.id)}" data-resp="Declined">Decline</button>` : ''}</td></tr>`; }).join('')}</table>` : '<p class="muted">No multi-day assignments yet.</p>'}</div>`;
+  const pending = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').reduce((s, b) => s + (b.fee || 0), 0);
+
+  root.innerHTML = `
+    <div class="dash-banner">
+      <div class="dash-user-info">
+        <img src="${esc(me.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="dash-avatar" alt="Pandit">
+        <div class="dash-title-wrap">
+          <h2>Pranam, ${esc(me.name)} ${statusBadge(me.status)}</h2>
+          <p>${esc(me.district || me.location || 'Odisha')} · ${esc(me.exp || me.experience + ' Years Exp')} · Base Fee: <b>${inr(me.fee)}</b></p>
+        </div>
+      </div>
+      <div>
+        <button class="btn btn-gold btn-sm" data-action="editPanditProfile"><span class="material-icons">edit</span> Edit Profile</button>
+      </div>
+    </div>
+
+    ${me.verified ? '' : '<div class="panel" style="background:#fffcf5;border-left:4px solid var(--ochre)"><strong>Your profile is under Admin KYC verification.</strong> Once approved, your profile will be actively listed in the verified pandits directory.</div>'}
+
+    <div class="stats">
+      <div class="stat"><b>${inr(earned)}</b><span>Dakshina Earned</span></div>
+      <div class="stat"><b>${inr(pending)}</b><span>Upcoming Dakshina</span></div>
+      <div class="stat"><b>${bookings.length}</b><span>Total Ceremonies</span></div>
+    </div>
+
+    <!-- Pandit Subtabs -->
+    <div class="dash-subtabs">
+      <button class="subtab ${tab === 'ceremonies' ? 'active' : ''}" data-action="dashTab" data-tab="ceremonies">
+        <span class="material-icons">notifications</span> Ceremony Requests <span class="subtab-badge">${bookings.length}</span>
+      </button>
+      <button class="subtab ${tab === 'long' ? 'active' : ''}" data-action="dashTab" data-tab="long">
+        <span class="material-icons">event_note</span> Multi-Day Assignments <span class="subtab-badge">${longs.length}</span>
+      </button>
+      <button class="subtab ${tab === 'avail' ? 'active' : ''}" data-action="dashTab" data-tab="avail">
+        <span class="material-icons">schedule</span> Availability &amp; Dakshina
+      </button>
+      <button class="subtab ${tab === 'profile' ? 'active' : ''}" data-action="dashTab" data-tab="profile">
+        <span class="material-icons">account_circle</span> My Profile
+      </button>
+    </div>
+
+    <div id="dash-tab-content">
+      ${tab === 'ceremonies' ? renderPanditCeremoniesTab(bookings) : ''}
+      ${tab === 'long' ? renderPanditLongTab(longs, email) : ''}
+      ${tab === 'avail' ? renderPanditAvailTab(me) : ''}
+      ${tab === 'profile' ? renderPanditProfileTab(me) : ''}
+    </div>
+  `;
+}
+
+function renderPanditCeremoniesTab(bookings) {
+  if (!bookings.length) {
+    return `<div class="panel empty" style="padding:48px 20px"><span class="material-icons" style="font-size:48px;color:var(--ochre)">event</span><p>No ceremony bookings assigned yet.</p></div>`;
+  }
+  return `
+    <div class="booking-cards-grid">
+      ${bookings.map((b) => `
+        <div class="booking-card">
+          <div>
+            <div class="booking-card-top">
+              <span class="booking-id-tag">${esc(b.bookingId)}</span>
+              ${statusBadge(b.status)}
+            </div>
+            <h4>${esc(b.service)}</h4>
+            <div class="booking-meta-row" style="margin-top:8px">
+              <span class="material-icons">person</span>
+              <span>Devotee: <b>${esc(b.userName)}</b> · 📞 ${esc(b.phone || 'N/A')}</span>
+            </div>
+            <div class="booking-meta-row">
+              <span class="material-icons">schedule</span>
+              <span>${esc(b.date)} at <b>${esc(b.time || '10:00 AM')}</b></span>
+            </div>
+            <div class="booking-meta-row">
+              <span class="material-icons">place</span>
+              <span>${esc(b.address || b.district)}</span>
+            </div>
+            <div class="booking-meta-row">
+              <span class="material-icons">payments</span>
+              <span>Dakshina: <b>${inr(b.fee)}</b></span>
+            </div>
+          </div>
+          <div class="booking-card-footer">
+            ${b.status === 'Confirmed' ? `
+              <button class="btn btn-green btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="In Progress">Accept</button>
+              <button class="btn btn-red btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="Cancelled">Decline</button>
+            ` : ''}
+            ${b.status === 'In Progress' ? `
+              <button class="btn btn-dark btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="Completed">Mark Completed ✅</button>
+            ` : ''}
+            ${['Completed', 'Cancelled'].includes(b.status) ? `<small class="muted">Ceremony ${esc(b.status)}</small>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderPanditLongTab(longs, email) {
+  if (!longs.length) {
+    return `<div class="panel empty" style="padding:48px 20px"><span class="material-icons" style="font-size:48px;color:var(--ochre)">event_note</span><p>No multi-day Mahayajna assignments yet.</p></div>`;
+  }
+  return `
+    <div class="booking-cards-grid">
+      ${longs.map((l) => {
+        const st = (l.panditStatuses || {})[email] || 'Assigned';
+        return `
+          <div class="booking-card">
+            <div>
+              <div class="booking-card-top">
+                <span class="booking-id-tag">${esc(l.id)}</span>
+                ${statusBadge(st)}
+              </div>
+              <h4>${esc(l.pujaName)}</h4>
+              <div class="booking-meta-row" style="margin-top:8px">
+                <span class="material-icons">calendar_today</span>
+                <span>${esc(l.fromDate)} → ${esc(l.toDate)} (${l.dailyHours}h/day)</span>
+              </div>
+              <div class="booking-meta-row">
+                <span class="material-icons">place</span>
+                <span>District: <b>${esc(l.district)}</b></span>
+              </div>
+            </div>
+            <div class="booking-card-footer">
+              ${st === 'Assigned' ? `
+                <button class="btn btn-green btn-sm" data-action="longResp" data-id="${esc(l.id)}" data-resp="Accepted">Accept Assignment</button>
+                <button class="btn btn-red btn-sm" data-action="longResp" data-id="${esc(l.id)}" data-resp="Declined">Decline</button>
+              ` : `<small class="muted">Status: <b>${esc(st)}</b></small>`}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderPanditAvailTab(me) {
+  return `
+    <div class="panel">
+      <h3>Manage Working Availability &amp; Dakshina</h3>
+      <label>Available days for ritual ceremonies</label>
+      <div class="checks" id="av-days" style="margin-bottom:16px">
+        ${DAYS.map((d) => `<label class="check"><input type="checkbox" value="${d}" ${(me.availableDays || []).includes(d) ? 'checked' : ''}>${d}</label>`).join('')}
+      </div>
+      <label>Time slots (one per line, e.g. 08:00 AM - 11:00 AM)</label>
+      <textarea id="av-slots" rows="3" style="margin-bottom:16px">${esc((me.timeSlots || DEFAULT_SLOTS).join('\n'))}</textarea>
+      <label>Base Dakshina for 1-session Puja (₹)</label>
+      <input id="av-fee" type="number" value="${me.fee || 1500}" style="max-width:240px;margin-bottom:16px">
+      <p><button class="btn btn-gold" data-action="saveAvail"><span class="material-icons">save</span> Save Availability Settings</button></p>
+    </div>
+  `;
+}
+
+function renderPanditProfileTab(me) {
+  return `
+    <div class="profile-card">
+      <div class="profile-hero">
+        <img src="${esc(me.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="profile-avatar-lg" alt="Avatar">
+        <div style="flex:1">
+          <h3 style="margin:0 0 6px;color:var(--gold);font-size:24px">${esc(me.name)} ${statusBadge(me.status)}</h3>
+          <p style="margin:0 0 8px;color:#f1d9aa;font-size:13.5px">${esc(me.district || me.location)} · ${esc(me.exp || me.experience + ' Years Exp')}</p>
+          <div>${(me.services || []).map(s => `<span class="badge green">${esc(s)}</span>`).join('')}</div>
+        </div>
+        <button class="btn btn-gold btn-sm" data-action="editPanditProfile"><span class="material-icons">edit</span> Edit Profile</button>
+      </div>
+      <div class="profile-grid-details">
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">badge</span> Full Name</div>
+          <div class="profile-field-value">${esc(me.name)}</div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">email</span> Registered Email</div>
+          <div class="profile-field-value">${esc(me.email)}</div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">phone</span> Phone Number</div>
+          <div class="profile-field-value">${esc(me.phone)}</div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">payments</span> Base Dakshina</div>
+          <div class="profile-field-value"><b>${inr(me.fee)}</b> per puja</div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">map</span> Home District &amp; State</div>
+          <div class="profile-field-value">${esc(me.district || me.city || '')}${me.state ? ', ' + esc(me.state) : ''}</div>
+        </div>
+        <div class="profile-field">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">explore</span> Working Districts</div>
+          <div class="profile-field-value">${(me.workingDistricts || [me.district]).map(esc).join(', ')}</div>
+        </div>
+        <div class="profile-field" style="grid-column:1 / -1">
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">notes</span> Pandit Bio &amp; Vedic Lineage</div>
+          <div class="profile-field-value" style="font-weight:400;color:#4a2b16">${esc(me.bio || 'Vedic Pandit conducting authentic traditional rituals.')}</div>
+        </div>
+        ${me.documentUrl || me.idDoc ? `
+          <div class="profile-field" style="grid-column:1 / -1;border:1px dashed var(--ochre)">
+            <div class="profile-field-label"><span class="material-icons" style="font-size:14px">verified_user</span> KYC Document Link on File</div>
+            <div class="profile-field-value">
+              <a href="${esc(me.documentUrl || me.idDoc)}" target="_blank" rel="noopener" style="color:var(--ochre);text-decoration:underline">
+                View Submitted Identity Document ↗
+              </a>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
 }
 
 async function adminDash(root) {
@@ -873,6 +1246,76 @@ const ACTIONS = {
     const slots = $('#av-slots').value.split('\n').map((s) => s.trim()).filter(Boolean);
     if (!days.length || !slots.length) return toast('Select at least one day and one slot', true);
     try { await api('/pandits/' + S.me._id, { method: 'PUT', body: { availableDays: days, timeSlots: slots, fee: +$('#av-fee').value || S.me.fee } }); toast('Availability saved'); } catch (e) { toast(e.message, true); }
+  },
+  dashTab: (d) => {
+    S.dashTab = d.tab;
+    renderDashboard();
+  },
+  openProfile: () => {
+    if (!S.user) {
+      openAuth('login');
+      toast('Please log in to view your profile 🙏');
+      return;
+    }
+    S.dashTab = 'profile';
+    showView('dashboard');
+  },
+  registerDevotee: () => openAuth('register'),
+  editDevoteeProfile: () => {
+    const u = S.user;
+    openModal('Edit Devotee Profile', `
+      <div><label>Full Name</label><input id="ep-dev-name" value="${esc(u.name || '')}"></div>
+      <div><label>Phone Number</label><input id="ep-dev-phone" value="${esc(u.phone || '')}"></div>
+      <div class="form-grid" style="padding:0">
+        <div><label>State</label><input id="ep-dev-state" value="${esc(u.state || '')}"></div>
+        <div><label>District</label><input id="ep-dev-dist" value="${esc(u.district || '')}"></div>
+      </div>
+      <div><label>City / Town</label><input id="ep-dev-city" value="${esc(u.city || '')}"></div>
+      <button class="btn btn-gold" id="btn-save-dev-prof" style="margin-top:10px;width:100%"><span class="material-icons">save</span> Save Profile</button>
+    `, (m) => {
+      $('#btn-save-dev-prof', m).onclick = async () => {
+        const name = $('#ep-dev-name', m).value.trim();
+        const phone = $('#ep-dev-phone', m).value.trim();
+        const state = $('#ep-dev-state', m).value.trim();
+        const district = $('#ep-dev-dist', m).value.trim();
+        const city = $('#ep-dev-city', m).value.trim();
+        if (!name || !phone) return toast('Name and phone are required', true);
+        try {
+          const updated = await api('/users/profile', { method: 'PUT', body: { name, phone, state, district, city } });
+          saveSession(updated, S.token);
+          closeModal();
+          toast('Profile updated successfully! 🙏');
+          renderDashboard();
+        } catch (e) { toast(e.message, true); }
+      };
+    });
+  },
+  editPanditProfile: () => {
+    const me = S.me;
+    if (!me) return;
+    openModal('Edit Pandit Profile', `
+      <div><label>Phone Number</label><input id="ep-p-phone" value="${esc(me.phone || '')}"></div>
+      <div><label>Base Dakshina (₹)</label><input id="ep-p-fee" type="number" value="${me.fee || 1500}"></div>
+      <div><label>Working Districts (comma-separated)</label><input id="ep-p-districts" value="${esc((me.workingDistricts || [me.district]).join(', '))}"></div>
+      <div><label>Profile Photo URL</label><input id="ep-p-photo" value="${esc(me.photo || '')}"></div>
+      <div><label>Pandit Bio / Vedic Lineage</label><textarea id="ep-p-bio" rows="3">${esc(me.bio || '')}</textarea></div>
+      <button class="btn btn-gold" id="btn-save-p-prof" style="margin-top:10px;width:100%"><span class="material-icons">save</span> Save Pandit Profile</button>
+    `, (m) => {
+      $('#btn-save-p-prof', m).onclick = async () => {
+        const phone = $('#ep-p-phone', m).value.trim();
+        const fee = +$('#ep-p-fee', m).value || me.fee;
+        const workingDistricts = $('#ep-p-districts', m).value.split(',').map((s) => s.trim()).filter(Boolean);
+        const photo = $('#ep-p-photo', m).value.trim() || me.photo;
+        const bio = $('#ep-p-bio', m).value.trim();
+        try {
+          const updated = await api('/pandits/' + me._id, { method: 'PUT', body: { phone, fee, workingDistricts, photo, bio } });
+          S.me = updated;
+          closeModal();
+          toast('Pandit profile updated! 🙏');
+          renderDashboard();
+        } catch (e) { toast(e.message, true); }
+      };
+    });
   },
   panditStatus: async (d) => { try { await api(`/pandits/${d.id}/status`, { method: 'PUT', body: { status: d.status } }); toast('Pandit ' + d.status.toLowerCase() + '. Email sent.'); renderDashboard(); } catch (e) { toast(e.message, true); } },
   assign: (d) => openAssign(d.id),

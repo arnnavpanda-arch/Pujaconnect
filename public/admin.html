@@ -6,68 +6,231 @@
   <title>PujaConnect – Super Admin Portal</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
   <style>
-    body { background: #fbf7f0; color: #2e1c12; }
+    :root {
+      --admin-bg: #f8f4ed;
+      --admin-panel: #ffffff;
+      --admin-border: #ebd9c2;
+      --admin-gold: #d99a19;
+      --admin-dark: #220e03;
+    }
+    body { background: var(--admin-bg); color: #2e1c12; margin: 0; font-family: Inter, system-ui, sans-serif; }
+    
     .admin-header {
-      background: #351605;
+      background: linear-gradient(135deg, #1b0a02 0%, #2e1305 60%, #451b07 100%);
       color: #fff;
       padding: 14px 24px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.25);
       position: sticky;
       top: 0;
       z-index: 50;
+      flex-wrap: wrap;
+      gap: 12px;
     }
     .admin-title {
       display: flex;
       align-items: center;
       gap: 12px;
-      font-size: 18px;
+      font-size: 19px;
       font-weight: 700;
       color: #ffd88a;
     }
-    .admin-title .om { font-size: 24px; color: #d99a19; }
-    .admin-controls { display: flex; align-items: center; gap: 14px; }
+    .admin-title .om { font-size: 26px; color: #f5b942; }
+    .admin-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    
     .db-badge {
       display: inline-flex;
       align-items: center;
       gap: 8px;
       padding: 6px 14px;
       border-radius: 20px;
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 600;
       transition: all 0.3s ease;
     }
     .db-badge.connected {
-      background: rgba(76, 175, 80, 0.18);
+      background: rgba(76, 175, 80, 0.16);
       border: 1px solid #4caf50;
       color: #81c784;
     }
     .db-badge.disconnected {
-      background: rgba(244, 67, 54, 0.2);
+      background: rgba(244, 67, 54, 0.18);
       border: 1px solid #f44336;
       color: #e57373;
     }
     .pulse-dot {
-      width: 10px;
-      height: 10px;
+      width: 9px;
+      height: 9px;
       border-radius: 50%;
       background: currentColor;
       box-shadow: 0 0 8px currentColor;
     }
-    .main-admin { max-width: 1200px; margin: 30px auto; padding: 0 20px 60px; }
-    .table-avatar {
+    
+    .main-admin { max-width: 1240px; margin: 24px auto; padding: 0 20px 80px; }
+
+    /* Admin Tab Navigation */
+    .admin-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      margin-bottom: 24px;
+      scrollbar-width: none;
+    }
+    .admin-tabs::-webkit-scrollbar { display: none; }
+    .admin-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 12px;
+      background: #fff;
+      border: 1px solid var(--admin-border);
+      color: #4a2814;
+      font-weight: 600;
+      font-size: 13.5px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+    .admin-tab:hover { background: #fffcf5; border-color: var(--admin-gold); }
+    .admin-tab.active {
+      background: var(--admin-dark);
+      color: #ffd88a;
+      border-color: var(--admin-dark);
+      box-shadow: 0 4px 14px rgba(34, 14, 3, 0.2);
+    }
+    .admin-tab-pill {
+      background: #e65100;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 10px;
+    }
+    .admin-tab-pill.green { background: #2e7d32; }
+
+    /* Modern Admin KPI Stat Cards */
+    .admin-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 16px;
+      margin-bottom: 26px;
+    }
+    .kpi-card {
+      background: #fff;
+      border: 1px solid var(--admin-border);
+      border-radius: 14px;
+      padding: 18px 20px;
+      box-shadow: 0 4px 18px rgba(53, 22, 5, 0.05);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3.5px;
+      background: linear-gradient(90deg, #d99a19, #ffd166);
+    }
+    .kpi-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .kpi-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .kpi-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff8ed;
+      color: var(--admin-gold);
+    }
+    .kpi-val { font-size: 28px; font-weight: 700; color: #2e1305; font-family: Georgia, serif; }
+
+    /* Admin Panels & Tables */
+    .admin-panel {
+      background: #fff;
+      border: 1px solid var(--admin-border);
+      border-radius: 16px;
+      box-shadow: 0 6px 24px rgba(53, 22, 5, 0.06);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .admin-panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .admin-panel-head h3 { margin: 0; font-size: 19px; color: #2b1103; display: flex; align-items: center; gap: 8px; }
+    
+    .table-responsive {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid #f0e0cc;
+      border-radius: 12px;
+      background: #fff;
+    }
+    .admin-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+      min-width: 650px;
+    }
+    .admin-table th {
+      background: #fbf7f0;
+      color: #634330;
+      font-weight: 700;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 12px 14px;
+      border-bottom: 2px solid #ebd9c2;
+    }
+    .admin-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid #f3e6d6;
+      vertical-align: middle;
+      color: #331f13;
+    }
+    .admin-table tr:hover td { background: #fffcf7; }
+    .admin-avatar {
       width: 44px;
       height: 44px;
       border-radius: 50%;
       object-fit: cover;
       border: 2px solid #d99a19;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+    }
+    
+    .search-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border: 1px solid var(--admin-border);
+      border-radius: 10px;
+      padding: 6px 12px;
+      max-width: 320px;
+      width: 100%;
+    }
+    .search-box input { border: none; padding: 4px; outline: none; width: 100%; font-size: 13px; }
+    .search-box .material-icons { color: var(--muted); font-size: 18px; }
+
+    @media (max-width: 768px) {
+      .admin-header { flex-direction: column; align-items: flex-start; }
+      .admin-controls { width: 100%; justify-content: space-between; }
     }
   </style>
 </head>
@@ -75,21 +238,46 @@
   <header class="admin-header">
     <div class="admin-title">
       <span class="om">ॐ</span>
-      <span>PujaConnect Admin Portal</span>
-      <span class="role-badge" style="background:#55280b;border-color:#d99a19;color:#ffd88a;font-size:11px">Super Admin</span>
+      <span>PujaConnect Executive Portal</span>
+      <span class="role-badge" style="background:#55280b;border:1px solid #d99a19;color:#ffd88a;font-size:11px">Super Admin</span>
     </div>
     <div class="admin-controls">
       <div id="admin-db-badge" class="db-badge connected">
         <span class="pulse-dot"></span>
         <span id="admin-db-text">Checking Database...</span>
       </div>
-      <button class="btn btn-outline" id="btn-refresh-db" style="padding:6px 12px;font-size:12px;color:#ffd88a;border-color:#ffd88a"><span class="material-icons" style="font-size:14px;vertical-align:middle">sync</span> Re-check DB</button>
-      <a href="/" class="btn btn-gold" style="padding:6px 14px;font-size:13px;text-decoration:none"><span class="material-icons" style="font-size:16px;vertical-align:middle">public</span> View Public Website</a>
+      <button class="btn btn-outline" id="btn-refresh-db" style="padding:6px 12px;font-size:12px;color:#ffd88a;border-color:#ffd88a">
+        <span class="material-icons" style="font-size:14px;vertical-align:middle">sync</span> Refresh Data
+      </button>
+      <a href="/" class="btn btn-gold" style="padding:6px 14px;font-size:13px;text-decoration:none">
+        <span class="material-icons" style="font-size:16px;vertical-align:middle">public</span> View Website
+      </a>
     </div>
   </header>
 
   <main class="main-admin">
-    <div id="admin-content">
+    <div id="admin-kpi-root"></div>
+
+    <!-- Subtabs -->
+    <div class="admin-tabs">
+      <button class="admin-tab active" data-tab="kyc" onclick="switchAdminTab('kyc')">
+        <span class="material-icons">verified_user</span> KYC Queue <span id="badge-kyc-count" class="admin-tab-pill">0</span>
+      </button>
+      <button class="admin-tab" data-tab="pandits" onclick="switchAdminTab('pandits')">
+        <span class="material-icons">badge</span> Pandits Directory
+      </button>
+      <button class="admin-tab" data-tab="pujas" onclick="switchAdminTab('pujas')">
+        <span class="material-icons">spa</span> Puja Catalog
+      </button>
+      <button class="admin-tab" data-tab="longs" onclick="switchAdminTab('longs')">
+        <span class="material-icons">event_note</span> Multi-Day Requests <span id="badge-long-count" class="admin-tab-pill">0</span>
+      </button>
+      <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">
+        <span class="material-icons">group</span> Devotees
+      </button>
+    </div>
+
+    <div id="admin-view-root">
       <div class="empty">Loading Super Admin Dashboard…</div>
     </div>
   </main>
@@ -99,6 +287,8 @@
 
   <script>
     let TOKEN = '';
+    let CURRENT_TAB = 'kyc';
+    let SEARCH_QUERY = '';
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 
@@ -128,7 +318,7 @@
     function openModal(title, html, onMount) {
       document.getElementById('modal-root').innerHTML = `
         <div class="modal-backdrop" onclick="if(event.target===this)closeModal()">
-          <div class="modal">
+          <div class="modal modal-wide">
             <div class="modal-head">
               <h3>${esc(title)}</h3>
               <button onclick="closeModal()" aria-label="Close"><span class="material-icons">close</span></button>
@@ -141,7 +331,7 @@
     function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
 
     function statusBadge(s) {
-      const cls = { 'Verified': 'badge-green', 'Pending Review': 'badge-gold', 'Rejected': 'badge-red', 'Confirmed': 'badge-green', 'Completed': 'badge-green', 'Cancelled': 'badge-red', 'Assigned': 'badge-green' }[s] || 'badge-gold';
+      const cls = { 'Verified': 'green', 'Pending Review': 'amber', 'Rejected': 'red', 'Confirmed': 'green', 'Completed': 'green', 'Cancelled': 'red', 'Assigned': 'green' }[s] || 'amber';
       return `<span class="badge ${cls}">${esc(s)}</span>`;
     }
 
@@ -152,7 +342,7 @@
         const d = await api('/db-status');
         if (d.connected) {
           badge.className = 'db-badge connected';
-          text.textContent = 'MongoDB Connected 🟢 (' + (d.host || 'Atlas') + ')';
+          text.textContent = 'MongoDB Atlas Connected 🟢';
         } else {
           badge.className = 'db-badge disconnected';
           text.textContent = 'Database Disconnected 🔴';
@@ -163,11 +353,10 @@
       }
     }
 
-    let S = { adminPandits: [], adminLongs: [], pujas: [] };
+    let S = { adminPandits: [], adminLongs: [], pujas: [], users: [], stats: {} };
 
-    async function renderDashboard() {
+    async function loadData() {
       await checkDb();
-      const root = document.getElementById('admin-content');
       try {
         const [stats, pandits, longs, users, pujas] = await Promise.all([
           api('/admin/stats').catch(() => ({ users: 0, pandits: 0, verifiedPandits: 0, pendingPandits: 0, bookings: 0, completed: 0, revenue: 0, longRequests: 0, pendingLong: 0 })),
@@ -176,114 +365,304 @@
           api('/users').catch(() => []),
           api('/pujas').catch(() => [])
         ]);
-        S.adminPandits = pandits; S.adminLongs = longs; S.pujas = pujas;
-        const pend = pandits.filter((p) => p.status === 'Pending Review');
-        const unassigned = longs.filter((l) => l.status === 'Pending Admin');
+        S.stats = stats;
+        S.adminPandits = pandits;
+        S.adminLongs = longs;
+        S.users = users;
+        S.pujas = pujas;
 
-        root.innerHTML = `
-          <div class="stats">${[['Devotees', stats.users], ['Total Pandits', stats.pandits], ['Verified Pandits', stats.verifiedPandits], ['Pending KYC Review', stats.pendingPandits], ['Total Bookings', stats.bookings], ['Completed Ceremonies', stats.completed], ['Booked Dakshina', inr(stats.revenue)], ['Multi-Day Requests', `${stats.pendingLong}/${stats.longRequests}`]].map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('')}</div>
-
-          <div class="panel">
-            <div class="row">
-              <h3>Pandit KYC Verification Queue</h3>
-              ${pend.length ? `<span class="badge badge-gold">${pend.length} awaiting review</span>` : ''}
-            </div>
-            ${pend.length ? `<table>
-              <tr><th>Photo</th><th>Pandit Details</th><th>Home District</th><th>Dakshina</th><th>Specialty</th><th>Action</th></tr>
-              ${pend.map((p) => `<tr>
-                <td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="table-avatar" alt="Pandit"></td>
-                <td><b>${esc(p.name)}</b><br><small class="muted">${esc(p.email)} · 📞 ${esc(p.phone)}</small></td>
-                <td>${esc(p.district || p.location)}</td>
-                <td>${inr(p.fee)}</td>
-                <td><small>${esc(p.specialty || (p.services || []).join(', ') || 'Vedic Rituals')}</small></td>
-                <td>
-                  <button class="btn btn-green btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Verified')">Approve</button>
-                  <button class="btn btn-red btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Rejected')">Reject</button>
-                </td>
-              </tr>`).join('')}
-            </table>` : '<p class="muted" style="padding:10px 0">All Pandits are verified. No registrations currently pending review.</p>'}
-          </div>
-
-          <div class="panel">
-            <div class="row">
-              <h3>Multi-Day Puja Custom Requests</h3>
-              ${unassigned.length ? `<span class="badge badge-red">${unassigned.length} need Pandit assignment</span>` : ''}
-            </div>
-            ${longs.length ? `<table>
-              <tr><th>ID</th><th>Devotee</th><th>Ritual</th><th>Dates &amp; Duration</th><th>Pandits Assigned</th><th>Status</th><th>Action</th></tr>
-              ${longs.map((l) => `<tr>
-                <td><b>${esc(l.id)}</b></td>
-                <td>${esc(l.userName)}<br><small class="muted">${esc(l.userEmail)}</small></td>
-                <td>${esc(l.pujaName)}<br><small>${esc(l.district)}</small></td>
-                <td>${esc(l.fromDate)} → ${esc(l.toDate)}<br><small class="muted">${l.totalDays} days × ${l.dailyHours} hrs/day</small></td>
-                <td>${l.assignedPandits.length}/${l.requiredPandits}</td>
-                <td>${statusBadge(l.status)}</td>
-                <td>
-                  ${['Pending Admin', 'Assigned'].includes(l.status) ? `<button class="btn btn-dark btn-sm" onclick="openAssignModal('${esc(l.id)}')">${l.status === 'Assigned' ? 'Re-assign' : 'Assign Pandits'}</button>` : '—'}
-                </td>
-              </tr>`).join('')}
-            </table>` : '<p class="muted">No custom multi-day puja requests yet.</p>'}
-          </div>
-
-          <div class="panel">
-            <div class="row">
-              <h3>Puja Services Catalog</h3>
-              <button class="btn btn-gold btn-sm" onclick="openPujaModal('')"><span class="material-icons" style="font-size:16px;vertical-align:middle">add</span> Add Puja</button>
-            </div>
-            <table>
-              <tr><th>Name</th><th>Type</th><th>Dakshina</th><th>Description</th><th>Action</th></tr>
-              ${pujas.map((p) => `<tr>
-                <td><b>${esc(p.name)}</b></td>
-                <td><span class="badge ${p.type === 'Long' ? 'badge-gold' : 'badge-green'}">${esc(p.type)}</span></td>
-                <td><b>${p.type === 'Long' ? inr(p.perHourFee) + '/hr' : inr(p.baseFee)}</b></td>
-                <td><small>${esc(p.desc)}</small></td>
-                <td>
-                  <button class="btn btn-outline dark btn-sm" onclick="openPujaModal('${esc(p._id)}')">Edit</button>
-                  <button class="btn btn-red btn-sm" onclick="deletePuja('${esc(p._id)}')">Delete</button>
-                </td>
-              </tr>`).join('')}
-            </table>
-          </div>
-
-          <div class="panel">
-            <h3>Registered Pandits Directory</h3>
-            <table>
-              <tr><th>Photo</th><th>Pandit Name</th><th>Home District</th><th>Experience</th><th>Base Dakshina</th><th>Status</th></tr>
-              ${pandits.map((p) => `<tr>
-                <td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="table-avatar" style="width:36px;height:36px" alt="Avatar"></td>
-                <td><b>${esc(p.name)}</b><br><small class="muted">${esc(p.email)} · 📞 ${esc(p.phone)}</small></td>
-                <td>${esc(p.district || p.location)}</td>
-                <td>${esc(p.exp || p.experience + ' Years')}</td>
-                <td>${inr(p.fee)}</td>
-                <td>${statusBadge(p.status)}</td>
-              </tr>`).join('')}
-            </table>
-          </div>
-
-          <div class="panel">
-            <h3>Registered Devotees</h3>
-            ${users.length ? `<table>
-              <tr><th>Devotee Name</th><th>Email</th><th>Phone</th><th>Location</th><th>Registration Date</th></tr>
-              ${users.map((u) => `<tr>
-                <td><b>${esc(u.name)}</b></td>
-                <td>${esc(u.email)}</td>
-                <td>${esc(u.phone)}</td>
-                <td>${esc(u.district || u.city || '')}${u.state ? ', ' + esc(u.state) : ''}</td>
-                <td>${new Date(u.createdAt).toLocaleDateString()}</td>
-              </tr>`).join('')}
-            </table>` : '<p class="muted">No devotees registered yet.</p>'}
-          </div>
-        `;
+        renderKpis();
+        renderActiveTab();
       } catch (e) {
-        root.innerHTML = `<div class="empty error">Error loading admin dashboard: ${esc(e.message)}</div>`;
+        document.getElementById('admin-view-root').innerHTML = `<div class="empty error">Error loading admin data: ${esc(e.message)}</div>`;
       }
+    }
+
+    function renderKpis() {
+      const s = S.stats;
+      const pendKyc = S.adminPandits.filter(p => p.status === 'Pending Review').length;
+      const pendLong = S.adminLongs.filter(l => l.status === 'Pending Admin').length;
+
+      document.getElementById('badge-kyc-count').textContent = pendKyc;
+      document.getElementById('badge-long-count').textContent = pendLong;
+
+      const kpis = [
+        { label: 'Registered Devotees', val: s.users || 0, icon: 'people' },
+        { label: 'Verified Pandits', val: s.verifiedPandits || 0, icon: 'verified' },
+        { label: 'Pending KYC Review', val: pendKyc, icon: 'pending_actions', alert: pendKyc > 0 },
+        { label: 'Total Ceremonies', val: s.bookings || 0, icon: 'event' },
+        { label: 'Completed Pujas', val: s.completed || 0, icon: 'task_alt' },
+        { label: 'Booked Dakshina', val: inr(s.revenue || 0), icon: 'payments' },
+        { label: 'Custom Mahayajnas', val: `${pendLong}/${s.longRequests || 0}`, icon: 'auto_stories' },
+        { label: 'Total Pandits', val: s.pandits || 0, icon: 'badge' }
+      ];
+
+      document.getElementById('admin-kpi-root').innerHTML = `
+        <div class="admin-stats-grid">
+          ${kpis.map(k => `
+            <div class="kpi-card" ${k.alert ? 'style="border-color:#e65100"' : ''}>
+              <div class="kpi-head">
+                <span class="kpi-label">${k.label}</span>
+                <span class="kpi-icon"><span class="material-icons">${k.icon}</span></span>
+              </div>
+              <div class="kpi-val" ${k.alert ? 'style="color:#e65100"' : ''}>${k.val}</div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function switchAdminTab(tab) {
+      CURRENT_TAB = tab;
+      document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+      renderActiveTab();
+    }
+
+    function renderActiveTab() {
+      const root = document.getElementById('admin-view-root');
+      if (CURRENT_TAB === 'kyc') renderKycQueue(root);
+      else if (CURRENT_TAB === 'pandits') renderPanditsDirectory(root);
+      else if (CURRENT_TAB === 'pujas') renderPujaCatalog(root);
+      else if (CURRENT_TAB === 'longs') renderLongRequests(root);
+      else if (CURRENT_TAB === 'users') renderDevoteesDirectory(root);
+    }
+
+    // 1. KYC Queue
+    function renderKycQueue(root) {
+      const pend = S.adminPandits.filter(p => p.status === 'Pending Review');
+      root.innerHTML = `
+        <div class="admin-panel">
+          <div class="admin-panel-head">
+            <h3><span class="material-icons" style="color:#e65100">verified_user</span> Pandit KYC Verification Queue</h3>
+            ${pend.length ? `<span class="badge red">${pend.length} awaiting review</span>` : '<span class="badge green">Queue clean</span>'}
+          </div>
+          ${pend.length ? `
+            <div class="table-responsive">
+              <table class="admin-table">
+                <thead>
+                  <tr><th>Photo</th><th>Pandit Details</th><th>Home District</th><th>Dakshina</th><th>Specialty</th><th>Action</th></tr>
+                </thead>
+                <tbody>
+                  ${pend.map(p => `
+                    <tr>
+                      <td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="admin-avatar" alt="Pandit"></td>
+                      <td><b>${esc(p.name)}</b><br><small class="muted">${esc(p.email)} · 📞 ${esc(p.phone)}</small></td>
+                      <td>${esc(p.district || p.location)}</td>
+                      <td><b>${inr(p.fee)}</b></td>
+                      <td><small>${esc(p.specialty || (p.services || []).join(', ') || 'Vedic Rituals')}</small></td>
+                      <td>
+                        <button class="btn btn-green btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Verified')">Approve</button>
+                        <button class="btn btn-red btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Rejected')">Reject</button>
+                        <button class="btn btn-outline dark btn-sm" onclick="viewPanditModal('${esc(p._id)}')">Inspect</button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : `
+            <div class="empty" style="padding:48px 20px">
+              <span class="material-icons" style="font-size:48px;color:#2e7d32">check_circle</span>
+              <p style="font-size:16px;font-weight:600;margin:12px 0 4px">All Pandit KYC reviews are up to date!</p>
+              <span class="muted">New registrations will appear here for verification.</span>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    // 2. Pandits Directory
+    function renderPanditsDirectory(root) {
+      let list = S.adminPandits;
+      if (SEARCH_QUERY) {
+        const q = SEARCH_QUERY.toLowerCase();
+        list = list.filter(p => p.name.toLowerCase().includes(q) || (p.district || '').toLowerCase().includes(q) || p.email.toLowerCase().includes(q) || (p.phone || '').includes(q));
+      }
+      root.innerHTML = `
+        <div class="admin-panel">
+          <div class="admin-panel-head">
+            <h3><span class="material-icons" style="color:var(--admin-gold)">badge</span> Registered Pandits (${list.length})</h3>
+            <div class="search-box">
+              <span class="material-icons">search</span>
+              <input type="text" placeholder="Search by name, district, phone..." value="${esc(SEARCH_QUERY)}" oninput="SEARCH_QUERY=this.value; renderActiveTab();">
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Photo</th><th>Pandit Name</th><th>Home District</th><th>Experience</th><th>Base Dakshina</th><th>Status</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                ${list.map(p => `
+                  <tr>
+                    <td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="admin-avatar" alt="Avatar"></td>
+                    <td><b>${esc(p.name)}</b><br><small class="muted">${esc(p.email)} · 📞 ${esc(p.phone)}</small></td>
+                    <td>${esc(p.district || p.location)}</td>
+                    <td>${esc(p.exp || p.experience + ' Years')}</td>
+                    <td><b>${inr(p.fee)}</b></td>
+                    <td>${statusBadge(p.status)}</td>
+                    <td>
+                      <button class="btn btn-outline dark btn-sm" onclick="viewPanditModal('${esc(p._id)}')">Details</button>
+                      ${p.status !== 'Verified' ? `<button class="btn btn-green btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Verified')">Approve</button>` : `<button class="btn btn-red btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Rejected')">Revoke</button>`}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    // 3. Puja Catalog
+    function renderPujaCatalog(root) {
+      root.innerHTML = `
+        <div class="admin-panel">
+          <div class="admin-panel-head">
+            <h3><span class="material-icons" style="color:var(--admin-gold)">spa</span> Vedic Puja Services Catalog (${S.pujas.length})</h3>
+            <button class="btn btn-gold btn-sm" onclick="openPujaModal('')"><span class="material-icons" style="font-size:16px">add</span> Add New Puja</button>
+          </div>
+          <div class="table-responsive">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Dakshina</th><th>Description</th><th>Benefits</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                ${S.pujas.map(p => `
+                  <tr>
+                    <td><b>${esc(p.name)}</b></td>
+                    <td><span class="badge ${p.type === 'Long' ? 'amber' : 'green'}">${esc(p.type)}</span></td>
+                    <td><b>${p.type === 'Long' ? inr(p.perHourFee) + '/hr' : inr(p.baseFee)}</b></td>
+                    <td><small>${esc(p.desc)}</small></td>
+                    <td><small class="muted">${(p.benefits || []).slice(0, 2).map(esc).join(', ')}</small></td>
+                    <td>
+                      <button class="btn btn-outline dark btn-sm" onclick="openPujaModal('${esc(p._id)}')">Edit</button>
+                      <button class="btn btn-red btn-sm" onclick="deletePuja('${esc(p._id)}')">Delete</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    // 4. Multi-Day Requests
+    function renderLongRequests(root) {
+      const longs = S.adminLongs;
+      root.innerHTML = `
+        <div class="admin-panel">
+          <div class="admin-panel-head">
+            <h3><span class="material-icons" style="color:#d99a19">event_note</span> Custom Multi-Day Rituals (${longs.length})</h3>
+          </div>
+          ${longs.length ? `
+            <div class="table-responsive">
+              <table class="admin-table">
+                <thead>
+                  <tr><th>ID</th><th>Devotee</th><th>Ritual</th><th>Dates &amp; Duration</th><th>Pandits Assigned</th><th>Estimate</th><th>Status</th><th>Action</th></tr>
+                </thead>
+                <tbody>
+                  ${longs.map(l => `
+                    <tr>
+                      <td><b>${esc(l.id)}</b></td>
+                      <td>${esc(l.userName)}<br><small class="muted">${esc(l.userEmail)} · 📞 ${esc(l.phone || 'N/A')}</small></td>
+                      <td>${esc(l.pujaName)}<br><small>${esc(l.district)}</small></td>
+                      <td>${esc(l.fromDate)} → ${esc(l.toDate)}<br><small class="muted">${l.totalDays} days × ${l.dailyHours} hrs/day</small></td>
+                      <td>${l.assignedPandits.length}/${l.requiredPandits}</td>
+                      <td><b>${inr(l.estimatedCost)}</b>${l.advancePaid ? '<br><small class="badge green">Advance Paid</small>' : ''}</td>
+                      <td>${statusBadge(l.status)}</td>
+                      <td>
+                        ${['Pending Admin', 'Assigned'].includes(l.status) ? `<button class="btn btn-dark btn-sm" onclick="openAssignModal('${esc(l.id)}')">${l.status === 'Assigned' ? 'Re-assign' : 'Assign Pandits'}</button>` : '—'}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : '<div class="empty">No multi-day custom requests yet.</div>'}
+        </div>
+      `;
+    }
+
+    // 5. Devotees
+    function renderDevoteesDirectory(root) {
+      const users = S.users;
+      root.innerHTML = `
+        <div class="admin-panel">
+          <div class="admin-panel-head">
+            <h3><span class="material-icons" style="color:var(--admin-gold)">group</span> Registered Devotees (${users.length})</h3>
+          </div>
+          ${users.length ? `
+            <div class="table-responsive">
+              <table class="admin-table">
+                <thead>
+                  <tr><th>Devotee Name</th><th>Email</th><th>Phone</th><th>State / District</th><th>Joined Date</th></tr>
+                </thead>
+                <tbody>
+                  ${users.map(u => `
+                    <tr>
+                      <td><b>${esc(u.name)}</b></td>
+                      <td>${esc(u.email)}</td>
+                      <td>📞 ${esc(u.phone || 'N/A')}</td>
+                      <td>${esc(u.district || u.city || '')}${u.state ? ', ' + esc(u.state) : ''}</td>
+                      <td>${new Date(u.createdAt).toLocaleDateString()}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : '<div class="empty">No devotees registered yet.</div>'}
+        </div>
+      `;
+    }
+
+    function viewPanditModal(id) {
+      const p = S.adminPandits.find(x => x._id === id);
+      if (!p) return;
+      openModal('Pandit Details – ' + p.name, `
+        <div style="display:flex;gap:18px;align-items:center;margin-bottom:16px">
+          <img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="admin-avatar" style="width:72px;height:72px" alt="Avatar">
+          <div>
+            <h3 style="margin:0">${esc(p.name)} ${statusBadge(p.status)}</h3>
+            <p class="muted" style="margin:4px 0">${esc(p.email)} · 📞 ${esc(p.phone)}</p>
+            <span class="badge">${esc(p.district || p.location)}</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;background:#fff8ed;padding:14px;border-radius:10px">
+          <div><label>Experience</label><b>${esc(p.exp || p.experience + ' Years')}</b></div>
+          <div><label>Base Dakshina</label><b>${inr(p.fee)}</b></div>
+          <div><label>Working Districts</label><span>${(p.workingDistricts || [p.district]).join(', ')}</span></div>
+          <div><label>Specialty</label><span>${esc(p.specialty || 'Vedic Rituals')}</span></div>
+        </div>
+        <div>
+          <label>Services Offered</label>
+          <div>${(p.services || []).map(s => `<span class="badge green">${esc(s)}</span>`).join('') || '<span class="muted">None listed</span>'}</div>
+        </div>
+        <div style="margin-top:12px">
+          <label>Bio / Description</label>
+          <p style="margin:4px 0;font-size:13.5px;color:#442b1a">${esc(p.bio || 'No bio provided.')}</p>
+        </div>
+        ${p.documentUrl || p.idDoc ? `
+          <div style="margin-top:16px;padding:12px;border:1px dashed #d99a19;border-radius:10px">
+            <label>KYC Proof Document</label>
+            <a href="${esc(p.documentUrl || p.idDoc)}" target="_blank" rel="noopener" style="color:#d99a19;font-weight:600;display:inline-flex;align-items:center;gap:4px">
+              <span class="material-icons" style="font-size:16px">open_in_new</span> View Submitted ID Document
+            </a>
+          </div>
+        ` : ''}
+        <div style="display:flex;gap:10px;margin-top:20px">
+          <button class="btn btn-green" style="flex:1" onclick="setPanditStatus('${esc(p._id)}', 'Verified'); closeModal();">Approve &amp; Verify</button>
+          <button class="btn btn-red" style="flex:1" onclick="setPanditStatus('${esc(p._id)}', 'Rejected'); closeModal();">Reject KYC</button>
+        </div>
+      `);
     }
 
     async function setPanditStatus(id, status) {
       try {
         await api(`/pandits/${id}/status`, { method: 'PUT', body: { status } });
         toast(`Pandit ${status.toLowerCase()} successfully!`);
-        renderDashboard();
+        loadData();
       } catch (e) { toast(e.message, true); }
     }
 
@@ -292,7 +671,7 @@
       try {
         await api(`/pujas/${id}`, { method: 'DELETE' });
         toast('Puja deleted from catalog');
-        renderDashboard();
+        loadData();
       } catch (e) { toast(e.message, true); }
     }
 
@@ -313,7 +692,7 @@
             await api(`/long-puja-requests/${id}/assign`, { method: 'PUT', body: { panditEmails: emails } });
             closeModal();
             toast('Pandits assigned successfully');
-            renderDashboard();
+            loadData();
           } catch (e) { toast(e.message, true); }
         };
       });
@@ -353,23 +732,22 @@
             await api('/pujas', { method: 'POST', body });
             closeModal();
             toast('Puja catalog updated');
-            renderDashboard();
+            loadData();
           } catch (e) { toast(e.message, true); }
         };
       });
     }
 
-    // Auto passwordless authentication on load
     (async function init() {
       try {
         const r = await api('/auth/admin-direct', { method: 'POST' });
         TOKEN = r.token;
-        toast('Super Admin Access Active 🛡️');
+        toast('Super Admin Access Granted 🛡️');
       } catch (e) {
         console.warn('Direct auth fallback');
       }
-      document.getElementById('btn-refresh-db').onclick = () => renderDashboard();
-      renderDashboard();
+      document.getElementById('btn-refresh-db').onclick = () => loadData();
+      loadData();
     })();
   </script>
 </body>
