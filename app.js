@@ -25,20 +25,33 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// ---- Diagnostics (no DB needed for ping) ----
+// ---- Diagnostics (no DB needed) ----
 app.get('/api/ping', (req, res) => res.json({ status: 'ok', time: Date.now() }));
-
-// ---- Ensure DB connection for everything else ----
-app.use('/api', wrap(async (req, res, next) => {
-  await connectDB();
-  next();
-}));
-
 app.get('/api/health', (req, res) => {
   const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
   const s = mongoose.connection.readyState;
-  res.status(s === 1 ? 200 : 503).json({ status: s === 1 ? 'ok' : 'degraded', database: states[s] || 'unknown', readyState: s, time: Date.now() });
+  res.status(s === 1 ? 200 : 503).json({
+    status: s === 1 ? 'ok' : 'degraded',
+    database: states[s] || 'unknown',
+    readyState: s,
+    hasMongoUri: Boolean(process.env.MONGO_URI),
+    time: Date.now()
+  });
 });
+
+// ---- Ensure DB connection for everything else ----
+app.use('/api', wrap(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('[API Database Connection Error]:', err.message);
+    res.status(503).json({
+      error: 'Database connection failed. Please check MONGO_URI and MongoDB Atlas IP access (0.0.0.0/0).',
+      details: err.message
+    });
+  }
+}));
 
 // ---- Auth helpers ----
 const publicUser = (u) => ({ name: u.name, email: u.email, phone: u.phone, state: u.state, district: u.district, city: u.city, role: u.role });
