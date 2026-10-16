@@ -305,61 +305,14 @@ td .btn { margin: 0 4px 4px 0; }
 .footer {
   background: #200e05;
   color: #f1d9aa;
-  padding: 44px 20px 80px;
-  border-top: 3px solid var(--ochre);
-}
-.footer-container { max-width: 1140px; margin: 0 auto; text-align: left; }
-.footer-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
-  gap: 32px;
-  margin-bottom: 36px;
-}
-.footer-brand h3 {
-  margin: 0 0 10px;
-  font-size: 24px;
-  color: var(--gold);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.footer-brand p { font-size: 13.5px; line-height: 1.6; color: #d6be96; margin: 0 0 14px; max-width: 320px; }
-.footer-col h4 {
-  font-family: Inter, sans-serif;
+  text-align: center;
+  padding: 24px 20px;
+  border-top: 1px solid rgba(255, 209, 102, 0.2);
   font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--gold);
-  margin: 0 0 14px;
 }
-.footer-links { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
-.footer-links a, .footer-links button {
-  color: #e5cdab;
-  font-size: 13.5px;
-  text-decoration: none;
-  background: none;
-  border: none;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
-  transition: color 0.2s;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.footer-links a:hover, .footer-links button:hover { color: #ffd88a; text-decoration: underline; }
-.footer-bottom {
-  border-top: 1px solid rgba(255, 209, 102, 0.15);
-  padding-top: 20px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12.5px;
-  color: #bfa583;
-  flex-wrap: wrap;
-  gap: 10px;
+.footer p {
+  margin: 0;
+  letter-spacing: 0.02em;
 }
 
 /* Sticky Mobile Bottom Navigation Bar */
@@ -420,7 +373,6 @@ td .btn { margin: 0 4px 4px 0; }
   .nav-actions { width: 100%; order: 6; }
   .form-grid { grid-template-columns: 1fr; }
   .hero-om { font-size: 84px; }
-  .footer-grid { grid-template-columns: 1fr; gap: 24px; }
   .dash-banner { flex-direction: column; align-items: flex-start; }
   .booking-cards-grid { grid-template-columns: 1fr; }
 }

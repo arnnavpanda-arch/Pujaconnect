@@ -238,6 +238,9 @@ function renderNav() {
 function showView(name) {
   if (name === 'dashboard' && !S.user) { openAuth(); return; }
   S.view = name;
+  const isDashboard = name === 'dashboard';
+  const navbar = document.querySelector('.navbar');
+  if (navbar) navbar.style.display = isDashboard ? 'none' : 'flex';
   document.querySelectorAll('.view-section').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
   document.querySelectorAll('.nav-links a').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
   document.querySelectorAll('.mobile-nav-btn').forEach((b) => {
@@ -730,8 +733,10 @@ async function userDash(root) {
           <p>${esc(S.user.email)} · ${esc(S.user.phone || 'No phone')} · <span class="badge green" style="margin:0">Devotee Account</span></p>
         </div>
       </div>
-      <div>
-        <button class="btn btn-gold btn-sm" data-action="bookCta"><span class="material-icons">self_improvement</span> Book a Puja</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-gold btn-sm" data-action="dashTab" data-tab="explore"><span class="material-icons">spa</span> Explore All Pujas</button>
+        <button class="btn btn-outline btn-sm" data-action="nav" data-view="home"><span class="material-icons">home</span> Home</button>
+        <button class="btn btn-outline btn-sm" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>
       </div>
     </div>
 
@@ -746,6 +751,9 @@ async function userDash(root) {
       <button class="subtab ${tab === 'bookings' ? 'active' : ''}" data-action="dashTab" data-tab="bookings">
         <span class="material-icons">event</span> My Bookings <span class="subtab-badge">${bookings.length}</span>
       </button>
+      <button class="subtab ${tab === 'explore' ? 'active' : ''}" data-action="dashTab" data-tab="explore">
+        <span class="material-icons">spa</span> Explore All Pujas
+      </button>
       <button class="subtab ${tab === 'long' ? 'active' : ''}" data-action="dashTab" data-tab="long">
         <span class="material-icons">event_note</span> Multi-Day Yajnas <span class="subtab-badge">${longs.length}</span>
       </button>
@@ -756,6 +764,7 @@ async function userDash(root) {
 
     <div id="dash-tab-content">
       ${tab === 'bookings' ? renderDevoteeBookingsTab(bookings) : ''}
+      ${tab === 'explore' ? renderDevoteeExploreTab() : ''}
       ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
       ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
     </div>
@@ -807,6 +816,62 @@ function renderDevoteeBookingsTab(bookings) {
                 <button class="btn btn-outline dark btn-sm" data-action="reschedule" data-id="${esc(b.bookingId)}">Reschedule</button>
                 <button class="btn btn-red btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>
               ` : ''}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderDevoteeExploreTab() {
+  const shortPujas = S.pujas.filter((p) => p.type === 'Short');
+  const longPujas = S.pujas.filter((p) => p.type === 'Long');
+  return `
+    <div class="panel" style="margin-bottom:20px">
+      <div class="row" style="flex-wrap:wrap;gap:12px">
+        <div>
+          <h3 style="margin:0"><span class="material-icons" style="vertical-align:middle;color:var(--ochre)">spa</span> Explore Sacred Vedic Pujas</h3>
+          <p class="muted" style="margin:4px 0 0">Browse through authentic home rituals and multi-day ceremonies conducted by verified Pandits.</p>
+        </div>
+        <button class="btn btn-gold btn-sm" data-action="bookCta"><span class="material-icons">person_search</span> Find a Pandit</button>
+      </div>
+    </div>
+
+    <h3 style="margin:24px 0 14px;color:var(--mahogany);display:flex;align-items:center;gap:8px">
+      <span class="material-icons" style="color:var(--ochre)">home</span> Popular Home Pujas
+    </h3>
+    <div class="grid" style="margin-bottom:32px">
+      ${shortPujas.map((p) => `
+        <div class="card">
+          <div class="thumb" style="background-image:url('${esc(p.image)}')"></div>
+          <div class="body">
+            <h3>${esc(p.name)}</h3>
+            <p class="muted" style="margin:0 0 8px;font-size:13.5px">${esc(p.desc)}</p>
+            <div>${(p.benefits || []).map((b) => `<span class="badge">✦ ${esc(b)}</span>`).join('')}</div>
+            <div class="row" style="margin-top:14px">
+              <span class="price">${inr(p.baseFee)}</span>
+              <button class="btn btn-dark btn-sm" data-action="findFor" data-name="${esc(p.name)}">Book Pandit</button>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <h3 style="margin:24px 0 14px;color:var(--mahogany);display:flex;align-items:center;gap:8px">
+      <span class="material-icons" style="color:var(--ochre)">auto_stories</span> Multi-Day Mahayajnas
+    </h3>
+    <div class="grid">
+      ${longPujas.map((p) => `
+        <div class="card">
+          <div class="thumb" style="background-image:url('${esc(p.image)}')"></div>
+          <div class="body">
+            <h3>${esc(p.name)}</h3>
+            <p class="muted" style="margin:0 0 8px;font-size:13.5px">${esc(p.desc)}</p>
+            <div>${(p.benefits || []).map((b) => `<span class="badge">✦ ${esc(b)}</span>`).join('')}</div>
+            <div class="row" style="margin-top:14px">
+              <span class="price">${esc(p.price || 'From ' + inr(p.perHourFee) + '/hr')}</span>
+              <button class="btn btn-gold btn-sm" data-action="planLong" data-name="${esc(p.name)}">Customize</button>
             </div>
           </div>
         </div>
@@ -926,8 +991,10 @@ async function panditDash(root) {
           <p>${esc(me.district || me.location || 'Odisha')} · ${esc(me.exp || me.experience + ' Years Exp')} · Base Fee: <b>${inr(me.fee)}</b></p>
         </div>
       </div>
-      <div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn btn-gold btn-sm" data-action="editPanditProfile"><span class="material-icons">edit</span> Edit Profile</button>
+        <button class="btn btn-outline btn-sm" data-action="nav" data-view="home"><span class="material-icons">home</span> Home</button>
+        <button class="btn btn-outline btn-sm" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>
       </div>
     </div>
 
