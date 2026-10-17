@@ -1084,6 +1084,7 @@ function renderDevoteePaymentTrackingTab(bookings) {
         const advance = b.advanceAmount || 0;
         const isPaid = b.paymentStatus === 'Paid';
         const isVerifying = b.paymentStatus === 'Verification Pending';
+        const isRejected = b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected';
         const remaining = Math.max(0, isPaid ? 0 : fee - (b.advancePaid ? advance : 0));
         const isPanditApproved = b.status === 'Confirmed' || b.status === 'In Progress' || b.panditApproval === 'Approved';
 
@@ -1092,6 +1093,8 @@ function renderDevoteePaymentTrackingTab(bookings) {
           statusSnippet = `<span class="badge green"><span class="material-icons" style="font-size:14px">check_circle</span> Paid &amp; Verified</span>`;
         } else if (isVerifying) {
           statusSnippet = `<span class="badge amber"><span class="material-icons" style="font-size:14px">hourglass_top</span> Payment Verification Pending</span>`;
+        } else if (isRejected) {
+          statusSnippet = `<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a"><span class="material-icons" style="font-size:14px">cancel</span> Payment Rejected</span>${b.paymentRejectionReason ? `<br><small class="muted" style="color:#c62828;font-size:12px;margin-top:2px;display:inline-block">Reason: ${esc(b.paymentRejectionReason)}</small>` : ''}`;
         } else if (b.status === 'Cancelled') {
           statusSnippet = `<span class="badge red">Ceremony Cancelled</span>`;
         } else {
@@ -1110,6 +1113,12 @@ function renderDevoteePaymentTrackingTab(bookings) {
             <div style="display:flex;align-items:center;gap:6px;color:var(--ochre);font-weight:600;font-size:13px">
               <span class="material-icons">pending_actions</span> Proof Submitted (Ref: ${esc(b.paymentProof || 'Submitted')})
             </div>
+          `;
+        } else if (isRejected) {
+          actionButton = `
+            <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
+              <span class="material-icons">refresh</span> Re-submit Payment Proof (${inr(remaining)})
+            </button>
           `;
         } else if (b.status !== 'Cancelled') {
           if (isPanditApproved) {
@@ -1222,6 +1231,10 @@ function renderDevoteeBookingsTab(bookings) {
                 </button>
               ` : b.paymentStatus === 'Verification Pending' ? `
                 <span class="badge amber" style="font-size:11px"><span class="material-icons" style="font-size:13px">hourglass_top</span> Verifying</span>
+              ` : (b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected') ? `
+                <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
+                  <span class="material-icons">payments</span> Re-submit Pay (${inr(Math.max(0, (b.fee || 1500) - (b.advancePaid ? (b.advanceAmount || 0) : 0)))})
+                </button>
               ` : (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved') ? `
                 <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
                   <span class="material-icons">payments</span> Pay (${inr(Math.max(0, (b.fee || 1500) - (b.advancePaid ? (b.advanceAmount || 0) : 0)))})

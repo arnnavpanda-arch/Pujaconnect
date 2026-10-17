@@ -1199,6 +1199,23 @@
       }
     }
 
+    async function rejectBookingPayment(id) {
+      const defaultReason = 'Transaction reference unconfirmed in bank statement or mismatched amount';
+      const reason = prompt(`Reject payment verification for booking ${id}?\n\nPlease enter the rejection reason that will be sent to the devotee:`, defaultReason);
+      if (reason === null) return;
+
+      try {
+        await api('/bookings/' + id + '/reject-payment', {
+          method: 'POST',
+          body: { reason: reason.trim() || defaultReason }
+        });
+        toast('Payment marked as Rejected. Devotee notified to re-submit valid proof.');
+        loadData();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    }
+
     function viewAdminBill(id) {
       const b = (S.bookings || []).find(x => x.bookingId === id);
       if (!b) return toast('Booking record not found', true);
@@ -1296,6 +1313,7 @@
       const allBookings = S.bookings || [];
       const pending = allBookings.filter(b => b.paymentStatus === 'Verification Pending');
       const paid = allBookings.filter(b => b.paymentStatus === 'Paid');
+      const rejected = allBookings.filter(b => b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected');
 
       root.innerHTML = `
         <div class="admin-panel">
@@ -1303,6 +1321,7 @@
             <h3><span class="material-icons" style="color:var(--admin-gold)">payments</span> Devotee Payment Verifications &amp; Billing</h3>
             <div style="display:flex;gap:8px;align-items:center">
               ${pending.length ? `<span class="badge red">${pending.length} pending verification</span>` : '<span class="badge green">All payments verified</span>'}
+              ${rejected.length ? `<span class="badge" style="background:#ffebee;color:#c62828;border:1px solid #ffcdd2">${rejected.length} rejected</span>` : ''}
             </div>
           </div>
 
@@ -1313,13 +1332,16 @@
             <button class="btn btn-sm ${PAY_FILTER === 'paid' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('paid')">
               Verified &amp; Paid (${paid.length})
             </button>
+            <button class="btn btn-sm ${PAY_FILTER === 'rejected' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('rejected')">
+              Rejected (${rejected.length})
+            </button>
             <button class="btn btn-sm ${PAY_FILTER === 'all' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('all')">
               All Bookings (${allBookings.length})
             </button>
           </div>
 
           ${(() => {
-            const list = PAY_FILTER === 'pending' ? pending : PAY_FILTER === 'paid' ? paid : allBookings;
+            const list = PAY_FILTER === 'pending' ? pending : PAY_FILTER === 'paid' ? paid : PAY_FILTER === 'rejected' ? rejected : allBookings;
             if (!list.length) {
               return `<div class="empty" style="padding:40px 20px">No payments found in this category.</div>`;
             }
@@ -1341,6 +1363,7 @@
                     ${list.map(b => {
                       const isPending = b.paymentStatus === 'Verification Pending';
                       const isPaid = b.paymentStatus === 'Paid';
+                      const isRejected = b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected';
                       return `
                         <tr>
                           <td>
@@ -1370,6 +1393,7 @@
                           <td>
                             ${isPaid ? '<span class="badge green">Paid &amp; Verified</span>' :
                               isPending ? '<span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100">Verification Pending</span>' :
+                              isRejected ? `<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a">Payment Rejected</span>${b.paymentRejectionReason ? `<br><small class="muted" style="color:#c62828;font-size:11px">Reason: ${esc(b.paymentRejectionReason)}</small>` : ''}` :
                               '<span class="badge">' + esc(b.paymentStatus || 'Pending') + '</span>'}
                           </td>
                           <td>
@@ -1378,10 +1402,18 @@
                                 <button class="btn btn-green btn-sm" onclick="verifyBookingPayment('${esc(b.bookingId)}')">
                                   <span class="material-icons" style="font-size:14px">verified</span> Verify &amp; Issue Bill
                                 </button>
+                                <button class="btn btn-red btn-sm" onclick="rejectBookingPayment('${esc(b.bookingId)}')">
+                                  <span class="material-icons" style="font-size:14px">cancel</span> Reject Payment
+                                </button>
                               ` : ''}
                               ${isPaid ? `
                                 <button class="btn btn-outline btn-sm" onclick="viewAdminBill('${esc(b.bookingId)}')">
                                   <span class="material-icons" style="font-size:14px">receipt</span> View Bill
+                                </button>
+                              ` : ''}
+                              ${isRejected ? `
+                                <button class="btn btn-outline dark btn-sm" onclick="verifyBookingPayment('${esc(b.bookingId)}')">
+                                  <span class="material-icons" style="font-size:14px">refresh</span> Re-verify / Approve
                                 </button>
                               ` : ''}
                             </div>
