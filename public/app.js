@@ -472,13 +472,35 @@ function panditCard(p) {
     `;
   }
 
+  const homeDist = p.district || 'Khordha';
+  const homeState = p.state || (p.location && p.location.includes(',') ? p.location.split(',').pop().trim() : 'Odisha');
+
   return `<div class="card pandit-card"><div class="head"><img src="${esc(p.photo)}" alt="" onerror="this.style.visibility='hidden'">
-    <div><h3>${esc(p.name)} <span class="material-icons" style="font-size:16px;vertical-align:middle" title="Verified">verified</span></h3><small>${esc(p.location || p.district)}</small></div></div>
-    <div class="body"><div><span class="badge">${esc(exp)}</span><span class="badge green"><span class="material-icons">verified</span>Verified</span><span class="badge">🗣 Sanskrit, Odia, Hindi</span></div>
-    <p style="margin:6px 0;font-size:14px"><strong>${esc(p.specialty)}</strong><br><span class="muted">${esc(p.bio)}</span></p>
-    ${districtFeesSnippet}
-    <div class="row" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><span class="price-wrap">${priceHtml}</span>
-    <button class="btn btn-gold btn-sm" data-action="bookPandit" data-id="${esc(p._id)}">Book Pandit</button></div></div></div>`;
+    <div>
+      <h3>${esc(p.name)} <span class="material-icons" style="font-size:16px;vertical-align:middle;color:var(--ochre)" title="Verified">verified</span></h3>
+      <div style="font-size:13px;color:var(--mahogany);font-weight:600;display:flex;align-items:center;gap:4px;margin-top:2px">
+        <span class="material-icons" style="font-size:15px;color:var(--ochre)">home</span>
+        <span>Home: <b>${esc(homeDist)}</b>, <b>${esc(homeState)}</b></span>
+      </div>
+    </div></div>
+    <div class="body">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span class="badge">${esc(exp)}</span>
+        <span class="badge green"><span class="material-icons">verified</span>Verified</span>
+        <span class="badge" style="background:#fffcf5;border:1px solid #ebd9be;color:var(--mahogany);font-weight:600">
+          <span class="material-icons" style="font-size:13px;vertical-align:middle;margin-right:2px;color:var(--ochre)">place</span>
+          Home: ${esc(homeDist)}, ${esc(homeState)}
+        </span>
+        <span class="badge">🗣 Sanskrit, Odia, Hindi</span>
+      </div>
+      <p style="margin:8px 0 6px;font-size:14px"><strong>${esc(p.specialty)}</strong><br><span class="muted">${esc(p.bio)}</span></p>
+      <div style="background:#faf5ee;border:1px solid #ebd9be;border-radius:8px;padding:7px 12px;font-size:12.5px;color:#4a2c16;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <span class="material-icons" style="font-size:16px;color:var(--ochre)">location_on</span>
+        <span><strong>Home District:</strong> ${esc(homeDist)} &nbsp;|&nbsp; <strong>State:</strong> ${esc(homeState)}</span>
+      </div>
+      ${districtFeesSnippet}
+      <div class="row" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><span class="price-wrap">${priceHtml}</span>
+      <button class="btn btn-gold btn-sm" data-action="bookPandit" data-id="${esc(p._id)}">Book Pandit</button></div></div></div>`;
 }
 
 /* ---------- booking flow ---------- */
@@ -942,7 +964,6 @@ function afterAuth(r) {
 
 /* ---------- pandit registration ---------- */
 function openPanditRegister() {
-  const shorts = S.pujas.map((p) => p.name);
   openModal('Pandit Registration', `
     <div class="form-grid" style="padding:0">
       <div><label>Full Name</label><input id="p-name" placeholder="Pt. Name"></div>
@@ -951,9 +972,7 @@ function openPanditRegister() {
       <div><label>Experience (years)</label><input id="p-exp" type="number" min="0" value="5"></div>
       <div><label>State</label><select id="p-state">${opts(Object.keys(LOCATIONS), 'Odisha')}</select></div>
       <div><label>Home District</label><select id="p-district"></select></div>
-      <div><label>City</label><input id="p-city" placeholder="e.g. Bhubaneswar"></div>
-      <div><label>Base Dakshina per puja (₹)</label><input id="p-fee" type="number" min="0" value="1500"></div>
-      <div class="full"><label>Pujas you perform</label><div class="checks">${shorts.map((n) => `<label class="check"><input type="checkbox" name="p-svc" value="${esc(n)}">${esc(n)}</label>`).join('')}</div></div>
+      <div class="full"><label>City / Town</label><input id="p-city" placeholder="e.g. Bhubaneswar"></div>
       <div class="full"><label>Specialty</label><input id="p-spec" placeholder="e.g. Rudrabhishek & Griha Pravesh"></div>
       <div class="full"><label>Short Bio</label><textarea id="p-bio" rows="2" placeholder="Tell devotees about your Vedic background and rituals."></textarea></div>
       <div class="full">
@@ -967,9 +986,43 @@ function openPanditRegister() {
           </div>
         </div>
       </div>
+      <div class="full" style="background:#fff8e1;border:1.5px solid #ffe082;border-left:5px solid #e65100;border-radius:10px;padding:14px 16px;margin-top:6px">
+        <div style="display:flex;align-items:flex-start;gap:10px">
+          <span class="material-icons" style="color:#e65100;font-size:24px;margin-top:2px">gavel</span>
+          <div style="flex:1">
+            <div style="font-weight:700;color:#b26a00;font-size:14px;margin-bottom:4px">
+              ⚠️ Important Notice: Admin Decision is the Final Decision
+            </div>
+            <p style="margin:0 0 10px;font-size:13px;color:#5d2800;line-height:1.5">
+              All Pandit onboarding, verification, ritual allocations, district assignments, and platform guidelines are governed by PujaConnect Administration. <strong>The Admin decision is the final decision.</strong>
+            </p>
+            <label style="cursor:pointer;display:inline-flex;align-items:center;gap:10px;background:#ffffff;border:1.5px solid #e65100;border-radius:8px;padding:9px 14px;font-weight:700;font-size:13px;color:#3e2723;user-select:none">
+              <input type="checkbox" id="p-admin-consent" style="width:19px;height:19px;cursor:pointer;accent-color:#e65100">
+              <span>I acknowledge and accept that the Admin decision is the final decision.</span>
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
-    <button class="btn btn-gold" id="p-submit" style="margin-top:16px;width:100%"><span class="material-icons">send</span> Submit Registration</button>`, (m) => {
+    <button class="btn btn-gold" id="p-submit" style="margin-top:16px;width:100%;transition:all 0.2s ease"><span class="material-icons">send</span> Submit Registration</button>`, (m) => {
     let photoDataUrl = '';
+    const consentBox = $('#p-admin-consent', m);
+    const submitBtn = $('#p-submit', m);
+
+    const updateSubmitState = () => {
+      if (consentBox && submitBtn) {
+        if (!consentBox.checked) {
+          submitBtn.style.opacity = '0.65';
+          submitBtn.title = 'Please check the Admin decision agreement box to enable submission';
+        } else {
+          submitBtn.style.opacity = '1';
+          submitBtn.title = 'Submit Registration';
+        }
+      }
+    };
+    updateSubmitState();
+    if (consentBox) consentBox.onchange = updateSubmitState;
+
     const paint = () => {
       const ds = LOCATIONS[$('#p-state', m).value] || [];
       $('#p-district', m).innerHTML = opts(ds, ds[0] || '', 'Select District');
@@ -993,27 +1046,29 @@ function openPanditRegister() {
     };
 
     $('#p-submit', m).onclick = async () => {
-      const checked = (n) => [...m.querySelectorAll(`input[name="${n}"]:checked`)].map((i) => i.value);
+      if (!consentBox || !consentBox.checked) {
+        return toast('Please check the confirmation box: "Admin decision is the final decision" before submitting.', true);
+      }
       const home = $('#p-district', m).value;
       if (!home) return toast('Please select your home district', true);
       const body = {
-        name: $('#p-name', m).value,
-        email: $('#p-email', m).value,
-        phone: $('#p-phone', m).value,
+        name: $('#p-name', m).value.trim(),
+        email: $('#p-email', m).value.trim(),
+        phone: $('#p-phone', m).value.trim(),
         state: $('#p-state', m).value,
         workingState: $('#p-state', m).value,
         district: home,
-        city: $('#p-city', m).value,
+        city: $('#p-city', m).value.trim(),
         workingDistricts: [home],
         experience: $('#p-exp', m).value,
-        fee: $('#p-fee', m).value,
-        services: checked('p-svc'),
-        specialty: $('#p-spec', m).value || undefined,
-        bio: $('#p-bio', m).value || undefined,
-        photo: photoDataUrl || undefined
+        fee: 1500,
+        services: ['Vedic Rituals', 'Home Puja'],
+        specialty: $('#p-spec', m).value.trim() || undefined,
+        bio: $('#p-bio', m).value.trim() || undefined,
+        photo: photoDataUrl || undefined,
+        adminDecisionAccepted: true
       };
       if (!body.name || !body.email || !body.phone) return toast('Name, email and phone are required', true);
-      if (!body.services.length) return toast('Select at least one puja', true);
       try {
         await api('/pandits/register', { method: 'POST', body });
         closeModal();
@@ -1107,11 +1162,39 @@ function isBookingRejected(b) {
 
 async function userDash(root) {
   const e = encodeURIComponent(S.user.email);
-  const [bookings, longs] = await Promise.all([
+  const [bookings, longs, panditsRes] = await Promise.all([
     api('/bookings?userEmail=' + e).catch(() => []),
-    api('/long-puja-requests?userEmail=' + e).catch(() => [])
+    api('/long-puja-requests?userEmail=' + e).catch(() => []),
+    api('/pandits?verified=true').catch(() => [])
   ]);
   S.bookings = bookings;
+  if (panditsRes && panditsRes.length) S.pandits = panditsRes;
+  const verifiedList = S.pandits || [];
+
+  const devoteeDistrict = (S.user.district || '').trim();
+  const devoteeState = (S.user.state || '').trim();
+
+  const panditsInDistrict = verifiedList.filter((p) => {
+    if (!p.verified) return false;
+    const dLower = devoteeDistrict.toLowerCase();
+    const isHome = p.district && p.district.toLowerCase() === dLower;
+    const isWorking = Array.isArray(p.workingDistricts) && p.workingDistricts.some((d) => String(d).toLowerCase() === dLower);
+    return isHome || isWorking;
+  });
+
+  const panditsInState = verifiedList.filter((p) => {
+    if (!p.verified) return false;
+    const sLower = devoteeState.toLowerCase();
+    const isHomeState = p.state && p.state.toLowerCase() === sLower;
+    const isWorkingState = p.workingState && p.workingState.toLowerCase() === sLower;
+    return isHomeState || isWorkingState;
+  });
+
+  const isRegionUnavailable = Boolean(
+    (devoteeDistrict && panditsInDistrict.length === 0) ||
+    (!devoteeDistrict && devoteeState && panditsInState.length === 0)
+  );
+
   const tab = S.dashTab || 'bookings';
   const upcoming = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').length;
   const pendingPayments = bookings.filter((b) => b.paymentStatus !== 'Paid' && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')).length;
@@ -1133,6 +1216,38 @@ async function userDash(root) {
         <button class="btn btn-outline btn-sm" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>
       </div>
     </div>
+
+    ${isRegionUnavailable ? `
+      <div class="dash-404-banner" style="background:linear-gradient(135deg, #fff5f5 0%, #fffbf0 100%);border:2px solid #ffab91;border-left:8px solid #d32f2f;border-radius:14px;padding:22px;margin-bottom:20px;box-shadow:0 4px 18px rgba(211,47,47,0.08)">
+        <div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap">
+          <div style="background:#ffebee;border:2px solid #ef5350;border-radius:12px;width:72px;height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#c62828;flex-shrink:0;box-shadow:0 3px 10px rgba(211,47,47,0.12)">
+            <span style="font-size:24px;font-weight:900;line-height:1;letter-spacing:-0.5px">404</span>
+            <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;margin-top:2px">Error</span>
+          </div>
+          <div style="flex:1;min-width:280px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span class="badge" style="background:#d32f2f;color:#fff;font-weight:700;font-size:11px;padding:3px 8px;letter-spacing:0.5px">404 ERROR</span>
+              <span class="badge" style="background:#fff3e0;color:#e65100;border:1px solid #ffb74d;font-weight:600">Selected Location: ${esc(devoteeDistrict || 'Not Set')}${devoteeState ? ', ' + esc(devoteeState) : ''}</span>
+            </div>
+            <h3 style="margin:8px 0 6px;color:#b71c1c;font-size:20px;font-weight:800">
+              404 – No Service Available at Your Region
+            </h3>
+            <p style="margin:0 0 12px;color:#5d2800;font-size:14.5px;line-height:1.6">
+              No service available at your region (<strong>${esc(devoteeDistrict || 'your district')}${devoteeState ? ', ' + esc(devoteeState) : ''}</strong>). Currently, no verified Vedic Pandits are available for this district or state. <strong>If any service is available, then our team will notify you.</strong>
+            </p>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px dashed #ffccbc">
+              <div style="display:inline-flex;align-items:center;gap:8px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:7px 14px;font-size:13px;color:#1b5e20;font-weight:600">
+                <span class="material-icons" style="font-size:18px;color:#2e7d32">notifications_active</span>
+                <span>✓ Auto-Notification Subscribed: We will notify <b>${esc(S.user.email)}</b> as soon as Pandits become available in ${esc(devoteeDistrict || devoteeState)}.</span>
+              </div>
+              <button class="btn btn-outline dark btn-sm" data-action="changeDevoteeLocation" style="background:#fff;border-color:#d32f2f;color:#b71c1c;font-weight:700;padding:7px 14px">
+                <span class="material-icons" style="font-size:16px;vertical-align:middle;margin-right:4px">edit_location</span> Change Selected Location
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    ` : ''}
 
     ${rebookNeeded > 0 ? `
       <div style="background:#fff3e0;border:1.5px solid #ffcc80;border-left:5px solid #e65100;border-radius:12px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
@@ -2977,23 +3092,90 @@ const ACTIONS = {
     showView('dashboard');
   },
   registerDevotee: () => openAuth('register'),
+  changeDevoteeLocation: () => {
+    const u = S.user;
+    if (!u) return openAuth('login');
+    const currentState = u.state || 'Odisha';
+    openModal('Change Selected Location', `
+      <div style="background:#fffcf5;border:1px solid #ebd9be;border-radius:10px;padding:12px;margin-bottom:14px">
+        <span class="muted" style="font-size:13px">Select your State and District to check Vedic Pandit availability in your region.</span>
+      </div>
+      <div class="form-grid" style="padding:0">
+        <div>
+          <label style="font-weight:600">State *</label>
+          <select id="ch-loc-state">${opts(Object.keys(LOCATIONS), currentState)}</select>
+        </div>
+        <div>
+          <label style="font-weight:600">District *</label>
+          <select id="ch-loc-district"></select>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label style="font-weight:600">City / Town</label>
+        <input id="ch-loc-city" value="${esc(u.city || '')}" placeholder="e.g. Bhubaneswar">
+      </div>
+      <button class="btn btn-gold" id="btn-save-loc" style="margin-top:16px;width:100%"><span class="material-icons">check_circle</span> Update Location &amp; Check Availability</button>
+    `, (m) => {
+      const stateSel = $('#ch-loc-state', m);
+      const distSel = $('#ch-loc-district', m);
+      const updateDist = () => {
+        const ds = LOCATIONS[stateSel.value] || [];
+        distSel.innerHTML = opts(ds, u.district || ds[0] || '', 'Select District');
+      };
+      updateDist();
+      stateSel.onchange = updateDist;
+
+      $('#btn-save-loc', m).onclick = async () => {
+        const state = stateSel.value;
+        const district = distSel.value;
+        const city = $('#ch-loc-city', m).value.trim();
+        if (!district) return toast('Please select your district', true);
+        try {
+          const updated = await api('/users/profile', {
+            method: 'PUT',
+            body: { name: u.name, phone: u.phone, state, district, city }
+          });
+          saveSession(updated, S.token);
+          closeModal();
+          toast('Location updated to ' + district + ', ' + state + '! 🙏');
+          renderDashboard();
+        } catch (e) { toast(e.message, true); }
+      };
+    });
+  },
   editDevoteeProfile: () => {
     const u = S.user;
+    const currentState = u.state || 'Odisha';
     openModal('Edit Devotee Profile', `
-      <div><label>Full Name</label><input id="ep-dev-name" value="${esc(u.name || '')}"></div>
-      <div><label>Phone Number</label><input id="ep-dev-phone" value="${esc(u.phone || '')}"></div>
+      <div><label style="font-weight:600">Full Name</label><input id="ep-dev-name" value="${esc(u.name || '')}"></div>
+      <div><label style="font-weight:600">Phone Number</label><input id="ep-dev-phone" value="${esc(u.phone || '')}"></div>
       <div class="form-grid" style="padding:0">
-        <div><label>State</label><input id="ep-dev-state" value="${esc(u.state || '')}"></div>
-        <div><label>District</label><input id="ep-dev-dist" value="${esc(u.district || '')}"></div>
+        <div>
+          <label style="font-weight:600">State</label>
+          <select id="ep-dev-state">${opts(Object.keys(LOCATIONS), currentState)}</select>
+        </div>
+        <div>
+          <label style="font-weight:600">District</label>
+          <select id="ep-dev-dist"></select>
+        </div>
       </div>
-      <div><label>City / Town</label><input id="ep-dev-city" value="${esc(u.city || '')}"></div>
-      <button class="btn btn-gold" id="btn-save-dev-prof" style="margin-top:10px;width:100%"><span class="material-icons">save</span> Save Profile</button>
+      <div><label style="font-weight:600">City / Town</label><input id="ep-dev-city" value="${esc(u.city || '')}"></div>
+      <button class="btn btn-gold" id="btn-save-dev-prof" style="margin-top:14px;width:100%"><span class="material-icons">save</span> Save Profile</button>
     `, (m) => {
+      const stateSel = $('#ep-dev-state', m);
+      const distSel = $('#ep-dev-dist', m);
+      const updateDist = () => {
+        const ds = LOCATIONS[stateSel.value] || [];
+        distSel.innerHTML = opts(ds, u.district || ds[0] || '', 'Select District');
+      };
+      updateDist();
+      stateSel.onchange = updateDist;
+
       $('#btn-save-dev-prof', m).onclick = async () => {
         const name = $('#ep-dev-name', m).value.trim();
         const phone = $('#ep-dev-phone', m).value.trim();
-        const state = $('#ep-dev-state', m).value.trim();
-        const district = $('#ep-dev-dist', m).value.trim();
+        const state = stateSel.value;
+        const district = distSel.value;
         const city = $('#ep-dev-city', m).value.trim();
         if (!name || !phone) return toast('Name and phone are required', true);
         try {
