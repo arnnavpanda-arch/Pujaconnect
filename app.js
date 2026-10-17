@@ -103,6 +103,58 @@ app.post('/api/auth/devotee-login', wrap(async (req, res) => {
   res.json({ user: publicUser(user), token: sign({ email: user.email, role: user.role }) });
 }));
 
+// Magic Rebook Login: auto authenticates devotee directly when clicking "Click Here to Rebook" in email
+app.post('/api/auth/magic-rebook', wrap(async (req, res) => {
+  const { bookingId, email, token } = req.body || {};
+  let userEmail = email ? lc(email) : '';
+  let valid = false;
+
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET());
+      if (decoded && decoded.email) {
+        userEmail = lc(decoded.email);
+        valid = true;
+      }
+    } catch (e) {
+      // Token verify failed or expired, will attempt fallback verification below
+    }
+  }
+
+  let booking = null;
+  if (bookingId) {
+    booking = await Booking.findOne(bookingFindQuery(bookingId));
+    if (booking) {
+      if (!userEmail) userEmail = lc(booking.userEmail);
+      if (lc(booking.userEmail) === userEmail) {
+        valid = true;
+      }
+    }
+  }
+
+  if (!valid || !userEmail) {
+    return res.status(401).json({ error: 'Invalid or expired rebooking authorization link' });
+  }
+
+  let user = await User.findOne({ email: userEmail });
+  if (!user) {
+    user = await User.create({
+      name: (booking && booking.userName) || 'Devotee',
+      email: userEmail,
+      phone: (booking && booking.phone) || '',
+      district: (booking && booking.district) || 'Khordha',
+      role: 'user'
+    });
+  }
+
+  res.json({
+    ok: true,
+    user: publicUser(user),
+    token: sign({ email: user.email, role: user.role }),
+    booking
+  });
+}));
+
 // Pandit Login Step 1: Send Email OTP
 app.post('/api/auth/pandit/send-otp', wrap(async (req, res) => {
   const { email } = req.body;
@@ -739,20 +791,38 @@ app.put('/api/bookings/:id/pandit-response', wrap(async (req, res) => {
 }));
 
 app.put('/api/bookings/:id/status', wrap(async (req, res) => {
-  const { status } = req.body;
-  if (!['Pending Assignment', 'Pending Pandit Confirmation', 'Confirmed', 'Completed', 'Cancelled', 'In Progress'].includes(status)) {
+  const { status, reason } = req.body;
+  if (!['Pending Assignment', 'Pending Pandit Confirmation', 'Confirmed', 'Completed', 'Cancelled', 'Rejected', 'In Progress'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
   const isApproved = ['Confirmed', 'In Progress'].includes(status);
-  const b = await Booking.findOneAndUpdate(
-    bookingFindQuery(req.params.id),
-    { status, panditApproval: isApproved ? 'Approved' : status === 'Cancelled' ? 'Rejected' : 'Pending' },
-    { new: true }
-  );
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  b.status = status;
+  b.panditApproval = isApproved ? 'Approved' : (status === 'Cancelled' || status === 'Rejected') ? 'Rejected' : 'Pending';
+
+  if (status === 'Rejected') {
+    b.slotUnavailable = true;
+    b.adminApproval = 'Rejected';
+    b.rejectionReason = reason ? String(reason).trim() : 'No verified Vedic Pandit available for this time slot. Please reschedule or rebook with a different date/time.';
+    b.panditEmail = '';
+    b.panditName = 'No Pandit Available for Slot';
+  }
+  await b.save();
 
   if (isApproved) {
     await sendSafe('PANDIT_CONFIRMED_BOOKING', b.userEmail, { bookingId: b.bookingId, userName: b.userName, panditName: b.panditName, service: b.service, date: b.date, time: b.time, district: b.district, address: b.address, fee: b.fee });
+  } else if (status === 'Rejected') {
+    const rebookToken = sign({ email: b.userEmail, role: 'user', bookingId: b.bookingId, purpose: 'rebook' });
+    const appUrl = `https://pujaconnect-one.vercel.app/?action=rebook&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.userEmail)}&token=${encodeURIComponent(rebookToken)}`;
+    await sendSafe('BOOKING_SLOT_UNAVAILABLE_REBOOK', b.userEmail, {
+      ...b.toObject(),
+      rejectionReason: b.rejectionReason,
+      appUrl,
+      rebookUrl: appUrl,
+      rebookToken
+    });
   } else if (status === 'Cancelled') {
     await sendSafe('PANDIT_REJECTED_BOOKING', b.userEmail, { bookingId: b.bookingId, userName: b.userName, panditName: b.panditName, service: b.service, date: b.date, district: b.district });
   }
@@ -974,13 +1044,20 @@ app.post('/api/bookings/:id/reject-slot', adminOnly, wrap(async (req, res) => {
   b.panditName = 'No Pandit Available for Slot';
   await b.save();
 
+  // Generate secure rebooking URL for devotee targeting pujaconnect-one.vercel.app
+  const rebookToken = sign({ email: b.userEmail, role: 'user', bookingId: b.bookingId, purpose: 'rebook' });
+  const appUrl = `https://pujaconnect-one.vercel.app/?action=rebook&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.userEmail)}&token=${encodeURIComponent(rebookToken)}`;
+
   // Send Rebook Puja notification email to devotee
   await sendSafe('BOOKING_SLOT_UNAVAILABLE_REBOOK', b.userEmail, {
     ...b.toObject(),
-    rejectionReason: reason
+    rejectionReason: reason,
+    appUrl,
+    rebookUrl: appUrl,
+    rebookToken
   });
 
-  res.json({ ok: true, booking: b, message: 'Booking marked as slot unavailable and rebook notice sent to devotee.' });
+  res.json({ ok: true, booking: b, rebookUrl: appUrl, message: 'Booking marked as slot unavailable and rebook notice sent to devotee.' });
 }));
 
 // Devotee rebooks puja with updated details (date, time, venue, etc.)

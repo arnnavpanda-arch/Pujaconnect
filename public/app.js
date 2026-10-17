@@ -1094,6 +1094,17 @@ async function renderDashboard() {
   }
 }
 
+function isBookingRejected(b) {
+  if (!b) return false;
+  return Boolean(
+    b.slotUnavailable ||
+    b.status === 'Rejected' ||
+    b.adminApproval === 'Rejected' ||
+    b.panditApproval === 'Rejected' ||
+    (b.status === 'Cancelled' && (b.slotUnavailable || (b.rejectionReason && b.rejectionReason.length > 0)))
+  );
+}
+
 async function userDash(root) {
   const e = encodeURIComponent(S.user.email);
   const [bookings, longs] = await Promise.all([
@@ -1104,7 +1115,7 @@ async function userDash(root) {
   const tab = S.dashTab || 'bookings';
   const upcoming = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').length;
   const pendingPayments = bookings.filter((b) => b.paymentStatus !== 'Paid' && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')).length;
-  const rebookNeeded = bookings.filter(b => b.slotUnavailable || b.status === 'Rejected' || (b.status === 'Cancelled' && (b.slotUnavailable || (b.rejectionReason && b.rejectionReason.toLowerCase().includes('pandit'))))).length;
+  const rebookNeeded = bookings.filter(isBookingRejected).length;
   const initial = (S.user.name || 'D').charAt(0).toUpperCase();
 
   root.innerHTML = `
@@ -1343,7 +1354,7 @@ function renderDevoteeBookingsTab(bookings) {
     `;
   }
 
-  const rejectedBookings = bookings.filter(b => b.slotUnavailable || b.status === 'Rejected' || (b.status === 'Cancelled' && (b.slotUnavailable || (b.rejectionReason && b.rejectionReason.toLowerCase().includes('pandit')))));
+  const rejectedBookings = bookings.filter(isBookingRejected);
 
   return `
     ${rejectedBookings.length ? `
@@ -1355,7 +1366,7 @@ function renderDevoteeBookingsTab(bookings) {
               ${rejectedBookings.length} Ceremony Request(s) Require Rebooking
             </div>
             <div style="font-size:13px;color:#6d2800;margin-top:2px">
-              No verified Vedic Pandit was available for the requested time slot. Click "Rebook / Update Details" on the booking card below to choose another convenient date or time slot.
+              No verified Vedic Pandit was available for the requested time slot. Click "Rebook This Puja" on your booking card below to choose another convenient date or time slot.
             </div>
           </div>
         </div>
@@ -1364,7 +1375,7 @@ function renderDevoteeBookingsTab(bookings) {
 
     <div class="booking-cards-grid">
       ${bookings.map((b) => {
-        const isSlotRejected = b.slotUnavailable || b.status === 'Rejected' || (b.status === 'Cancelled' && (b.slotUnavailable || (b.rejectionReason && b.rejectionReason.toLowerCase().includes('pandit'))));
+        const isSlotRejected = isBookingRejected(b);
         const fee = b.fee || 1199;
 
         let badgeHtml = '';
@@ -1377,7 +1388,7 @@ function renderDevoteeBookingsTab(bookings) {
         }
 
         return `
-        <div class="booking-card" ${isSlotRejected ? 'style="border-color:#ffcc80;box-shadow:0 4px 16px rgba(230,81,0,0.08)"' : ''}>
+        <div class="booking-card" ${isSlotRejected ? 'style="border:2px solid #ff9800;background:#fffdf9;box-shadow:0 4px 18px rgba(230,81,0,0.12)"' : ''}>
           <div>
             <div class="booking-card-top">
               <span class="booking-id-tag">${esc(b.bookingId)}</span>
@@ -1386,13 +1397,16 @@ function renderDevoteeBookingsTab(bookings) {
             <h4>${esc(b.service)}</h4>
 
             ${isSlotRejected ? `
-              <div style="background:#fff3e0;border:1px solid #ffcc80;border-left:4px solid #e65100;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;color:#bf360c;line-height:1.5">
-                <div style="font-weight:700;display:flex;align-items:center;gap:6px">
-                  <span class="material-icons" style="font-size:16px">info</span> No Pandit Available for this Time Slot:
+              <div style="background:#fff3e0;border:1.5px solid #ffb74d;border-left:5px solid #e65100;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13.5px;color:#bf360c;line-height:1.5">
+                <div style="font-weight:700;display:flex;align-items:center;gap:6px;font-size:14px">
+                  <span class="material-icons" style="font-size:18px;color:#e65100">event_busy</span> Ceremony Request Rejected (Slot Unavailable)
                 </div>
-                <div style="margin-top:2px">${esc(b.rejectionReason || 'No verified Pandit is available for this date and time slot in your district.')}</div>
-                <div style="margin-top:6px;font-weight:600;color:#d84315">
-                  👉 Click "Rebook / Update Ceremony Details" below to pick a new date or time slot.
+                <div style="margin-top:4px;color:#5c1d00">${esc(b.rejectionReason || 'No verified Pandit is currently available for this date and time slot in your district.')}</div>
+                <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                  <button class="btn btn-gold btn-sm rebook-action-btn" data-action="rebookBooking" data-id="${esc(b.bookingId)}" style="background:linear-gradient(135deg, #e65100 0%, #b71c1c 100%);color:#fff;font-weight:700;padding:8px 16px;border-radius:8px;box-shadow:0 3px 10px rgba(230,81,0,0.3)">
+                    <span class="material-icons" style="font-size:16px;vertical-align:middle">event_repeat</span> Rebook This Puja
+                  </button>
+                  <span style="font-size:12.5px;color:#8d2800;font-weight:500">Pick a new date &amp; time slot to reschedule</span>
                 </div>
               </div>
             ` : ''}
@@ -1428,8 +1442,8 @@ function renderDevoteeBookingsTab(bookings) {
           <div class="booking-card-footer">
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               ${isSlotRejected ? `
-                <button class="btn btn-gold btn-sm" data-action="rebookBooking" data-id="${esc(b.bookingId)}">
-                  <span class="material-icons" style="font-size:15px;vertical-align:middle">event_repeat</span> Rebook / Update Ceremony Details
+                <button class="btn btn-gold btn-sm" data-action="rebookBooking" data-id="${esc(b.bookingId)}" style="background:linear-gradient(135deg, #e65100 0%, #b71c1c 100%);color:#fff;font-weight:700">
+                  <span class="material-icons" style="font-size:15px;vertical-align:middle">event_repeat</span> Rebook This Puja
                 </button>
               ` : ''}
               <button class="btn btn-dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}"><span class="material-icons">print</span> Slip</button>
@@ -2517,8 +2531,13 @@ const ACTIONS = {
   findFor: (d) => { S.filters.service = d.name; showView('pandits'); },
   planLong: (d) => { S.longPreset = d.name; showView('long'); },
   bookPandit: (d) => openBooking(d.id),
-  rebookBooking: (d) => {
-    const b = (S.bookings || []).find((x) => x.bookingId === d.id);
+  rebookBooking: async (d) => {
+    let b = (S.bookings || []).find((x) => x.bookingId === d.id);
+    if (!b && d.id) {
+      try {
+        b = await api('/bookings/' + encodeURIComponent(d.id));
+      } catch (e) {}
+    }
     if (!b) return toast('Booking record not found', true);
     openBooking({
       bookingId: b.bookingId,
@@ -3240,6 +3259,87 @@ document.addEventListener('keydown', (ev) => {
   renderHomePujas();
   renderHomePandits();
   setupHeroFilter();
-  const hash = location.hash.replace('#', '');
-  if (['pandits', 'pujas', 'long', 'about', 'dashboard'].includes(hash)) showView(hash);
+
+  // Check for direct email "Click Here to Rebook" link
+  const urlParams = new URLSearchParams(window.location.search);
+  const actionParam = urlParams.get('action');
+  const rebookId = urlParams.get('bookingId') || urlParams.get('rebook');
+  const emailParam = urlParams.get('email');
+  const tokenParam = urlParams.get('token');
+
+  if (actionParam === 'rebook' || (rebookId && emailParam)) {
+    // Clean search params from URL so refresh stays clean
+    try {
+      window.history.replaceState({}, document.title, window.location.pathname + '#dashboard');
+    } catch (e) {}
+
+    // Auto login devotee if not logged in or logged in as different account
+    if (!S.user || (emailParam && S.user.email.toLowerCase() !== emailParam.toLowerCase())) {
+      let loggedIn = false;
+      try {
+        const authRes = await api('/auth/magic-rebook', {
+          method: 'POST',
+          body: { bookingId: rebookId, email: emailParam, token: tokenParam }
+        });
+        if (authRes && authRes.user && authRes.token) {
+          saveSession(authRes.user, authRes.token);
+          renderNav();
+          loggedIn = true;
+        }
+      } catch (err) {
+        console.warn('Magic rebook auth error:', err);
+      }
+
+      if (!loggedIn && emailParam) {
+        try {
+          const devRes = await api('/auth/devotee-login', {
+            method: 'POST',
+            body: { email: emailParam }
+          });
+          if (devRes && devRes.user) {
+            saveSession(devRes.user, devRes.token);
+            renderNav();
+            loggedIn = true;
+          }
+        } catch (e2) {}
+      }
+    }
+
+    // Direct devotee to dashboard
+    showView('dashboard');
+    S.dashTab = 'bookings';
+    await renderDashboard();
+
+    // Directly open the rebooking form for this specific rejected booking
+    if (rebookId) {
+      setTimeout(async () => {
+        let b = (S.bookings || []).find((x) => x.bookingId === rebookId);
+        if (!b) {
+          try {
+            b = await api('/bookings/' + encodeURIComponent(rebookId));
+          } catch (e) {}
+        }
+        if (b) {
+          openBooking({
+            bookingId: b.bookingId,
+            service: b.service,
+            district: b.district,
+            date: b.date,
+            time: b.time,
+            address: b.address,
+            phone: b.phone || (S.user ? S.user.phone : ''),
+            panditEmail: b.preferredPanditEmail || '',
+            preferredPanditEmail: b.preferredPanditEmail || '',
+            fee: b.fee,
+            isRebook: true
+          });
+          toast(`Ceremony ready to rebook. Please pick a new date & time slot! 🙏`);
+        }
+      }, 300);
+    }
+  } else {
+    const hash = location.hash.replace('#', '');
+    if (['pandits', 'pujas', 'long', 'about', 'dashboard'].includes(hash)) showView(hash);
+  }
 })();
+

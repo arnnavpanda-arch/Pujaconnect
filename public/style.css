@@ -484,6 +484,10 @@ td .btn { margin: 0 4px 4px 0; }
   flex-wrap: wrap;
   gap: 8px;
 }
+.rebook-action-btn:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+}
 
 /* My Profile View Cards */
 .profile-card {
