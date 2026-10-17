@@ -1421,9 +1421,14 @@
           <div class="invoice-footer">
             <div class="invoice-stamp">PAID &amp; VERIFIED</div>
             <div style="font-size:12px;color:var(--muted);line-height:1.5">
-              <b>Payment Mode:</b> ${esc(b.paymentMethod || 'UPI / Bank Transfer')}<br>
+              <b>Devotee Payment Mode:</b> ${esc(b.paymentMethod || 'UPI / Bank Transfer')}<br>
               <b>Transaction Ref / UTR:</b> <code style="font-size:11px">${esc(b.paymentProof || 'VERIFIED')}</code><br>
-              <b>Verification Status:</b> Verified by PujaConnect Super Admin<br>
+              <b>Ceremony Status:</b> <span style="color:#2e7d32;font-weight:700">Completed (Ceremony Ended)</span><br>
+              ${b.panditPayoutStatus === 'Paid' ? `
+                <b>Admin Pandit Payout:</b> <span style="color:#1b5e20;font-weight:700">Paid (${inr(b.panditPayoutAmount || b.fee)}) via ${esc(b.panditPayoutMethod || 'Bank Transfer')} · Ref: <code>${esc(b.panditPayoutTxnId || 'SETTLED')}</code>${b.panditPayoutDate ? ` on ${new Date(b.panditPayoutDate).toLocaleDateString('en-IN')}` : ''}</span><br>
+              ` : `
+                <b>Admin Pandit Payout:</b> <span style="color:var(--ochre);font-weight:700">Pending Admin Transfer (Scheduled within 24 Hours)</span><br>
+              `}
               <span style="font-style:italic;color:var(--ochre)">"May Lord Ganesha and the Divine Deities bestow health, peace &amp; prosperity on your family."</span>
             </div>
           </div>

@@ -1503,8 +1503,9 @@ async function panditDash(root) {
   }
   S.me = me;
   const tab = S.dashTab || 'ceremonies';
-  const earned = bookings.filter((b) => b.status === 'Completed').reduce((s, b) => s + (b.fee || 0), 0);
-  const pending = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').reduce((s, b) => s + (b.fee || 0), 0);
+  const paidOut = bookings.filter((b) => b.panditPayoutStatus === 'Paid').reduce((s, b) => s + (b.panditPayoutAmount || b.fee || 0), 0);
+  const pendingPayout = bookings.filter((b) => (b.paymentStatus === 'Paid' || b.status === 'Completed') && b.panditPayoutStatus !== 'Paid').reduce((s, b) => s + (b.fee || 0), 0);
+  const completedCount = bookings.filter((b) => b.status === 'Completed' || b.paymentStatus === 'Paid').length;
 
   root.innerHTML = `
     <div class="dash-banner">
@@ -1525,9 +1526,9 @@ async function panditDash(root) {
     ${me.verified ? '' : '<div class="panel" style="background:#fffcf5;border-left:4px solid var(--ochre)"><strong>Your profile is under Admin KYC verification.</strong> Once approved, your profile will be actively listed in the verified pandits directory.</div>'}
 
     <div class="stats">
-      <div class="stat"><b>${inr(earned)}</b><span>Dakshina Earned</span></div>
-      <div class="stat"><b>${inr(pending)}</b><span>Upcoming Dakshina</span></div>
-      <div class="stat"><b>${bookings.length}</b><span>Total Ceremonies</span></div>
+      <div class="stat"><b>${inr(paidOut)}</b><span>Dakshina Paid by Admin</span></div>
+      <div class="stat"><b>${inr(pendingPayout)}</b><span>Payout Due from Admin</span></div>
+      <div class="stat"><b>${completedCount} / ${bookings.length}</b><span>Completed / Total Pujas</span></div>
     </div>
 
     <!-- Pandit Subtabs -->
@@ -1568,18 +1569,32 @@ function renderPanditCeremoniesTab(bookings) {
   }
   return `
     <div class="booking-cards-grid">
-      ${bookings.map((b) => `
+      ${bookings.map((b) => {
+        const isUserPaid = b.paymentStatus === 'Paid' || b.advancePaid;
+        const isAdminPaid = b.panditPayoutStatus === 'Paid';
+        const isCeremonyEnded = b.status === 'Completed' || isUserPaid;
+
+        return `
         <div class="booking-card">
           <div>
             <div class="booking-card-top">
               <span class="booking-id-tag">${esc(b.bookingId)}</span>
-              ${statusBadge(b.status)}
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                ${isCeremonyEnded ? `<span class="badge green"><span class="material-icons" style="font-size:13px;vertical-align:middle">task_alt</span> Ceremony Ended</span>` : statusBadge(b.status)}
+                ${isAdminPaid ? `<span class="badge green" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;font-weight:700"><span class="material-icons" style="font-size:13px;vertical-align:middle">payments</span> Paid</span>` : (isUserPaid ? `<span class="badge amber" style="background:#fff8ed;color:#8a5d3b;border:1px solid #ebd9c2"><span class="material-icons" style="font-size:13px;vertical-align:middle">hourglass_top</span> Payout Pending</span>` : '')}
+              </div>
             </div>
             <h4>${esc(b.service)}</h4>
             <div class="booking-meta-row" style="margin-top:8px">
               <span class="material-icons">person</span>
               <span>Devotee: <b>${esc(b.userName)}</b> · 📞 ${esc(b.phone || 'N/A')}</span>
             </div>
+            ${b.userEmail ? `
+              <div class="booking-meta-row">
+                <span class="material-icons">email</span>
+                <span>Devotee Email: <b>${esc(b.userEmail)}</b></span>
+              </div>
+            ` : ''}
             <div class="booking-meta-row">
               <span class="material-icons">schedule</span>
               <span>${esc(b.date)} at <b>${esc(b.time || '10:00 AM')}</b></span>
@@ -1590,8 +1605,59 @@ function renderPanditCeremoniesTab(bookings) {
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">payments</span>
-              <span>Dakshina: <b>${inr(b.fee)}</b></span>
+              <span>Puja Dakshina: <b>${inr(b.fee)}</b></span>
             </div>
+
+            <!-- Devotee Payment & Admin Payout (Uncompacted Details) -->
+            ${isUserPaid ? `
+              <div style="background:#f0fff4;border:1px solid #c8e6c9;border-radius:8px;padding:9px 12px;margin-top:10px;font-size:12.5px;color:#1b5e20">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="font-weight:700;display:flex;align-items:center;gap:4px">
+                    <span class="material-icons" style="font-size:16px;color:#2e7d32">verified</span>
+                    Devotee Payment: Received
+                  </span>
+                  <b>${inr(b.fee)}</b>
+                </div>
+                <div style="font-size:11.5px;margin-top:3px;color:#2e7d32">
+                  Ceremony ended · Mode: ${esc(b.paymentMethod || 'UPI/Transfer')} ${b.paymentProof ? `· Ref: <code>${esc(b.paymentProof)}</code>` : ''}
+                </div>
+              </div>
+            ` : `
+              <div style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:9px 12px;margin-top:10px;font-size:12px;color:var(--muted)">
+                <span class="material-icons" style="font-size:14px;vertical-align:middle">schedule</span>
+                Devotee Payment: <b>${esc(b.paymentStatus || 'Pending')}</b> (Awaiting payment from devotee to conclude ritual)
+              </div>
+            `}
+
+            ${isAdminPaid ? `
+              <div style="background:#e8f5e9;border:1.5px solid #2e7d32;border-radius:8px;padding:10px 12px;margin-top:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="color:#1b5e20;font-weight:800;font-size:13.5px;display:flex;align-items:center;gap:5px">
+                    <span class="material-icons" style="font-size:18px;color:#2e7d32">check_circle</span>
+                    Dakshina Payout: Paid
+                  </span>
+                  <b style="color:#1b5e20;font-size:15px">${inr(b.panditPayoutAmount || b.fee)}</b>
+                </div>
+                <div style="font-size:12px;color:#1b5e20;margin-top:4px;line-height:1.4">
+                  ✓ Admin has transferred your Dakshina via ${esc(b.panditPayoutMethod || 'Direct Bank Transfer')}.<br>
+                  Transaction Ref: <code style="background:#fff;padding:1px 5px;border-radius:4px;border:1px solid #c8e6c9">${esc(b.panditPayoutTxnId || 'SETTLED')}</code>
+                  ${b.panditPayoutDate ? ` · Date: <b>${new Date(b.panditPayoutDate).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })}</b>` : ''}
+                </div>
+              </div>
+            ` : (isUserPaid ? `
+              <div style="background:#fff8ed;border:1.5px solid #d99a19;border-radius:8px;padding:10px 12px;margin-top:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="color:var(--ochre);font-weight:700;font-size:13px;display:flex;align-items:center;gap:5px">
+                    <span class="material-icons" style="font-size:16px">hourglass_top</span>
+                    Dakshina Payout: Awaiting Admin Transfer
+                  </span>
+                  <b style="color:var(--mahogany);font-size:14.5px">${inr(b.fee)}</b>
+                </div>
+                <div class="muted" style="font-size:11.5px;margin-top:3px">
+                  Devotee payment verified. PujaConnect Admin dispatches Dakshina to your registered bank account within 24 hours. Once transferred, status updates to <b>Paid</b>.
+                </div>
+              </div>
+            ` : '')}
           </div>
           <div class="booking-card-footer">
             ${(b.status === 'Pending Pandit Confirmation' || b.panditApproval === 'Pending') ? `
@@ -1604,16 +1670,26 @@ function renderPanditCeremoniesTab(bookings) {
                 <button class="btn btn-red btn-sm" style="flex:1" data-action="panditRejectBooking" data-id="${esc(b.bookingId)}">✕ Reject Offer</button>
               </div>
             ` : ''}
-            ${b.status === 'Confirmed' ? `
-              <button class="btn btn-dark btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="In Progress">Start Ceremony</button>
-            ` : ''}
-            ${b.status === 'In Progress' ? `
-              <button class="btn btn-green btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="Completed">Mark Completed ✅</button>
-            ` : ''}
-            ${['Completed', 'Cancelled'].includes(b.status) ? `<small class="muted">Ceremony ${esc(b.status)}</small>` : ''}
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%">
+              ${isUserPaid ? `
+                <button class="btn btn-gold btn-sm" data-action="viewBill" data-id="${esc(b.bookingId)}">
+                  <span class="material-icons">receipt_long</span> View Ritual Bill
+                </button>
+              ` : ''}
+              <button class="btn btn-outline dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}">
+                <span class="material-icons">print</span> Ritual Slip
+              </button>
+              ${isCeremonyEnded ? `
+                <span class="badge green" style="margin-left:auto;font-size:11.5px"><span class="material-icons" style="font-size:13px;vertical-align:middle">done_all</span> Ceremony Ended</span>
+              ` : (b.status === 'Confirmed' ? `
+                <small class="muted" style="margin-left:auto">Awaiting Devotee Payment</small>
+              ` : ['Cancelled'].includes(b.status) ? `
+                <small class="muted" style="margin-left:auto">Ceremony Cancelled</small>
+              ` : '')}
+            </div>
           </div>
         </div>
-      `).join('')}
+      `;}).join('')}
     </div>
   `;
 }
@@ -2699,7 +2775,7 @@ const ACTIONS = {
                 body: { paymentProof: proof, paymentMethod: mode }
               });
               closeModal();
-              toast('Payment submitted! Awaiting Admin verification. 🙏');
+              toast('Dakshina payment received! Ceremony concluded and official bill generated. 🙏');
               renderDashboard();
             } catch (err) {
               submitBtn.disabled = false;
@@ -2755,7 +2831,7 @@ const ACTIONS = {
             <label>Billed To (Devotee)</label>
             <b>${esc(b.userName)}</b>
             <div>${esc(b.userEmail)}</div>
-            <div>📞 ${esc(b.userPhone || 'Registered Mobile')}</div>
+            <div>📞 ${esc(b.userPhone || b.phone || 'Registered Mobile')}</div>
             ${b.address ? `<div>📍 ${esc(b.address)}</div>` : ''}
           </div>
           <div class="invoice-party" style="text-align:right">
@@ -2804,9 +2880,14 @@ const ACTIONS = {
         <div class="invoice-footer">
           <div class="invoice-stamp">PAID &amp; VERIFIED</div>
           <div style="font-size:12px;color:var(--muted);line-height:1.5">
-            <b>Payment Mode:</b> ${esc(b.paymentMethod || 'UPI / Bank Transfer')}<br>
+            <b>Devotee Payment Mode:</b> ${esc(b.paymentMethod || 'UPI / Bank Transfer')}<br>
             <b>Transaction Ref / UTR:</b> <code style="font-size:11px">${esc(b.paymentProof || 'VERIFIED')}</code><br>
-            <b>Verification Status:</b> Verified by PujaConnect Super Admin<br>
+            <b>Ceremony Status:</b> <span style="color:#2e7d32;font-weight:700">Completed (Ceremony Ended)</span><br>
+            ${b.panditPayoutStatus === 'Paid' ? `
+              <b>Admin Pandit Payout:</b> <span style="color:#1b5e20;font-weight:700">Paid (${inr(b.panditPayoutAmount || b.fee)}) via ${esc(b.panditPayoutMethod || 'Bank Transfer')} · Ref: <code>${esc(b.panditPayoutTxnId || 'SETTLED')}</code>${b.panditPayoutDate ? ` on ${new Date(b.panditPayoutDate).toLocaleDateString('en-IN')}` : ''}</span><br>
+            ` : `
+              <b>Admin Pandit Payout:</b> <span style="color:var(--ochre);font-weight:700">Pending Admin Transfer (Scheduled within 24 Hours)</span><br>
+            `}
             <span style="font-style:italic;color:var(--ochre)">"May Lord Ganesha and the Divine Deities bestow health, peace &amp; prosperity on your family."</span>
           </div>
         </div>
