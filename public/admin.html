@@ -963,6 +963,28 @@
             ${Object.entries(p.districtPrices || {}).map(([d, f]) => `<span class="badge" style="background:#fff8ed;border:1px solid #ebd9c2"><b>${esc(d)}:</b> ${inr(f)}</span>`).join('') || '<span class="muted" style="font-size:12px">No custom district rates fixed yet. Standard base fee applies.</span>'}
           </div>
         </div>
+        <div style="margin-bottom:14px;background:#ffffff;border:1px solid #ebd9c2;border-radius:10px;padding:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <label style="font-weight:700;margin:0;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:16px;color:var(--admin-gold)">account_balance</span>
+              Pandit Bank &amp; Payout Account
+            </label>
+            <button class="btn btn-gold btn-sm" onclick="closeModal(); openAdminPanditBankModal('${esc(p._id)}');">
+              <span class="material-icons" style="font-size:14px">edit</span> ${p.bankAccount ? 'Edit Bank Details' : 'Enter Bank Details'}
+            </button>
+          </div>
+          ${p.bankAccount ? `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12.5px">
+              <div><span class="muted">Account Holder:</span> <b>${esc(p.accountHolder || p.name)}</b></div>
+              <div><span class="muted">Bank:</span> <b>${esc(p.bankName || 'Registered Bank')}</b></div>
+              <div><span class="muted">A/C No:</span> <b style="font-family:monospace;color:#1b5e20">${esc(p.bankAccount)}</b></div>
+              <div><span class="muted">IFSC:</span> <b style="font-family:monospace">${esc(p.ifscCode || 'N/A')}</b></div>
+              ${p.upiId ? `<div><span class="muted">UPI ID:</span> ${esc(p.upiId)}</div>` : ''}
+            </div>
+          ` : `
+            <div style="font-size:12.5px;color:#c62828">⚠️ No bank details provided yet by Pandit. Click button above to enter bank details.</div>
+          `}
+        </div>
         <div>
           <label>Services Offered</label>
           <div>${(p.services || []).map(s => `<span class="badge green">${esc(s)}</span>`).join('') || '<span class="muted">None listed</span>'}</div>
@@ -1658,11 +1680,17 @@
                                 </div>
                                 <div><span class="muted">IFSC:</span> <b style="font-family:monospace">${esc(p.ifscCode || 'N/A')}</b></div>
                                 ${p.upiId ? `<div><span class="muted">UPI:</span> ${esc(p.upiId)}</div>` : ''}
+                                <button class="btn btn-outline dark btn-sm" style="margin-top:5px;font-size:11px;padding:2px 8px" onclick="openAdminPanditBankModal('${esc(p ? (p._id || p.email) : b.panditEmail)}')">
+                                  <span class="material-icons" style="font-size:12px">edit</span> Edit Bank Details
+                                </button>
                               </div>
                             ` : `
                               <div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;padding:8px;font-size:11.5px;color:#e65100">
                                 <strong>⚠️ No Bank Details</strong><br>
-                                Pandit has not submitted bank details yet.
+                                Pandit has not submitted bank details yet.<br>
+                                <button class="btn btn-gold btn-sm" style="margin-top:6px;font-size:11px;padding:3px 10px" onclick="openAdminPanditBankModal('${esc(p ? (p._id || p.email) : b.panditEmail)}')">
+                                  <span class="material-icons" style="font-size:13px">account_balance</span> Enter Bank Details
+                                </button>
                               </div>
                             `}
                           </td>
@@ -1762,10 +1790,19 @@
               <div><span class="muted">UPI ID:</span> <b>${esc(p ? p.upiId : 'N/A')}</b></div>
             </div>
             ${!hasBank ? `
-              <div style="margin-top:10px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;padding:8px 10px;font-size:12px;color:#e65100">
-                ⚠️ Notice: The assigned pandit has not saved their bank details in the dashboard. The email will still notify them, but please ensure bank transfer details are confirmed.
+              <div style="margin-top:10px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;padding:8px 10px;font-size:12px;color:#e65100;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <span>⚠️ Notice: The assigned pandit has not saved their bank details yet.</span>
+                <button class="btn btn-gold btn-sm" onclick="closeModal(); openAdminPanditBankModal('${esc(p ? (p._id || p.email) : b.panditEmail)}', '${esc(b.bookingId)}');">
+                  <span class="material-icons" style="font-size:13px">account_balance</span> Enter Bank Details
+                </button>
               </div>
-            ` : ''}
+            ` : `
+              <div style="margin-top:10px;display:flex;justify-content:flex-end">
+                <button class="btn btn-outline dark btn-sm" onclick="closeModal(); openAdminPanditBankModal('${esc(p ? (p._id || p.email) : b.panditEmail)}', '${esc(b.bookingId)}');">
+                  <span class="material-icons" style="font-size:13px">edit</span> Update Pandit Bank Details
+                </button>
+              </div>
+            `}
           </div>
 
           <!-- Payout Form / Transfer Parameters -->
@@ -1828,6 +1865,85 @@
             toast(e.message || 'Failed to process payout', true);
             goBtn.disabled = false;
             goBtn.innerHTML = '<span class="material-icons">send</span> Confirm Payout & Send Email to Pandit';
+          }
+        };
+      });
+    }
+
+    function openAdminPanditBankModal(idOrEmail, returnBookingId) {
+      let p = (S.adminPandits || []).find(x => x._id === idOrEmail || (x.email || '').toLowerCase() === String(idOrEmail || '').toLowerCase());
+      if (!p) {
+        p = { _id: idOrEmail, email: idOrEmail, name: 'Assigned Pandit', bankAccount: '', ifscCode: '', bankName: '', accountHolder: '', upiId: '' };
+      }
+
+      openModal(`Pandit Bank & Payout Details – ${p.name}`, `
+        <div style="font-size:13.5px;color:#3b2115">
+          <p class="muted" style="margin-top:0">Configure direct bank payout account for <strong>${esc(p.name)}</strong> (${esc(p.email)}):</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+            <div>
+              <label style="font-weight:600;font-size:12.5px;display:block;margin-bottom:4px">Account Holder Name *</label>
+              <input type="text" id="adm-p-holder" value="${esc(p.accountHolder || p.name || '')}" placeholder="Full name on passbook">
+            </div>
+            <div>
+              <label style="font-weight:600;font-size:12.5px;display:block;margin-bottom:4px">Bank Name *</label>
+              <input type="text" id="adm-p-bank" value="${esc(p.bankName || '')}" placeholder="e.g. State Bank of India, HDFC">
+            </div>
+            <div>
+              <label style="font-weight:600;font-size:12.5px;display:block;margin-bottom:4px">Bank Account Number *</label>
+              <input type="text" id="adm-p-acc" value="${esc(p.bankAccount || '')}" placeholder="Full account number" style="font-family:monospace">
+            </div>
+            <div>
+              <label style="font-weight:600;font-size:12.5px;display:block;margin-bottom:4px">Bank IFSC Code *</label>
+              <input type="text" id="adm-p-ifsc" value="${esc(p.ifscCode || '')}" placeholder="e.g. SBIN0001234" style="font-family:monospace;text-transform:uppercase">
+            </div>
+            <div style="grid-column:1 / -1">
+              <label style="font-weight:600;font-size:12.5px;display:block;margin-bottom:4px">UPI ID (Optional)</label>
+              <input type="text" id="adm-p-upi" value="${esc(p.upiId || '')}" placeholder="e.g. name@okhdfcbank">
+            </div>
+          </div>
+          <button class="btn btn-gold btn-lg" id="btn-save-admin-p-bank" style="width:100%">
+            <span class="material-icons">save</span> Save Bank &amp; Payout Details
+          </button>
+        </div>
+      `, (m) => {
+        const saveBtn = document.getElementById('btn-save-admin-p-bank');
+        if (!saveBtn) return;
+        saveBtn.onclick = async () => {
+          const acc = document.getElementById('adm-p-acc').value.trim();
+          const ifsc = document.getElementById('adm-p-ifsc').value.trim().toUpperCase();
+          const bankName = document.getElementById('adm-p-bank').value.trim();
+          const holder = document.getElementById('adm-p-holder').value.trim() || p.name;
+          const upi = document.getElementById('adm-p-upi').value.trim();
+
+          if (!acc) return toast('Bank Account Number is required', true);
+          if (!ifsc) return toast('Bank IFSC Code is required', true);
+
+          saveBtn.disabled = true;
+          saveBtn.innerHTML = '<span class="material-icons spin">sync</span> Saving...';
+
+          try {
+            const pId = p._id ? encodeURIComponent(p._id) : encodeURIComponent(p.email);
+            await api('/pandits/' + pId + '/bank-details', {
+              method: 'PUT',
+              body: {
+                email: p.email,
+                bankAccount: acc,
+                ifscCode: ifsc,
+                bankName,
+                accountHolder: holder,
+                upiId: upi
+              }
+            });
+            closeModal();
+            toast(`Bank & Payout Details saved for Pandit ${p.name}! 🙏`);
+            await loadData();
+            if (returnBookingId) {
+              openPanditPayModal(returnBookingId);
+            }
+          } catch (e) {
+            toast(e.message || 'Failed to save bank details', true);
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<span class="material-icons">save</span> Save Bank &amp; Payout Details';
           }
         };
       });

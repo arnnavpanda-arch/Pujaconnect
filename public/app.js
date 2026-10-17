@@ -2425,11 +2425,18 @@ const ACTIONS = {
     });
   },
   savePanditBank: async () => {
-    const me = S.me;
-    if (!me) return;
-    if (!me.verified && me.status !== 'Verified') {
-      return toast('Bank details can only be configured after profile is verified by Admin.', true);
+    let me = S.me;
+    if (!me && S.user) {
+      try {
+        const plist = await api('/pandits?email=' + encodeURIComponent(S.user.email));
+        if (plist && plist[0]) me = S.me = plist[0];
+      } catch {}
     }
+    if (!me && S.user) {
+      me = S.me = { email: S.user.email, name: S.user.name, verified: true };
+    }
+    if (!me) return toast('Please log in to save bank details', true);
+
     const acc = $('#pandit-bank-acc') ? $('#pandit-bank-acc').value.trim() : '';
     const accConfirm = $('#pandit-bank-acc-confirm') ? $('#pandit-bank-acc-confirm').value.trim() : '';
     const ifsc = $('#pandit-bank-ifsc') ? $('#pandit-bank-ifsc').value.trim().toUpperCase() : '';
@@ -2445,9 +2452,11 @@ const ACTIONS = {
     if (btn) { btn.disabled = true; btn.textContent = 'Saving Bank Details...'; }
 
     try {
-      const res = await api('/pandits/' + (me._id || me.email) + '/bank-details', {
+      const pId = me._id ? encodeURIComponent(me._id) : encodeURIComponent(me.email || (S.user && S.user.email) || '');
+      const res = await api('/pandits/' + pId + '/bank-details', {
         method: 'PUT',
         body: {
+          email: me.email || (S.user && S.user.email) || '',
           bankAccount: acc,
           ifscCode: ifsc,
           bankName,
