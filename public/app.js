@@ -1485,9 +1485,21 @@ async function panditDash(root) {
       district: S.user.district || 'Khordha',
       city: S.user.city || 'Bhubaneswar',
       fee: 1500,
+      bankAccount: S.user.bankAccount || '',
+      ifscCode: S.user.ifscCode || '',
+      bankName: S.user.bankName || '',
+      accountHolder: S.user.accountHolder || S.user.name,
+      upiId: S.user.upiId || '',
       status: S.user.status || 'Pending Review',
       verified: S.user.status === 'Verified'
     };
+  }
+  if (S.me && S.me.bankAccount && !me.bankAccount) {
+    me.bankAccount = S.me.bankAccount;
+    me.ifscCode = S.me.ifscCode;
+    me.bankName = S.me.bankName;
+    me.accountHolder = S.me.accountHolder;
+    me.upiId = S.me.upiId;
   }
   S.me = me;
   const tab = S.dashTab || 'ceremonies';
@@ -2459,19 +2471,41 @@ const ACTIONS = {
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="material-icons spin">sync</span> Saving Bank Details...'; }
 
     try {
-      const pId = me._id ? encodeURIComponent(me._id) : encodeURIComponent(me.email || (S.user && S.user.email) || '');
-      const res = await api('/pandits/' + pId + '/bank-details', {
+      const pId = (me && (me._id || me.panditId)) ||
+                  (S.user && (S.user.panditId || S.user._id)) ||
+                  (me && me.email) ||
+                  (S.user && S.user.email) ||
+                  'current';
+      const body = {
+        panditId: (me && (me._id || me.panditId)) || (S.user && (S.user.panditId || S.user._id)) || '',
+        email: (me && me.email) || (S.user && S.user.email) || '',
+        phone: (me && me.phone) || (S.user && S.user.phone) || '',
+        name: (me && me.name) || (S.user && S.user.name) || name,
+        bankAccount: cleanAcc,
+        ifscCode: cleanIfsc,
+        bankName,
+        accountHolder: name,
+        upiId: upi
+      };
+
+      const res = await api('/pandits/' + encodeURIComponent(pId) + '/bank-details', {
         method: 'PUT',
-        body: {
-          email: me.email || (S.user && S.user.email) || '',
+        body
+      });
+      const savedPandit = (res && res.pandit) ? res.pandit : { ...me, ...body };
+      S.me = savedPandit;
+      if (S.user) {
+        S.user = {
+          ...S.user,
           bankAccount: cleanAcc,
           ifscCode: cleanIfsc,
           bankName,
           accountHolder: name,
-          upiId: upi
-        }
-      });
-      S.me = (res && res.pandit) ? res.pandit : { ...me, bankAccount: cleanAcc, ifscCode: cleanIfsc, bankName, accountHolder: name, upiId: upi };
+          upiId: upi,
+          panditId: savedPandit._id || S.user.panditId
+        };
+        localStorage.setItem('pc_user', JSON.stringify(S.user));
+      }
       toast('Bank details saved successfully! Dakshina will be credited to this account. 🙏');
       S.dashTab = 'bank';
       renderDashboard();
