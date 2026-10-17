@@ -1295,7 +1295,7 @@ function renderDevoteePaymentTrackingTab(bookings) {
         }
 
         return `
-          <div class="payment-card">
+          <div class="payment-card" data-action="viewTimeline" data-id="${esc(b.bookingId)}" style="cursor:pointer" title="Click to view live ceremony progress timeline">
             <div class="payment-card-header">
               <div>
                 <span class="booking-id-tag">${esc(b.bookingId)}</span>
@@ -1333,13 +1333,245 @@ function renderDevoteePaymentTrackingTab(bookings) {
               <div style="font-size:13px;color:var(--muted)">
                 ${b.address ? `<span class="material-icons" style="font-size:14px;vertical-align:middle">place</span> ${esc(b.address)}` : ''}
               </div>
-              <div>${actionButton}</div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <button class="btn btn-outline dark btn-sm" data-action="viewTimeline" data-id="${esc(b.bookingId)}" title="View live timeline and progress">
+                  <span class="material-icons" style="font-size:14px">timeline</span> Timeline
+                </button>
+                ${actionButton}
+              </div>
             </div>
           </div>
         `;
       }).join('')}
     </div>
   `;
+}
+
+async function openBookingTimeline(arg) {
+  let b = (typeof arg === 'object' && arg && arg.bookingId) ? arg : (S.bookings || []).find((x) => x.bookingId === arg);
+  if (!b && (typeof arg === 'string' || (arg && arg.id))) {
+    const id = typeof arg === 'string' ? arg : arg.id;
+    try {
+      b = await api('/bookings/' + encodeURIComponent(id));
+    } catch (e) {}
+  }
+  if (!b) return toast('Ceremony booking record not found', true);
+
+  const isSlotRejected = isBookingRejected(b);
+  const fee = b.fee || 1199;
+
+  // Stage 2: Admin Review & Pandit Assignment
+  let step2State = 'pending';
+  let step2Tag = 'Pending Review';
+  let step2Desc = 'PujaConnect team is verifying ceremony requirements and available Vedic Pandits.';
+  if (isSlotRejected) {
+    step2State = 'rejected';
+    step2Tag = 'Slot Unavailable (Rejected)';
+    step2Desc = b.rejectionReason || 'No verified Vedic Pandit available for this date and time slot in your district. Rebooking required.';
+  } else if (b.status === 'Pending Assignment') {
+    step2State = 'active';
+    step2Tag = 'In Progress';
+    step2Desc = `PujaConnect coordination team is currently reviewing verified Vedic Purohits in ${esc(b.district)} to assign the best scholar for ${esc(b.service)}.`;
+  } else {
+    step2State = 'completed';
+    step2Tag = 'Approved & Assigned';
+    step2Desc = `Admin verified ritual requirements and assigned Pandit ${esc(b.panditName || 'Verified Pandit')} (${esc(b.district)}).`;
+  }
+
+  // Stage 3: Waiting for Selected / Assigned Pandit ji Confirmation
+  let step3State = 'pending';
+  let step3Tag = 'Pending';
+  let step3Desc = 'Will be dispatched to assigned Pandit ji once admin review is approved.';
+  if (isSlotRejected) {
+    step3State = 'disabled';
+    step3Tag = 'Cancelled';
+    step3Desc = 'Not reached due to slot unavailability. Please rebook to pick an alternative date or time slot.';
+  } else if (b.status === 'Pending Assignment') {
+    step3State = 'pending';
+    step3Tag = 'Awaiting Admin';
+    step3Desc = 'Pandit offer will be sent immediately upon admin assignment.';
+  } else if (b.status === 'Pending Pandit Confirmation') {
+    step3State = 'active';
+    step3Tag = 'Waiting for Pandit ji Confirmation';
+    step3Desc = `Ceremony offer has been sent to Pandit ${esc(b.panditName)}. Waiting for Pandit ji to accept and confirm availability.`;
+  } else if (b.panditApproval === 'Rejected') {
+    step3State = 'warning';
+    step3Tag = 'Pandit Unavailable (Reassigning)';
+    step3Desc = `Pandit had a prior commitment. Admin is reassigning another verified Vedic Pandit for ${esc(b.district)}.`;
+  } else if (b.panditApproval === 'Approved' || ['Confirmed', 'In Progress', 'Completed'].includes(b.status)) {
+    step3State = 'completed';
+    step3Tag = 'Confirmed & Accepted';
+    step3Desc = `Pandit ${esc(b.panditName)} has accepted the ceremony assignment and confirmed availability for ${esc(b.date)} (${esc(b.time)}).`;
+  }
+
+  // Stage 4: Dakshina Payment & Bank Verification
+  let step4State = 'pending';
+  let step4Tag = 'Pending';
+  let step4Desc = `Dakshina amount: ${inr(fee)}. Payment unlocks once Pandit confirms availability.`;
+  if (isSlotRejected) {
+    step4State = 'disabled';
+    step4Tag = 'Cancelled';
+    step4Desc = 'No payment needed for rejected slot. Rebook to choose a new slot.';
+  } else if (b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified') {
+    step4State = 'completed';
+    step4Tag = 'Paid & Verified';
+    step4Desc = `Dakshina of ${inr(fee)} verified by PujaConnect accounts. Official ceremony receipt generated.`;
+  } else if (b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending') {
+    step4State = 'active';
+    step4Tag = 'Verification in Progress';
+    step4Desc = `Payment transaction proof submitted (${esc(b.paymentProof || 'UTR/UPI')}). Administration is verifying bank records.`;
+  } else if (b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected') {
+    step4State = 'rejected';
+    step4Tag = 'Verification Unsuccessful';
+    step4Desc = `${esc(b.paymentRejectionReason || 'Reference not found in bank records')}. Please click "Repay" to re-submit valid payment details.`;
+  } else if (['Confirmed', 'In Progress', 'Completed'].includes(b.status) || b.panditApproval === 'Approved') {
+    step4State = 'active';
+    step4Tag = 'Payment Due';
+    step4Desc = `Fixed Dakshina: ${inr(fee)}. Please scan UPI QR code or transfer to secure ceremony schedule.`;
+  }
+
+  // Stage 5: Sacred Ceremony Day & Blessings
+  let step5State = 'pending';
+  let step5Tag = 'Upcoming';
+  let step5Desc = `Scheduled for ${esc(b.date)} at ${esc(b.time || '10:00 AM')} in ${esc(b.district)}.`;
+  if (b.status === 'Completed') {
+    step5State = 'completed';
+    step5Tag = 'Ceremony Completed 🙏';
+    step5Desc = `Sacred Vedic ritual completed successfully on ${esc(b.date)}. May Lord shower peace, health, and prosperity to you and your family! ✨`;
+  } else if (b.status === 'In Progress') {
+    step5State = 'active';
+    step5Tag = 'In Progress Today 🪔';
+    step5Desc = `Ceremony is in progress today (${esc(b.time)}). Pandit ji is performing sacred Vedic rituals at your venue.`;
+  } else if (b.status === 'Confirmed') {
+    step5State = 'scheduled';
+    step5Tag = 'Confirmed & Scheduled 📅';
+    step5Desc = `All confirmations complete! Pandit ${esc(b.panditName)} will arrive at your venue on ${esc(b.date)} for the ${esc(b.time)} slot.`;
+  } else if (b.status === 'Cancelled') {
+    step5State = 'rejected';
+    step5Tag = 'Cancelled';
+    step5Desc = 'Ceremony booking was cancelled.';
+  }
+
+  openModal(`Ceremony Progress Timeline – ${b.bookingId}`, `
+    <div style="padding:4px 0">
+      <!-- Ritual Summary Card -->
+      <div style="background:#fff8ed;border:1.5px solid #ebd9c2;border-radius:12px;padding:16px;margin-bottom:18px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+          <div>
+            <span class="booking-id-tag" style="color:#b26a00;font-size:12px">BOOKING ID: ${esc(b.bookingId)}</span>
+            <h3 style="margin:4px 0 6px;color:var(--mahogany);font-size:20px">${esc(b.service)}</h3>
+            <div style="font-size:13px;color:#5c3818;display:flex;flex-wrap:wrap;gap:14px;margin-top:6px">
+              <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">schedule</span> <b>${esc(b.date)}</b> at <b>${esc(b.time || '10:00 AM')}</b></span>
+              <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">place</span> <b>${esc(b.district)}</b></span>
+              <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">payments</span> Dakshina: <b>${inr(fee)}</b></span>
+            </div>
+          </div>
+          <div>
+            ${isSlotRejected ? `<span class="badge red"><span class="material-icons" style="font-size:12px">event_busy</span> Rejected – Slot Unavailable</span>` : statusBadge(b.status)}
+          </div>
+        </div>
+        ${b.address ? `<div style="font-size:12.5px;color:#7a5030;margin-top:8px;border-top:1px dashed #ebd9c2;padding-top:8px"><b>Ceremony Venue:</b> ${esc(b.address)}</div>` : ''}
+      </div>
+
+      <!-- Live Stepper Timeline -->
+      <div class="ceremony-timeline">
+        <!-- Step 1: Request Submitted -->
+        <div class="ceremony-timeline-step completed">
+          <div class="timeline-step-icon"><span class="material-icons">check_circle</span></div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">1. Request Submitted</span>
+              <span class="timeline-step-tag" style="background:#e8f5e9;color:#2e7d32">Submitted ✅</span>
+            </div>
+            <p class="timeline-step-desc">
+              Ritual booking request submitted for <b>${esc(b.service)}</b> in <b>${esc(b.district)}</b>.
+              <br><small class="muted">${b.preferredPanditName ? `Devotee preferred: Pandit ${esc(b.preferredPanditName)}` : 'Devotee selected: Any Available Verified Pandit'}</small>
+            </p>
+          </div>
+        </div>
+
+        <!-- Step 2: Approved / Reviewed by Admin -->
+        <div class="ceremony-timeline-step ${step2State}">
+          <div class="timeline-step-icon">
+            <span class="material-icons">${step2State === 'completed' ? 'check_circle' : (step2State === 'rejected' ? 'cancel' : (step2State === 'active' ? 'hourglass_top' : 'radio_button_unchecked'))}</span>
+          </div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">2. Approved by Admin &amp; Pandit Assignment</span>
+              <span class="timeline-step-tag" style="background:${step2State === 'completed' ? '#e8f5e9;color:#2e7d32' : (step2State === 'rejected' ? '#ffebee;color:#c62828' : '#fff8e1;color:#b26a00')}">${esc(step2Tag)}</span>
+            </div>
+            <p class="timeline-step-desc">${step2Desc}</p>
+          </div>
+        </div>
+
+        <!-- Step 3: Waiting for Selected / Assigned Pandit ji Confirmation -->
+        <div class="ceremony-timeline-step ${step3State}">
+          <div class="timeline-step-icon">
+            <span class="material-icons">${step3State === 'completed' ? 'check_circle' : (step3State === 'active' ? 'sync' : (step3State === 'warning' ? 'error_outline' : (step3State === 'disabled' ? 'block' : 'radio_button_unchecked')))}</span>
+          </div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">3. Waiting for Selected / Assigned Pandit ji Confirmation</span>
+              <span class="timeline-step-tag" style="background:${step3State === 'completed' ? '#e8f5e9;color:#2e7d32' : (step3State === 'active' ? '#fff8e1;color:#b26a00' : '#f5f5f5;color:#777')}">${esc(step3Tag)}</span>
+            </div>
+            <p class="timeline-step-desc">${step3Desc}</p>
+          </div>
+        </div>
+
+        <!-- Step 4: Dakshina Payment & Bank Verification -->
+        <div class="ceremony-timeline-step ${step4State}">
+          <div class="timeline-step-icon">
+            <span class="material-icons">${step4State === 'completed' ? 'check_circle' : (step4State === 'rejected' ? 'error' : (step4State === 'active' ? 'payments' : (step4State === 'disabled' ? 'block' : 'radio_button_unchecked')))}</span>
+          </div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">4. Dakshina Payment &amp; Verification</span>
+              <span class="timeline-step-tag" style="background:${step4State === 'completed' ? '#e8f5e9;color:#2e7d32' : (step4State === 'rejected' ? '#ffebee;color:#c62828' : (step4State === 'active' ? '#fff8e1;color:#b26a00' : '#f5f5f5;color:#777'))}">${esc(step4Tag)}</span>
+            </div>
+            <p class="timeline-step-desc">${step4Desc}</p>
+          </div>
+        </div>
+
+        <!-- Step 5: Sacred Ceremony Day & Blessings -->
+        <div class="ceremony-timeline-step ${step5State}">
+          <div class="timeline-step-icon">
+            <span class="material-icons">${step5State === 'completed' ? 'auto_awesome' : (step5State === 'active' ? 'local_fire_department' : (step5State === 'scheduled' ? 'event' : (step5State === 'rejected' ? 'cancel' : 'radio_button_unchecked')))}</span>
+          </div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">5. Sacred Ceremony &amp; Divine Blessings</span>
+              <span class="timeline-step-tag" style="background:${step5State === 'completed' ? '#e8f5e9;color:#2e7d32' : (step5State === 'scheduled' ? '#e3f2fd;color:#1565c0' : (step5State === 'active' ? '#fff3e0;color:#e65100' : '#f5f5f5;color:#777'))}">${esc(step5Tag)}</span>
+            </div>
+            <p class="timeline-step-desc">${step5Desc}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons Footer inside Modal -->
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:20px;padding-top:14px;border-top:1px solid #ebd9c2;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${isSlotRejected ? `
+            <button class="btn btn-gold btn-sm" onclick="closeModal();ACTIONS.rebookBooking({id:'${esc(b.bookingId)}'})" style="background:linear-gradient(135deg, #e65100 0%, #b71c1c 100%);color:#fff;font-weight:700">
+              <span class="material-icons" style="font-size:15px;vertical-align:middle">event_repeat</span> Rebook This Puja
+            </button>
+          ` : ''}
+          ${b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' ? `
+            <button class="btn btn-gold btn-sm" onclick="closeModal();ACTIONS.viewBill({id:'${esc(b.bookingId)}'})">
+              <span class="material-icons" style="font-size:15px;vertical-align:middle">receipt_long</span> View Bill / Receipt
+            </button>
+          ` : (!isSlotRejected && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')) ? `
+            <button class="btn btn-gold btn-sm" onclick="closeModal();ACTIONS.payBooking({id:'${esc(b.bookingId)}'})">
+              <span class="material-icons" style="font-size:15px;vertical-align:middle">payments</span> Pay Dakshina (${inr(fee)})
+            </button>
+          ` : ''}
+          <button class="btn btn-dark btn-sm" onclick="ACTIONS.slip({id:'${esc(b.bookingId)}'})">
+            <span class="material-icons" style="font-size:15px;vertical-align:middle">print</span> Print Slip
+          </button>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="closeModal()">Close</button>
+      </div>
+    </div>
+  `, null, true);
 }
 
 function renderDevoteeBookingsTab(bookings) {
@@ -1388,13 +1620,16 @@ function renderDevoteeBookingsTab(bookings) {
         }
 
         return `
-        <div class="booking-card" ${isSlotRejected ? 'style="border:2px solid #ff9800;background:#fffdf9;box-shadow:0 4px 18px rgba(230,81,0,0.12)"' : ''}>
+        <div class="booking-card" data-action="viewTimeline" data-id="${esc(b.bookingId)}" style="cursor:pointer;${isSlotRejected ? 'border:2px solid #ff9800;background:#fffdf9;box-shadow:0 4px 18px rgba(230,81,0,0.12)' : ''}" title="Click to view live ceremony progress timeline">
           <div>
             <div class="booking-card-top">
               <span class="booking-id-tag">${esc(b.bookingId)}</span>
               ${badgeHtml}
             </div>
             <h4>${esc(b.service)}</h4>
+            <div style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ochre);font-weight:600;margin:3px 0 6px">
+              <span class="material-icons" style="font-size:14px">timeline</span> Tap to track live ceremony timeline &rarr;
+            </div>
 
             ${isSlotRejected ? `
               <div style="background:#fff3e0;border:1.5px solid #ffb74d;border-left:5px solid #e65100;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13.5px;color:#bf360c;line-height:1.5">
@@ -1441,6 +1676,9 @@ function renderDevoteeBookingsTab(bookings) {
           </div>
           <div class="booking-card-footer">
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-gold btn-sm" data-action="viewTimeline" data-id="${esc(b.bookingId)}" title="View live timeline and progress">
+                <span class="material-icons" style="font-size:15px;vertical-align:middle">timeline</span> Timeline
+              </button>
               ${isSlotRejected ? `
                 <button class="btn btn-gold btn-sm" data-action="rebookBooking" data-id="${esc(b.bookingId)}" style="background:linear-gradient(135deg, #e65100 0%, #b71c1c 100%);color:#fff;font-weight:700">
                   <span class="material-icons" style="font-size:15px;vertical-align:middle">event_repeat</span> Rebook This Puja
@@ -2531,6 +2769,7 @@ const ACTIONS = {
   findFor: (d) => { S.filters.service = d.name; showView('pandits'); },
   planLong: (d) => { S.longPreset = d.name; showView('long'); },
   bookPandit: (d) => openBooking(d.id),
+  viewTimeline: (d) => openBookingTimeline(d.id),
   rebookBooking: async (d) => {
     let b = (S.bookings || []).find((x) => x.bookingId === d.id);
     if (!b && d.id) {
