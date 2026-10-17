@@ -277,13 +277,61 @@ app.put('/api/pandits/:id/status', adminOnly, wrap(async (req, res) => {
 }));
 
 app.put('/api/pandits/:id', wrap(async (req, res) => {
-  const allowed = ['name', 'phone', 'state', 'district', 'city', 'location', 'workingState', 'workingDistricts', 'experience', 'exp', 'specialty', 'bio', 'fee', 'services', 'availableDays', 'daySlots', 'timeSlots', 'districtPrices', 'photo', 'documentUrl', 'idDoc', 'bankAccount', 'ifscCode', 'upiId', 'bankName', 'accountHolder', 'qrCode'];
+  const allowed = ['name', 'phone', 'state', 'district', 'city', 'location', 'workingState', 'workingDistricts', 'experience', 'exp', 'specialty', 'bio', 'services', 'availableDays', 'daySlots', 'timeSlots', 'photo', 'documentUrl', 'idDoc'];
   const update = {};
   allowed.forEach((k) => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
   const query = req.params.id.match(/^[0-9a-fA-F]{24}$/) ? { _id: req.params.id } : { email: lc(req.params.id) };
   const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
   res.json(p);
+}));
+
+// Admin fixes district-wise amounts for a Pandit
+app.put('/api/pandits/:id/district-prices', adminOnly, wrap(async (req, res) => {
+  const { fee, districtPrices } = req.body;
+  const query = req.params.id.match(/^[0-9a-fA-F]{24}$/) ? { _id: req.params.id } : { email: lc(req.params.id) };
+  const update = {};
+  if (fee !== undefined) update.fee = Number(fee) || 1500;
+  if (districtPrices !== undefined) update.districtPrices = districtPrices;
+  const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
+  if (!p) return res.status(404).json({ error: 'Pandit not found' });
+  res.json(p);
+}));
+
+// Centralized Platform Bank Details (Managed exclusively by Admin)
+const DEFAULT_PLATFORM_BANK = {
+  accountHolder: 'PujaConnect Official Platform Account',
+  bankName: 'State Bank of India',
+  accountNumber: '40918237465',
+  ifscCode: 'SBIN0001234',
+  upiId: 'pujaconnect@upi',
+  qrCode: 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=pujaconnect@upi&pn=PujaConnect%20Vedic%20Services&cu=INR'
+};
+
+app.get('/api/platform-bank-details', wrap(async (req, res) => {
+  const s = await AppSetting.findOne({ key: 'platform_bank_details' });
+  res.json(s && s.value ? { ...DEFAULT_PLATFORM_BANK, ...s.value } : DEFAULT_PLATFORM_BANK);
+}));
+
+app.put('/api/platform-bank-details', adminOnly, wrap(async (req, res) => {
+  const { accountHolder, bankName, accountNumber, ifscCode, upiId, qrCode } = req.body;
+  const currentDoc = await AppSetting.findOne({ key: 'platform_bank_details' });
+  const current = currentDoc && currentDoc.value ? currentDoc.value : DEFAULT_PLATFORM_BANK;
+  const updated = {
+    ...current,
+    accountHolder: accountHolder !== undefined ? String(accountHolder).trim() : current.accountHolder,
+    bankName: bankName !== undefined ? String(bankName).trim() : current.bankName,
+    accountNumber: accountNumber !== undefined ? String(accountNumber).trim() : current.accountNumber,
+    ifscCode: ifscCode !== undefined ? String(ifscCode).trim().toUpperCase() : current.ifscCode,
+    upiId: upiId !== undefined ? String(upiId).trim() : current.upiId,
+    qrCode: qrCode !== undefined ? String(qrCode).trim() : current.qrCode
+  };
+  const s = await AppSetting.findOneAndUpdate(
+    { key: 'platform_bank_details' },
+    { value: updated },
+    { upsert: true, new: true }
+  );
+  res.json(s.value);
 }));
 
 // ---- Bookings ----
@@ -306,6 +354,7 @@ app.get('/api/bookings', wrap(async (req, res) => {
   const q = {};
   if (req.query.userEmail) q.userEmail = lc(req.query.userEmail);
   if (req.query.panditEmail) q.panditEmail = lc(req.query.panditEmail);
+  if (req.query.status) q.status = req.query.status;
   if (req.query.paymentStatus) q.paymentStatus = req.query.paymentStatus;
   if (req.query.bookingId) q.bookingId = req.query.bookingId;
   res.json(await Booking.find(q).sort({ transactionDate: -1 }));
@@ -317,47 +366,178 @@ app.get('/api/bookings/:id', wrap(async (req, res) => {
   res.json(b);
 }));
 
+// Devotee books a puja: selecting a specific pandit is OPTIONAL.
+// No confirmation mail sent yet. Sends request acknowledgement mail with booking details.
 app.post('/api/bookings', wrap(async (req, res) => {
   const b = req.body;
-  if (!b.userEmail || !b.service || !b.date || !b.district || !b.panditEmail) return res.status(400).json({ error: 'Missing required booking fields' });
-  const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
-  if (!pandit || !pandit.verified) return res.status(400).json({ error: 'Selected Pandit is not available' });
-  // Slot clash check
-  const clash = await Booking.findOne({ panditEmail: pandit.email, date: b.date, time: b.time, status: { $in: ['Confirmed', 'In Progress'] } });
-  if (clash) return res.status(409).json({ error: 'This slot is already booked. Please choose another.' });
+  if (!b.userEmail || !b.service || !b.date || !b.district) {
+    return res.status(400).json({ error: 'Missing required booking fields (userEmail, service, date, district)' });
+  }
 
-  const fee = Number(b.fee) || (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee;
+  let preferredPandit = null;
+  if (b.panditEmail && lc(b.panditEmail) !== 'any' && lc(b.panditEmail) !== '') {
+    preferredPandit = await Pandit.findOne({ email: lc(b.panditEmail), verified: true });
+  }
+
+  let fee = Number(b.fee);
+  if (!fee) {
+    if (preferredPandit) {
+      fee = (preferredPandit.districtPrices && preferredPandit.districtPrices[b.district]) || preferredPandit.fee || 1500;
+    } else {
+      const pujaDoc = await Puja.findOne({ name: b.service });
+      fee = (pujaDoc && pujaDoc.baseFee) || 1199;
+    }
+  }
+
   const advanceAmount = Number(b.advanceAmount) || 0;
+  const bookingId = await uniqueId(Booking, 'bookingId', 'PUJA');
+
   const booking = await Booking.create({
-    bookingId: await uniqueId(Booking, 'bookingId', 'PUJA'),
-    userEmail: lc(b.userEmail), userName: b.userName || 'Customer', phone: b.phone || '',
-    service: b.service, date: b.date, time: b.time || '08:00 AM - 11:00 AM', district: b.district, address: b.address || '',
-    panditEmail: pandit.email, panditName: pandit.name,
-    fee, advanceAmount, advancePaid: advanceAmount > 0,
-    paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= fee ? 'Paid' : 'Partial',
+    bookingId,
+    userEmail: lc(b.userEmail),
+    userName: b.userName || 'Devotee',
+    phone: b.phone || '',
+    service: b.service,
+    date: b.date,
+    time: b.time || '08:00 AM - 11:00 AM',
+    district: b.district,
+    address: b.address || '',
+    preferredPanditEmail: preferredPandit ? preferredPandit.email : '',
+    preferredPanditName: preferredPandit ? preferredPandit.name : '',
+    panditEmail: '',
+    panditName: 'To Be Assigned by Admin',
+    status: 'Pending Assignment',
     panditApproval: 'Pending',
-    adminApproval: 'Approved',
+    adminApproval: 'Pending',
+    rejectedPandits: [],
+    rejectionReason: '',
+    fee,
+    advanceAmount,
+    advancePaid: advanceAmount > 0,
+    paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= fee ? 'Paid' : 'Partial',
     bookingType: b.bookingType || 'Standard'
   });
-  const mail = { ...booking.toObject(), address: booking.address || booking.district };
-  sendSafe('BOOKING_CONFIRMATION', booking.userEmail, mail);
-  sendSafe('PANDIT_NEW_BOOKING', pandit.email, mail);
-  if (advanceAmount > 0) sendSafe('PAYMENT_RECEIPT', booking.userEmail, { userName: booking.userName, reference: booking.bookingId, service: booking.service, total: fee, advanceAmount });
-  res.status(201).json(booking);
+
+  // Send acknowledgement email to devotee (NOT confirmation email yet!)
+  const mailPayload = {
+    ...booking.toObject(),
+    preferredPanditName: preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit',
+    address: booking.address || booking.district
+  };
+  sendSafe('BOOKING_REQUEST_RECEIVED', booking.userEmail, mailPayload);
+
+  res.status(201).json({
+    ok: true,
+    booking,
+    message: 'Booking request submitted! Our team will assign a verified Pandit as soon as possible.'
+  });
+}));
+
+// Admin assigns an available Pandit to a booking
+app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
+  const { panditEmail } = req.body;
+  if (!panditEmail) return res.status(400).json({ error: 'Please select a Pandit to assign' });
+
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  const pandit = await Pandit.findOne({ email: lc(panditEmail), verified: true });
+  if (!pandit) return res.status(400).json({ error: 'Selected Pandit is not verified or does not exist' });
+
+  // Slot clash check
+  const clash = await Booking.findOne({
+    bookingId: { $ne: b.bookingId },
+    panditEmail: pandit.email,
+    date: b.date,
+    time: b.time,
+    status: { $in: ['Confirmed', 'In Progress'] }
+  });
+  if (clash) {
+    return res.status(409).json({ error: `Pandit ${pandit.name} is already booked on ${b.date} at ${b.time}. Please select another Pandit.` });
+  }
+
+  const fee = (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || b.fee;
+  b.panditEmail = pandit.email;
+  b.panditName = pandit.name;
+  b.fee = fee;
+  b.status = 'Pending Pandit Confirmation';
+  b.panditApproval = 'Pending';
+  b.adminApproval = 'Approved';
+  await b.save();
+
+  // Send assignment offer alert to Pandit
+  sendSafe('PANDIT_NEW_BOOKING', pandit.email, {
+    ...b.toObject(),
+    panditName: pandit.name,
+    address: b.address || b.district
+  });
+
+  res.json({ ok: true, booking: b });
+}));
+
+// Pandit accepts or rejects the ceremony assignment
+app.put('/api/bookings/:id/pandit-response', wrap(async (req, res) => {
+  const { response, rejectionReason, panditEmail } = req.body; // 'Accept' | 'Reject'
+  if (!['Accept', 'Reject'].includes(response)) {
+    return res.status(400).json({ error: 'Invalid response. Must be Accept or Reject.' });
+  }
+
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  if (response === 'Accept') {
+    b.status = 'Confirmed';
+    b.panditApproval = 'Approved';
+    await b.save();
+
+    // Now send the official confirmation email automatically to devotee!
+    const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
+    sendSafe('BOOKING_CONFIRMATION', b.userEmail, {
+      ...b.toObject(),
+      panditPhone: pandit ? pandit.phone : ''
+    });
+    sendSafe('PANDIT_CONFIRMED_BOOKING', b.userEmail, {
+      bookingId: b.bookingId,
+      userName: b.userName,
+      panditName: b.panditName,
+      service: b.service,
+      date: b.date,
+      time: b.time,
+      address: b.address,
+      fee: b.fee
+    });
+  } else {
+    // Rejected by Pandit
+    const rejectedEmail = b.panditEmail || (panditEmail ? lc(panditEmail) : '');
+    const rejectedName = b.panditName;
+    if (rejectedEmail && !b.rejectedPandits.includes(rejectedEmail)) {
+      b.rejectedPandits.push(rejectedEmail);
+    }
+    b.status = 'Pending Assignment';
+    b.panditApproval = 'Rejected';
+    b.rejectionReason = rejectionReason || `Declined by ${rejectedName || 'Pandit'}`;
+    b.panditEmail = '';
+    b.panditName = 'To Be Assigned by Admin';
+    await b.save();
+    // No confirmation or cancellation email sent to devotee yet; Admin reassigns another Pandit!
+  }
+
+  res.json({ ok: true, booking: b });
 }));
 
 app.put('/api/bookings/:id/status', wrap(async (req, res) => {
   const { status } = req.body;
-  if (!['Confirmed', 'Completed', 'Cancelled', 'In Progress'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  if (!['Pending Assignment', 'Pending Pandit Confirmation', 'Confirmed', 'Completed', 'Cancelled', 'In Progress'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
   const isApproved = ['Confirmed', 'In Progress'].includes(status);
   const b = await Booking.findOneAndUpdate(
     bookingFindQuery(req.params.id),
-    { status, panditApproval: isApproved ? 'Approved' : status === 'Cancelled' ? 'Rejected' : 'Approved' },
+    { status, panditApproval: isApproved ? 'Approved' : status === 'Cancelled' ? 'Rejected' : 'Pending' },
     { new: true }
   );
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
-  // Notification email to user on Pandit response
   if (isApproved) {
     sendSafe('PANDIT_CONFIRMED_BOOKING', b.userEmail, { bookingId: b.bookingId, userName: b.userName, panditName: b.panditName, service: b.service, date: b.date, time: b.time, address: b.address, fee: b.fee });
   } else if (status === 'Cancelled') {

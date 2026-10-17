@@ -260,11 +260,14 @@
 
     <!-- Subtabs -->
     <div class="admin-tabs">
+      <button class="admin-tab" data-tab="bookings" onclick="switchAdminTab('bookings')">
+        <span class="material-icons">event_available</span> Bookings &amp; Assignments <span id="badge-bookings-count" class="admin-tab-pill">0</span>
+      </button>
       <button class="admin-tab active" data-tab="kyc" onclick="switchAdminTab('kyc')">
         <span class="material-icons">verified_user</span> KYC Queue <span id="badge-kyc-count" class="admin-tab-pill">0</span>
       </button>
       <button class="admin-tab" data-tab="pandits" onclick="switchAdminTab('pandits')">
-        <span class="material-icons">badge</span> Pandits Directory
+        <span class="material-icons">badge</span> Pandits Directory &amp; Rates
       </button>
       <button class="admin-tab" data-tab="pujas" onclick="switchAdminTab('pujas')">
         <span class="material-icons">spa</span> Puja Catalog
@@ -274,6 +277,9 @@
       </button>
       <button class="admin-tab" data-tab="payments" onclick="switchAdminTab('payments')">
         <span class="material-icons">payments</span> Payment Verifications <span id="badge-payments-count" class="admin-tab-pill">0</span>
+      </button>
+      <button class="admin-tab" data-tab="platform-bank" onclick="switchAdminTab('platform-bank')">
+        <span class="material-icons">account_balance</span> Platform Bank &amp; UPI
       </button>
       <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">
         <span class="material-icons">group</span> Devotees
@@ -391,10 +397,12 @@
 
       document.getElementById('badge-kyc-count').textContent = pendKyc;
       document.getElementById('badge-long-count').textContent = pendLong;
-      const payBadge = document.getElementById('badge-payments-count');
-      if (payBadge) payBadge.textContent = pendPayments;
+      const pendBookings = (S.bookings || []).filter(b => b.status === 'Pending Assignment' || b.panditApproval === 'Rejected').length;
+      const bookBadge = document.getElementById('badge-bookings-count');
+      if (bookBadge) bookBadge.textContent = pendBookings;
 
       const kpis = [
+        { label: 'Pending Pandit Assignment', val: pendBookings, icon: 'person_search', alert: pendBookings > 0 },
         { label: 'Registered Devotees', val: s.users || 0, icon: 'people' },
         { label: 'Verified Pandits', val: s.verifiedPandits || 0, icon: 'verified' },
         { label: 'Pending KYC Review', val: pendKyc, icon: 'pending_actions', alert: pendKyc > 0 },
@@ -428,12 +436,230 @@
 
     function renderActiveTab() {
       const root = document.getElementById('admin-view-root');
-      if (CURRENT_TAB === 'kyc') renderKycQueue(root);
+      if (CURRENT_TAB === 'bookings') renderBookingsAssignments(root);
+      else if (CURRENT_TAB === 'kyc') renderKycQueue(root);
       else if (CURRENT_TAB === 'pandits') renderPanditsDirectory(root);
       else if (CURRENT_TAB === 'pujas') renderPujaCatalog(root);
       else if (CURRENT_TAB === 'longs') renderLongRequests(root);
       else if (CURRENT_TAB === 'payments') renderPaymentsVerification(root);
+      else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(root);
       else if (CURRENT_TAB === 'users') renderDevoteesDirectory(root);
+    }
+
+    // 0. Bookings & Pandit Assignments
+    let BOOKING_FILTER = 'all';
+    function renderBookingsAssignments(root) {
+      let list = S.bookings || [];
+      if (BOOKING_FILTER === 'pending_assignment') {
+        list = list.filter(b => b.status === 'Pending Assignment' || b.panditApproval === 'Rejected');
+      } else if (BOOKING_FILTER === 'awaiting_pandit') {
+        list = list.filter(b => b.status === 'Pending Pandit Confirmation');
+      } else if (BOOKING_FILTER === 'rejected') {
+        list = list.filter(b => (b.rejectedPandits && b.rejectedPandits.length > 0) || b.panditApproval === 'Rejected');
+      } else if (BOOKING_FILTER === 'confirmed') {
+        list = list.filter(b => b.status === 'Confirmed');
+      }
+
+      if (SEARCH_QUERY) {
+        const q = SEARCH_QUERY.toLowerCase();
+        list = list.filter(b => (b.bookingId || '').toLowerCase().includes(q) || (b.userName || '').toLowerCase().includes(q) || (b.service || '').toLowerCase().includes(q) || (b.district || '').toLowerCase().includes(q) || (b.panditName || '').toLowerCase().includes(q));
+      }
+
+      const pendCount = (S.bookings || []).filter(b => b.status === 'Pending Assignment' || b.panditApproval === 'Rejected').length;
+      const awaitingCount = (S.bookings || []).filter(b => b.status === 'Pending Pandit Confirmation').length;
+      const rejectedCount = (S.bookings || []).filter(b => (b.rejectedPandits && b.rejectedPandits.length > 0) || b.panditApproval === 'Rejected').length;
+
+      root.innerHTML = `
+        <div class="admin-panel">
+          <div class="admin-panel-head">
+            <div>
+              <h3><span class="material-icons" style="color:var(--admin-gold)">event_available</span> Puja Bookings &amp; Pandit Assignment</h3>
+              <p class="muted" style="font-size:13px;margin:4px 0 0">
+                Devotee requirements and live Pandit assignments. If a Pandit declines, reassign another Pandit serving that district.
+              </p>
+            </div>
+            <div class="search-box">
+              <span class="material-icons">search</span>
+              <input type="text" placeholder="Search bookings..." value="${esc(SEARCH_QUERY)}" oninput="SEARCH_QUERY=this.value; renderBookingsAssignments(document.getElementById('admin-view-root'));">
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap">
+            <button class="btn btn-sm ${BOOKING_FILTER === 'all' ? 'btn-dark' : 'btn-outline dark'}" onclick="BOOKING_FILTER='all'; renderBookingsAssignments(document.getElementById('admin-view-root'));">
+              All Bookings (${(S.bookings || []).length})
+            </button>
+            <button class="btn btn-sm ${BOOKING_FILTER === 'pending_assignment' ? 'btn-gold' : 'btn-outline dark'}" onclick="BOOKING_FILTER='pending_assignment'; renderBookingsAssignments(document.getElementById('admin-view-root'));">
+              Needs Pandit Assignment (${pendCount})
+            </button>
+            <button class="btn btn-sm ${BOOKING_FILTER === 'awaiting_pandit' ? 'btn-dark' : 'btn-outline dark'}" onclick="BOOKING_FILTER='awaiting_pandit'; renderBookingsAssignments(document.getElementById('admin-view-root'));">
+              Awaiting Pandit Acceptance (${awaitingCount})
+            </button>
+            <button class="btn btn-sm ${BOOKING_FILTER === 'rejected' ? 'btn-red' : 'btn-outline dark'}" onclick="BOOKING_FILTER='rejected'; renderBookingsAssignments(document.getElementById('admin-view-root'));">
+              Rejected Offers (${rejectedCount})
+            </button>
+            <button class="btn btn-sm ${BOOKING_FILTER === 'confirmed' ? 'btn-green' : 'btn-outline dark'}" onclick="BOOKING_FILTER='confirmed'; renderBookingsAssignments(document.getElementById('admin-view-root'));">
+              Confirmed
+            </button>
+          </div>
+
+          ${list.length ? `
+            <div class="table-responsive">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>Booking ID</th>
+                    <th>Devotee Details</th>
+                    <th>Puja / Ritual</th>
+                    <th>District &amp; Schedule</th>
+                    <th>Devotee Preferred Pandit</th>
+                    <th>Assigned Pandit &amp; Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${list.map(b => {
+                    const wasRejected = (b.rejectedPandits && b.rejectedPandits.length > 0) || b.panditApproval === 'Rejected';
+                    let statusBadgeHtml = '';
+                    let actionBtnHtml = '';
+
+                    if (b.status === 'Pending Assignment' && wasRejected) {
+                      statusBadgeHtml = `
+                        <span class="badge red">⚠️ Rejected by Pandit</span>
+                        <div style="font-size:11px;color:#c62828;margin-top:3px;font-weight:600">Offer rejected – Try another Pandit</div>
+                      `;
+                      actionBtnHtml = `<button class="btn btn-gold btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Reassign Pandit</button>`;
+                    } else if (b.status === 'Pending Assignment') {
+                      statusBadgeHtml = `<span class="badge amber">Pending Assignment</span>`;
+                      actionBtnHtml = `<button class="btn btn-gold btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Assign Pandit</button>`;
+                    } else if (b.status === 'Pending Pandit Confirmation') {
+                      statusBadgeHtml = `
+                        <span class="badge blue">Offered to ${esc(b.panditName)}</span>
+                        <div class="muted" style="font-size:11px;margin-top:2px">Awaiting Pandit Acceptance</div>
+                      `;
+                      actionBtnHtml = `<button class="btn btn-outline dark btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Change Pandit</button>`;
+                    } else if (b.status === 'Confirmed') {
+                      statusBadgeHtml = `<span class="badge green">Confirmed (${esc(b.panditName)}) ✅</span>`;
+                      actionBtnHtml = `<button class="btn btn-outline dark btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Change</button>`;
+                    } else {
+                      statusBadgeHtml = `<span class="badge">${esc(b.status)}</span>`;
+                      actionBtnHtml = `<button class="btn btn-outline dark btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Inspect</button>`;
+                    }
+
+                    return `
+                      <tr>
+                        <td><b>${esc(b.bookingId)}</b><br><small class="muted">${inr(b.fee)}</small></td>
+                        <td><b>${esc(b.userName)}</b><br><small class="muted">${esc(b.userEmail)}<br>📞 ${esc(b.phone || 'N/A')}</small></td>
+                        <td><b>${esc(b.service)}</b></td>
+                        <td><b>${esc(b.district)}</b><br><small class="muted">📅 ${esc(b.date)} (${esc(b.time)})</small></td>
+                        <td>${b.preferredPanditName ? `<span class="badge" style="background:#fff8ed;color:#8a5d3b;border:1px solid #ebd9c2">★ ${esc(b.preferredPanditName)}</span>` : '<span class="muted" style="font-size:12px">Any Available Pandit</span>'}</td>
+                        <td>${statusBadgeHtml}</td>
+                        <td>${actionBtnHtml}</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : `
+            <div class="empty" style="padding:40px 20px">
+              <span class="material-icons" style="font-size:42px;color:var(--muted)">event_busy</span>
+              <p style="margin:10px 0 0;font-size:15px;font-weight:600">No bookings found for this filter.</p>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    function openAdminBookingAssignModal(bookingId) {
+      const b = (S.bookings || []).find(x => x.bookingId === bookingId);
+      if (!b) return toast('Booking record not found', true);
+
+      const eligible = (S.adminPandits || []).filter(p => p.verified && ((p.workingDistricts || []).includes(b.district) || p.district === b.district));
+      const fallback = eligible.length ? eligible : (S.adminPandits || []).filter(p => p.verified);
+      const prevRejected = (b.rejectedPandits || []).map(x => x.toLowerCase());
+
+      openModal(`Assign Pandit – ${b.bookingId}`, `
+        <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:10px;padding:14px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+            <h4 style="margin:0;color:var(--admin-dark)">${esc(b.service)}</h4>
+            <span class="badge ${b.status === 'Confirmed' ? 'green' : b.status === 'Pending Assignment' ? (prevRejected.length ? 'red' : 'amber') : 'blue'}">
+              ${esc(b.status)}
+            </span>
+          </div>
+          <div style="font-size:13px;color:#553018;display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:8px">
+            <div><b>Devotee:</b> ${esc(b.userName)} (${esc(b.phone || b.userEmail)})</div>
+            <div><b>Ceremony Schedule:</b> ${esc(b.date)} · ${esc(b.time)}</div>
+            <div><b>District &amp; Venue:</b> ${esc(b.district)} ${b.address ? `· ${esc(b.address)}` : ''}</div>
+            <div><b>Preferred Pandit:</b> ${b.preferredPanditName ? `<span class="badge" style="background:#ffe082;color:#5d4037">★ ${esc(b.preferredPanditName)} (User requested)</span>` : '<span class="muted">Any Available Verified Pandit</span>'}</div>
+          </div>
+          ${b.rejectionReason ? `
+            <div style="margin-top:10px;padding:8px 10px;background:#ffebee;border-radius:6px;color:#c62828;font-size:12.5px;font-weight:600">
+              ⚠️ ${esc(b.rejectionReason)} – Please assign another available Pandit below.
+            </div>
+          ` : ''}
+        </div>
+
+        <label style="font-weight:700;display:block;margin-bottom:8px">
+          Select Verified Pandit for ${esc(b.district)} (${eligible.length} serving this district):
+        </label>
+        
+        <div class="pandit-assign-list" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px">
+          ${fallback.map(p => {
+            const isPref = b.preferredPanditEmail && p.email.toLowerCase() === b.preferredPanditEmail.toLowerCase();
+            const wasRejected = prevRejected.includes(p.email.toLowerCase());
+            const isCurrentlyAssigned = b.panditEmail && p.email.toLowerCase() === b.panditEmail.toLowerCase();
+            const distFee = (p.districtPrices && p.districtPrices[b.district]) || p.fee || 1500;
+            return `
+              <label style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid ${isPref ? '#f59e0b' : '#ebd9c2'};border-radius:10px;background:${wasRejected ? '#fff5f5' : isPref ? '#fffdf5' : '#fff'};cursor:pointer">
+                <input type="radio" name="selected-pandit" value="${esc(p.email)}" ${isCurrentlyAssigned || (!b.panditEmail && isPref && !wasRejected) ? 'checked' : ''}>
+                <img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" style="width:44px;height:44px;border-radius:50%;object-fit:cover" alt="Avatar">
+                <div style="flex:1">
+                  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                    <b style="color:var(--admin-dark)">${esc(p.name)}</b>
+                    ${isPref ? '<span class="badge" style="background:#fef3c7;color:#92400e;font-size:10.5px">★ Devotee Preferred</span>' : ''}
+                    ${wasRejected ? '<span class="badge red" style="font-size:10.5px">Declined Earlier</span>' : ''}
+                    <span class="badge green" style="font-size:10.5px">Verified</span>
+                  </div>
+                  <div class="muted" style="font-size:12px;margin-top:2px">
+                    Exp: ${esc(p.exp || p.experience + ' Yrs')} · Home: ${esc(p.district)} · Serves: ${(p.workingDistricts || [p.district]).join(', ')}
+                  </div>
+                </div>
+                <div style="text-align:right">
+                  <b style="color:var(--admin-gold);font-size:14px">${inr(distFee)}</b>
+                  <div class="muted" style="font-size:11px">for ${esc(b.district)}</div>
+                </div>
+              </label>
+            `;
+          }).join('') || '<div class="empty">No verified Pandits found for this district.</div>'}
+        </div>
+
+        <button class="btn btn-gold btn-lg" id="btn-confirm-assign-pandit" style="width:100%;margin-top:16px">
+          <span class="material-icons">send</span> Confirm Assignment &amp; Send Offer to Pandit
+        </button>
+      `, (m) => {
+        const btn = m.querySelector('#btn-confirm-assign-pandit');
+        if (btn) {
+          btn.onclick = async () => {
+            const checked = m.querySelector('input[name="selected-pandit"]:checked');
+            if (!checked) return toast('Please select a Pandit from the list', true);
+            btn.disabled = true;
+            btn.innerHTML = '<span class="material-icons spin">sync</span> Assigning Pandit...';
+            try {
+              await api(`/bookings/${b.bookingId}/assign-pandit`, {
+                method: 'PUT',
+                body: { panditEmail: checked.value }
+              });
+              closeModal();
+              toast('Pandit assigned successfully! Notification sent to Pandit ji.');
+              loadData();
+            } catch (err) {
+              toast(err.message, true);
+              btn.disabled = false;
+              btn.innerHTML = '<span class="material-icons">send</span> Confirm Assignment &amp; Send Offer to Pandit';
+            }
+          };
+        }
+      });
     }
 
     // 1. KYC Queue
@@ -512,6 +738,7 @@
                     <td>${statusBadge(p.status)}</td>
                     <td>
                       <button class="btn btn-outline dark btn-sm" onclick="viewPanditModal('${esc(p._id)}')">Details</button>
+                      <button class="btn btn-gold btn-sm" onclick="openPanditDistrictPricingModal('${esc(p._id)}')">Fix District Rates</button>
                       ${p.status !== 'Verified' ? `<button class="btn btn-green btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Verified')">Approve</button>` : `<button class="btn btn-red btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Rejected')">Revoke</button>`}
                     </td>
                   </tr>
@@ -644,6 +871,17 @@
           <div><label>Working Districts</label><span>${(p.workingDistricts || [p.district]).join(', ')}</span></div>
           <div><label>Specialty</label><span>${esc(p.specialty || 'Vedic Rituals')}</span></div>
         </div>
+        <div style="margin-bottom:14px;background:#fff;border:1px solid #ebd9c2;border-radius:10px;padding:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <label style="font-weight:700;margin:0;color:var(--admin-dark)">Admin Fixed District Dakshina Rates</label>
+            <button class="btn btn-gold btn-sm" onclick="closeModal(); openPanditDistrictPricingModal('${esc(p._id)}');">
+              <span class="material-icons" style="font-size:14px">edit</span> Fix District Rates
+            </button>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${Object.entries(p.districtPrices || {}).map(([d, f]) => `<span class="badge" style="background:#fff8ed;border:1px solid #ebd9c2"><b>${esc(d)}:</b> ${inr(f)}</span>`).join('') || '<span class="muted" style="font-size:12px">No custom district rates fixed yet. Standard base fee applies.</span>'}
+          </div>
+        </div>
         <div>
           <label>Services Offered</label>
           <div>${(p.services || []).map(s => `<span class="badge green">${esc(s)}</span>`).join('') || '<span class="muted">None listed</span>'}</div>
@@ -665,6 +903,203 @@
           <button class="btn btn-red" style="flex:1" onclick="setPanditStatus('${esc(p._id)}', 'Rejected'); closeModal();">Reject KYC</button>
         </div>
       `);
+    }
+
+    function openPanditDistrictPricingModal(id) {
+      const p = S.adminPandits.find(x => x._id === id);
+      if (!p) return;
+      const state = p.workingState || p.state || 'Odisha';
+      const districts = (p.workingDistricts && p.workingDistricts.length) ? p.workingDistricts : [p.district || 'Khordha'];
+      const curPrices = p.districtPrices || {};
+
+      openModal(`Set District Rates – ${p.name}`, `
+        <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:10px;padding:12px;margin-bottom:16px">
+          <div style="font-size:14px;font-weight:700;color:var(--admin-dark)">${esc(p.name)} (${esc(state)})</div>
+          <div class="muted" style="font-size:12.5px;margin-top:2px">
+            Working Districts chosen by Pandit: <b>${esc(districts.join(', '))}</b>
+          </div>
+          <p style="margin:6px 0 0;font-size:12px;color:#8a5d3b">
+            Fix the official Dakshina fee for each district served by this Pandit. Only Admin can set these amounts.
+          </p>
+        </div>
+
+        <div>
+          <label style="font-weight:600">Default Base Fee (₹)</label>
+          <input type="number" id="adm-base-fee" value="${p.fee || 1500}" style="margin-bottom:12px">
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center;background:#f5f0e8;padding:10px;border-radius:8px;margin-bottom:14px">
+          <span style="font-size:12.5px;font-weight:600;flex:1">Quick Fill All Districts:</span>
+          <input type="number" id="quick-adm-dist-fee" placeholder="₹ Amount" style="width:120px;padding:5px 8px;font-size:13px">
+          <button type="button" class="btn btn-outline dark btn-sm" id="btn-quick-fill-adm">Apply to All</button>
+        </div>
+
+        <label style="font-weight:600;display:block;margin-bottom:8px">District-wise Dakshina Fees (₹):</label>
+        <div class="district-pricing-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:10px;max-height:280px;overflow-y:auto;padding-right:4px">
+          ${districts.map(d => `
+            <div style="background:#fff;border:1px solid #e0d0bc;border-radius:8px;padding:8px 10px">
+              <label style="font-size:12px;font-weight:700;margin-bottom:4px;display:block;color:var(--admin-dark)">${esc(d)}</label>
+              <div style="display:flex;align-items:center;gap:4px">
+                <span style="font-size:13px;font-weight:700">₹</span>
+                <input type="number" class="adm-dist-fee-input" data-district="${esc(d)}" value="${curPrices[d] || p.fee || 1500}" style="font-size:13px;padding:5px 8px;font-weight:600">
+              </div>
+            </div>
+          `).join('')}
+        </div>
+
+        <button class="btn btn-gold" id="btn-save-dist-prices" style="width:100%;margin-top:18px">
+          <span class="material-icons">save</span> Save District Pricing
+        </button>
+      `, (m) => {
+        const quickInput = m.querySelector('#quick-adm-dist-fee');
+        const quickBtn = m.querySelector('#btn-quick-fill-adm');
+        if (quickBtn && quickInput) {
+          quickBtn.onclick = () => {
+            const val = Number(quickInput.value);
+            if (!val || val <= 0) return toast('Please enter a valid amount', true);
+            m.querySelectorAll('.adm-dist-fee-input').forEach(inp => { inp.value = val; });
+            toast(`Set ₹${val} for all ${districts.length} districts`);
+          };
+        }
+
+        const saveBtn = m.querySelector('#btn-save-dist-prices');
+        if (saveBtn) {
+          saveBtn.onclick = async () => {
+            const baseFee = Number(m.querySelector('#adm-base-fee').value) || 1500;
+            const prices = {};
+            m.querySelectorAll('.adm-dist-fee-input').forEach(inp => {
+              const d = inp.dataset.district;
+              const val = Number(inp.value) || baseFee;
+              prices[d] = val;
+            });
+
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="material-icons spin">sync</span> Saving...';
+            try {
+              await api(`/pandits/${p._id}/district-prices`, {
+                method: 'PUT',
+                body: { fee: baseFee, districtPrices: prices }
+              });
+              closeModal();
+              toast(`District pricing saved for ${p.name}!`);
+              loadData();
+            } catch (err) {
+              toast(err.message, true);
+              saveBtn.disabled = false;
+              saveBtn.innerHTML = '<span class="material-icons">save</span> Save District Pricing';
+            }
+          };
+        }
+      });
+    }
+
+    async function renderPlatformBankTab(root) {
+      root.innerHTML = '<div class="empty">Loading Platform Bank Details...</div>';
+      try {
+        const details = await api('/platform-bank-details');
+        root.innerHTML = `
+          <div class="admin-panel" style="max-width:850px;margin:0 auto">
+            <div class="admin-panel-head">
+              <div>
+                <h3><span class="material-icons" style="color:var(--admin-gold)">account_balance</span> Official Platform Bank &amp; UPI Account</h3>
+                <p class="muted" style="font-size:13px;margin:4px 0 0">
+                  Devotees send all ritual Dakshina payments to this single centralized account. Individual pandit bank details are not shown to devotees.
+                </p>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:16px">
+              <div>
+                <label style="font-weight:600;display:block;margin-bottom:4px">Account Holder Name *</label>
+                <input type="text" id="adm-bank-holder" value="${esc(details.accountHolder || '')}" placeholder="e.g. PujaConnect Official Platform Account">
+              </div>
+              <div>
+                <label style="font-weight:600;display:block;margin-bottom:4px">Bank Name *</label>
+                <input type="text" id="adm-bank-name" value="${esc(details.bankName || '')}" placeholder="e.g. State Bank of India">
+              </div>
+              <div>
+                <label style="font-weight:600;display:block;margin-bottom:4px">Bank Account Number *</label>
+                <input type="text" id="adm-bank-acc" value="${esc(details.accountNumber || '')}" placeholder="e.g. 40918237465">
+              </div>
+              <div>
+                <label style="font-weight:600;display:block;margin-bottom:4px">IFSC Code *</label>
+                <input type="text" id="adm-bank-ifsc" value="${esc(details.ifscCode || '')}" placeholder="e.g. SBIN0001234" style="text-transform:uppercase">
+              </div>
+              <div style="grid-column:1/-1">
+                <label style="font-weight:600;display:block;margin-bottom:4px">Platform UPI ID / VPA *</label>
+                <input type="text" id="adm-bank-upi" value="${esc(details.upiId || '')}" placeholder="e.g. pujaconnect@upi">
+              </div>
+              <div style="grid-column:1/-1">
+                <label style="font-weight:600;display:block;margin-bottom:4px">Official UPI QR Code Image (URL or Upload file)</label>
+                <div style="display:flex;gap:10px;align-items:center">
+                  <input type="text" id="adm-bank-qr-url" value="${esc(details.qrCode || '')}" placeholder="https://..." style="flex:1">
+                  <input type="file" id="adm-bank-qr-file" accept="image/*" style="font-size:12px;max-width:200px">
+                </div>
+                <div id="adm-qr-preview-box" style="margin-top:12px;display:flex;align-items:center;gap:14px;background:#fff8ed;border:1px solid #ebd9c2;border-radius:10px;padding:12px">
+                  <img id="adm-qr-preview-img" src="${esc(details.qrCode || 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=pujaconnect@upi')}" style="width:90px;height:90px;object-fit:contain;border-radius:8px;background:#fff;border:1px solid #ddd" alt="QR Preview">
+                  <div>
+                    <b style="font-size:13px;color:var(--admin-dark)">Devotee Live Payment View</b>
+                    <div class="muted" style="font-size:12px;margin-top:2px">Devotees will scan this official QR Code when paying their ceremony Dakshina.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button class="btn btn-gold btn-lg" id="btn-save-platform-bank" style="width:100%">
+              <span class="material-icons">save</span> Save Official Platform Bank Details
+            </button>
+          </div>
+        `;
+
+        const qrUrlInp = document.getElementById('adm-bank-qr-url');
+        const qrFileInp = document.getElementById('adm-bank-qr-file');
+        const qrImg = document.getElementById('adm-qr-preview-img');
+        if (qrUrlInp && qrImg) {
+          qrUrlInp.oninput = () => { if (qrUrlInp.value) qrImg.src = qrUrlInp.value; };
+        }
+        if (qrFileInp && qrImg && qrUrlInp) {
+          qrFileInp.onchange = (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+              qrUrlInp.value = evt.target.result;
+              qrImg.src = evt.target.result;
+            };
+            reader.readAsDataURL(file);
+          };
+        }
+
+        const saveBtn = document.getElementById('btn-save-platform-bank');
+        if (saveBtn) {
+          saveBtn.onclick = async () => {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="material-icons spin">sync</span> Saving...';
+            try {
+              await api('/platform-bank-details', {
+                method: 'PUT',
+                body: {
+                  accountHolder: document.getElementById('adm-bank-holder').value.trim(),
+                  bankName: document.getElementById('adm-bank-name').value.trim(),
+                  accountNumber: document.getElementById('adm-bank-acc').value.trim(),
+                  ifscCode: document.getElementById('adm-bank-ifsc').value.trim(),
+                  upiId: document.getElementById('adm-bank-upi').value.trim(),
+                  qrCode: document.getElementById('adm-bank-qr-url').value.trim()
+                }
+              });
+              toast('Official platform bank details saved successfully! 🙏');
+              saveBtn.disabled = false;
+              saveBtn.innerHTML = '<span class="material-icons">save</span> Save Official Platform Bank Details';
+            } catch (err) {
+              toast(err.message, true);
+              saveBtn.disabled = false;
+              saveBtn.innerHTML = '<span class="material-icons">save</span> Save Official Platform Bank Details';
+            }
+          };
+        }
+      } catch (e) {
+        root.innerHTML = `<div class="empty error">Failed to load platform bank details: ${esc(e.message)}</div>`;
+      }
     }
 
     async function setPanditStatus(id, status) {

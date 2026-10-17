@@ -418,70 +418,220 @@ function requireLogin(thenAction) {
   return false;
 }
 
-async function openBooking(id) {
-  const p = (S.pandits || []).find((x) => x._id === id);
-  if (!p) return;
-  if (!requireLogin(() => openBooking(id))) return;
+async function openBooking(arg) {
+  let targetPanditId = null;
+  let targetPujaName = '';
+  let targetDistrict = '';
+
+  if (typeof arg === 'string') {
+    targetPanditId = arg;
+  } else if (arg && typeof arg === 'object') {
+    targetPanditId = arg.panditId || null;
+    targetPujaName = arg.pujaName || arg.name || '';
+    targetDistrict = arg.district || '';
+  }
+
+  if (!requireLogin(() => openBooking(arg))) return;
   const u = S.user;
-  const services = p.services && p.services.length ? p.services : S.pujas.filter((x) => x.type === 'Short').map((x) => x.name);
-  const districts = p.workingDistricts && p.workingDistricts.length ? p.workingDistricts : [p.district];
+
+  if (!S.pandits || !S.pandits.length) {
+    try { S.pandits = await api('/pandits?verified=true'); } catch {}
+  }
+
+  const selectedPandit = targetPanditId ? (S.pandits || []).find((x) => x._id === targetPanditId || x.email === targetPanditId) : null;
+  const allShortPujas = (S.pujas || []).filter((x) => x.type === 'Short').map((x) => x.name);
+  const curState = S.filters.state || (selectedPandit && (selectedPandit.workingState || selectedPandit.state)) || u.state || 'Odisha';
+  const availableDistricts = LOCATIONS[curState] || ['Khordha', 'Cuttack', 'Puri', 'Bhadrak', 'Balasore', 'Sambalpur'];
+
   const sel = { date: '', time: '' };
-  let booked = [];
-  openModal('Book ' + p.name, `
-    <div><label>Puja / Ritual</label><select id="b-service">${opts(services, S.filters.service)}</select></div>
-    <div><label>District</label><select id="b-district">${opts(districts, S.filters.district)}</select></div>
-    <div><label>Date</label><input type="date" id="b-date" min="${today()}"></div>
-    <div><label>Time Slot</label><div id="b-slots" class="checks"><span class="muted">Select a date to see live slots.</span></div></div>
-    <div><label>Address / Venue</label><textarea id="b-address" rows="2" placeholder="House no., locality, landmark"></textarea></div>
-    <div><label>Contact Phone</label><input id="b-phone" value="${esc(u.phone || '')}"></div>
-    <div class="cost-box"><div class="row"><span>Dakshina</span><b id="b-fee">${inr(p.fee)}</b></div>
-      <label class="check" style="margin-top:10px"><input type="checkbox" id="b-adv"> Pay 25% advance now (demo – no real payment is taken)</label></div>
-    <button class="btn btn-gold" id="b-submit">Confirm Booking</button>`, (m) => {
-    const feeFor = () => (p.districtPrices && p.districtPrices[$('#b-district', m).value]) || p.fee;
-    const paintFee = () => {
-      const dist = $('#b-district', m).value;
-      const f = feeFor();
-      const hasCustom = p.districtPrices && p.districtPrices[dist];
-      $('#b-fee', m).innerHTML = `${inr(f)} ${hasCustom ? `<small class="muted" style="font-size:12px;font-weight:400">(${esc(dist)} Rate)</small>` : ''}`;
+  const initialPuja = targetPujaName || (selectedPandit && selectedPandit.services && selectedPandit.services[0]) || S.filters.service || allShortPujas[0] || 'Satyanarayan Puja';
+  const initialDistrict = targetDistrict || (selectedPandit && ((selectedPandit.workingDistricts && selectedPandit.workingDistricts[0]) || selectedPandit.district)) || S.filters.district || u.district || availableDistricts[0];
+
+  openModal('Book a Sacred Ritual', `
+    <div>
+      <label>Puja / Sacred Ritual *</label>
+      <select id="b-service">${opts(allShortPujas.length ? allShortPujas : ['Satyanarayan Puja', 'Griha Pravesh', 'Ganesh Puja', 'Rudrabhishek', 'Vastu Shanti'], initialPuja)}</select>
+    </div>
+    <div class="form-grid" style="padding:0">
+      <div>
+        <label>District *</label>
+        <select id="b-district">${opts(availableDistricts, initialDistrict)}</select>
+      </div>
+      <div>
+        <label>Ceremony Date *</label>
+        <input type="date" id="b-date" min="${today()}">
+      </div>
+    </div>
+    <div>
+      <label>Preferred Vedic Pandit (Optional)</label>
+      <select id="b-pandit">
+        <option value="">✨ Any Available Verified Pandit (Auto-assigned by PujaConnect Admin)</option>
+      </select>
+      <small class="muted" style="display:block;margin-top:4px;font-size:12px">
+        Selecting a Pandit is optional. Our team will verify pandit availability and assign the best verified Pandit who serves your district.
+      </small>
+    </div>
+    <div>
+      <label>Ceremony Time Slot *</label>
+      <div id="b-slots" class="checks">
+        <span class="muted">Select a date to view available time slots.</span>
+      </div>
+    </div>
+    <div>
+      <label>Ceremony Venue / Address *</label>
+      <textarea id="b-address" rows="2" placeholder="House no., apartment, landmark, locality"></textarea>
+    </div>
+    <div>
+      <label>Contact Mobile Phone *</label>
+      <input id="b-phone" value="${esc(u.phone || '')}" placeholder="10-digit mobile number">
+    </div>
+    <div class="cost-box">
+      <div class="row">
+        <span>Estimated Dakshina</span>
+        <b id="b-fee">₹1,199</b>
+      </div>
+      <small class="muted" style="display:block;margin-top:4px;font-size:12px">
+        Dakshina rates are fixed district-wise by PujaConnect Admin. Payment is completed only after admin assignment and confirmation.
+      </small>
+    </div>
+    <button class="btn btn-gold btn-lg" id="b-submit" style="width:100%;margin-top:12px">
+      <span class="material-icons">send</span> Submit Booking Request
+    </button>
+  `, (m) => {
+    const serviceSel = $('#b-service', m);
+    const districtSel = $('#b-district', m);
+    const panditSel = $('#b-pandit', m);
+    const dateInp = $('#b-date', m);
+    const feeEl = $('#b-fee', m);
+
+    const updatePanditsDropdown = () => {
+      const dist = districtSel.value;
+      const eligible = (S.pandits || []).filter((p) => {
+        if (!p.verified) return false;
+        return (p.workingDistricts && p.workingDistricts.includes(dist)) || p.district === dist;
+      });
+
+      let optionsHtml = '<option value="">✨ Any Available Verified Pandit (Auto-assigned by PujaConnect Admin)</option>';
+      eligible.forEach((p) => {
+        const isSelected = selectedPandit && selectedPandit.email.toLowerCase() === p.email.toLowerCase();
+        optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''}>Pandit ${esc(p.name)} (${esc(p.district)}) — ${esc(p.exp || p.experience + ' Yrs')}</option>`;
+      });
+      panditSel.innerHTML = optionsHtml;
+      paintFee();
     };
+
+    const paintFee = () => {
+      const dist = districtSel.value;
+      const ritual = serviceSel.value;
+      const pEmail = panditSel.value;
+      const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
+
+      let f = 1199;
+      if (p) {
+        f = (p.districtPrices && p.districtPrices[dist]) || p.fee || 1500;
+      } else {
+        const pujaDoc = (S.pujas || []).find((x) => x.name === ritual);
+        f = (pujaDoc && pujaDoc.baseFee) || 1199;
+      }
+      feeEl.innerHTML = inr(f);
+    };
+
+    const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
     const drawSlots = () => {
-      const d = $('#b-date', m).value;
+      const d = dateInp.value;
       const box = $('#b-slots', m);
       sel.time = '';
-      if (!d) return;
-      const dn = dayName(d);
-      if (!(p.availableDays || DAYS).includes(dn)) { box.innerHTML = `<span class="muted">Pandit is not available on ${dn}s.</span>`; return; }
-      const slots = (p.daySlots && p.daySlots[dn] && p.daySlots[dn].length ? p.daySlots[dn] : p.timeSlots) || DEFAULT_SLOTS;
-      const taken = booked.filter((b) => b.date === d && ['Confirmed', 'In Progress'].includes(b.status)).map((b) => b.time);
-      box.innerHTML = slots.map((s) => `<button type="button" class="slot ${taken.includes(s) ? 'booked' : ''}" data-slot="${esc(s)}" ${taken.includes(s) ? 'disabled' : ''}>${esc(s)}</button>`).join('');
+      if (!d) {
+        box.innerHTML = '<span class="muted">Select a date to view live slots.</span>';
+        return;
+      }
+      box.innerHTML = standardSlots.map((s) => `
+        <button type="button" class="slot" data-slot="${esc(s)}">${esc(s)}</button>
+      `).join('');
     };
-    api('/bookings?panditEmail=' + encodeURIComponent(p.email)).then((b) => { booked = b; drawSlots(); }).catch(() => {});
-    $('#b-date', m).onchange = drawSlots;
-    $('#b-district', m).onchange = paintFee;
+
+    updatePanditsDropdown();
+    serviceSel.onchange = updatePanditsDropdown;
+    districtSel.onchange = updatePanditsDropdown;
+    panditSel.onchange = paintFee;
+    dateInp.onchange = drawSlots;
+
     $('#b-slots', m).onclick = (e) => {
       const b = e.target.closest('.slot');
-      if (!b || b.disabled) return;
+      if (!b) return;
       m.querySelectorAll('.slot').forEach((x) => x.classList.remove('selected'));
       b.classList.add('selected');
       sel.time = b.dataset.slot;
     };
+
     $('#b-submit', m).onclick = async (e) => {
-      const date = $('#b-date', m).value;
-      if (!date) return toast('Please choose a date', true);
+      const date = dateInp.value;
+      if (!date) return toast('Please choose a ceremony date', true);
       if (!sel.time) return toast('Please choose a time slot', true);
-      const fee = feeFor();
-      e.target.disabled = true;
+      const address = $('#b-address', m).value.trim();
+      if (!address) return toast('Please enter your ceremony venue / address', true);
+      const phone = $('#b-phone', m).value.trim();
+      if (!phone) return toast('Please enter your contact mobile number', true);
+
+      const feeText = feeEl.textContent.replace(/[^0-9]/g, '');
+      const fee = Number(feeText) || 1199;
+
+      const submitBtn = e.target;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Submitting Request...';
+
       try {
-        const bk = await api('/bookings', { method: 'POST', body: {
-          userEmail: u.email, userName: u.name, phone: $('#b-phone', m).value,
-          service: $('#b-service', m).value, district: $('#b-district', m).value, date, time: sel.time,
-          address: $('#b-address', m).value, panditEmail: p.email, fee,
-          advanceAmount: $('#b-adv', m).checked ? Math.round(fee * 0.25) : 0
-        } });
+        const res = await api('/bookings', {
+          method: 'POST',
+          body: {
+            userEmail: u.email,
+            userName: u.name,
+            phone,
+            service: serviceSel.value,
+            district: districtSel.value,
+            date,
+            time: sel.time,
+            address,
+            panditEmail: panditSel.value,
+            fee
+          }
+        });
+
         closeModal();
-        toast(`Booked! ID ${bk.bookingId}. Confirmation email sent.`);
+        const bk = res.booking || res;
+
+        // Display Success Screen as requested
+        openModal('Booking Request Submitted', `
+          <div style="text-align:center;padding:16px 8px">
+            <span class="material-icons" style="font-size:56px;color:#2e7d32">check_circle</span>
+            <h3 style="margin:12px 0 6px;color:var(--mahogany)">Booking Request Submitted! 🙏</h3>
+            <p style="font-size:15px;color:#2e1305;font-weight:600;margin:0 0 16px">
+              Our team will assign a verified Pandit as soon as possible.
+            </p>
+            <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:12px;padding:16px;margin:0 0 16px;text-align:left;font-size:13.5px;line-height:1.7">
+              <div><b>Booking ID:</b> <span class="booking-id-tag">${esc(bk.bookingId)}</span></div>
+              <div><b>Sacred Ritual:</b> ${esc(bk.service)}</div>
+              <div><b>Ceremony Date &amp; Time:</b> ${esc(bk.date)} (${esc(bk.time)})</div>
+              <div><b>District:</b> ${esc(bk.district)}</div>
+              <div><b>Venue:</b> ${esc(bk.address || bk.district)}</div>
+              <div><b>Preferred Pandit:</b> ${bk.preferredPanditName ? esc(bk.preferredPanditName) : 'Any Available Verified Pandit (Auto-assignment)'}</div>
+              <div><b>Estimated Dakshina:</b> ${inr(bk.fee)}</div>
+            </div>
+            <div style="background:#f1f8e9;border:1px solid #c8e6c9;border-radius:8px;padding:12px 14px;color:#2e7d32;font-size:13px;text-align:left;margin-bottom:18px">
+              ✓ An acknowledgement email with your ceremony details has been sent to <b>${esc(u.email)}</b>.<br>
+              ✓ Once our administration assigns the Pandit and the Pandit accepts the ceremony, you will automatically receive the official confirmation email.
+            </div>
+            <button class="btn btn-gold btn-lg" onclick="closeModal(); showView('dashboard');" style="width:100%">
+              Go to Devotee Dashboard
+            </button>
+          </div>
+        `);
         showView('dashboard');
-      } catch (err) { toast(err.message, true); e.target.disabled = false; }
+      } catch (err) {
+        toast(err.message, true);
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span class="material-icons">send</span> Submit Booking Request';
+      }
     };
   });
 }
@@ -779,8 +929,13 @@ function renderLongForm() {
   };
 }
 
-/* ---------- dashboards ---------- */
-const statusBadge = (s) => `<span class="badge ${['Completed', 'Confirmed', 'Verified', 'Assigned', 'Accepted'].includes(s) ? 'green' : ['Cancelled', 'Rejected', 'Declined'].includes(s) ? 'red' : 'amber'}">${esc(s)}</span>`;
+const statusBadge = (s) => {
+  let cls = 'amber';
+  if (['Completed', 'Confirmed', 'Verified', 'Assigned', 'Accepted'].includes(s)) cls = 'green';
+  else if (['Cancelled', 'Rejected', 'Declined'].includes(s)) cls = 'red';
+  else if (['Pending Pandit Confirmation', 'Offered'].includes(s)) cls = 'blue';
+  return `<span class="badge ${cls}">${esc(s)}</span>`;
+};
 
 async function renderDashboard() {
   const root = $('#dashboard-root');
@@ -1314,12 +1469,21 @@ function renderPanditCeremoniesTab(bookings) {
             </div>
           </div>
           <div class="booking-card-footer">
+            ${(b.status === 'Pending Pandit Confirmation' || b.panditApproval === 'Pending') ? `
+              <div style="background:#fff8ed;border:1px dashed #d99a19;border-radius:8px;padding:8px 10px;margin-bottom:8px;width:100%">
+                <b style="color:var(--mahogany);font-size:12.5px">⭐ Assignment Request from Admin</b>
+                <div class="muted" style="font-size:11.5px;margin-top:2px">Please accept to confirm booking or decline for admin reassignment.</div>
+              </div>
+              <div style="display:flex;gap:8px;width:100%">
+                <button class="btn btn-green btn-sm" style="flex:1" data-action="panditAcceptBooking" data-id="${esc(b.bookingId)}">✓ Accept Ceremony</button>
+                <button class="btn btn-red btn-sm" style="flex:1" data-action="panditRejectBooking" data-id="${esc(b.bookingId)}">✕ Reject Offer</button>
+              </div>
+            ` : ''}
             ${b.status === 'Confirmed' ? `
-              <button class="btn btn-green btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="In Progress">Accept</button>
-              <button class="btn btn-red btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="Cancelled">Decline</button>
+              <button class="btn btn-dark btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="In Progress">Start Ceremony</button>
             ` : ''}
             ${b.status === 'In Progress' ? `
-              <button class="btn btn-dark btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="Completed">Mark Completed ✅</button>
+              <button class="btn btn-green btn-sm" data-action="setStatus" data-id="${esc(b.bookingId)}" data-status="Completed">Mark Completed ✅</button>
             ` : ''}
             ${['Completed', 'Cancelled'].includes(b.status) ? `<small class="muted">Ceremony ${esc(b.status)}</small>` : ''}
           </div>
@@ -1406,15 +1570,15 @@ function renderPanditAvailTab(me) {
       </div>
     </div>
 
-    <!-- Working Districts & District-wise Fees Section -->
+    <!-- Working Districts Section -->
     <div class="panel-section-box">
       <div class="section-box-header">
         <div class="box-icon"><span class="material-icons">place</span></div>
         <div style="flex:1">
-          <h4>Working Districts &amp; District-wise Dakshina Fees</h4>
-          <p class="muted">Select your state, choose the districts you serve, and set your custom ritual Dakshina fee for each district.</p>
+          <h4>Working Districts</h4>
+          <p class="muted">Select your state and choose the districts you are available to serve for ceremonies.</p>
         </div>
-        ${isApproved ? '<span class="badge green"><span class="material-icons">check_circle</span> Approved for Districts</span>' : '<span class="badge amber">Pending Admin Approval</span>'}
+        ${isApproved ? '<span class="badge green"><span class="material-icons">check_circle</span> Approved for Service</span>' : '<span class="badge amber">Pending Admin Approval</span>'}
       </div>
 
       <div style="margin-top:16px">
@@ -1435,18 +1599,11 @@ function renderPanditAvailTab(me) {
         <div class="district-selection-grid" id="district-checkboxes"></div>
       </div>
 
-      <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:18px">
-        <div class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:10px">
-          <div>
-            <h4 style="margin:0;font-size:15px;color:var(--mahogany)">Per-District Dakshina Fees (₹)</h4>
-            <small class="muted">Enter custom Dakshina for each selected district</small>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input type="number" id="quick-fill-fee" placeholder="Amount (e.g. 1500)" style="width:140px;padding:6px 10px;font-size:13px">
-            <button type="button" class="btn btn-gold btn-sm" id="btn-apply-all-fees">Apply to All</button>
-          </div>
+      <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:10px;padding:12px 14px;margin-top:18px;display:flex;align-items:center;gap:12px">
+        <span class="material-icons" style="color:var(--ochre);font-size:24px">gavel</span>
+        <div style="font-size:13px;color:#3b2115;line-height:1.5">
+          <b>Admin Fixed Dakshina:</b> Official ceremony Dakshina amounts are set and managed exclusively by the PujaConnect Administration for each district you select.
         </div>
-        <div id="district-fee-table" class="district-fees-container"></div>
       </div>
     </div>
 
@@ -1494,61 +1651,12 @@ function renderPanditAvailTab(me) {
           </button>
         </div>
       </div>
-
-      <!-- Default Base Fee Fallback -->
-      <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
-        <label style="font-weight:600" for="av-fee">Default Base Dakshina (₹)</label>
-        <input id="av-fee" type="number" value="${me.fee || 1500}" style="max-width:240px;margin-top:4px" placeholder="1500">
-        <small class="muted" style="display:block;margin-top:4px">Standard Dakshina applied if a district doesn't have a custom rate set.</small>
-      </div>
-    </div>
-
-    <!-- Pandit Bank & UPI Payout Details Section -->
-    <div class="panel-section-box">
-      <div class="section-box-header">
-        <div class="box-icon"><span class="material-icons">account_balance</span></div>
-        <div style="flex:1">
-          <h4>Bank &amp; UPI Payout Details (For Devotee Payments)</h4>
-          <p class="muted">After ceremony approval, devotees will pay their Dakshina directly to these bank/UPI details.</p>
-        </div>
-      </div>
-
-      <div class="form-grid" style="padding:16px 0 0">
-        <div>
-          <label style="font-weight:600">Bank Account Number</label>
-          <input type="text" id="p-bank-acc" value="${esc(me.bankAccount || '')}" placeholder="e.g. 123456789012">
-        </div>
-        <div>
-          <label style="font-weight:600">IFSC Code</label>
-          <input type="text" id="p-bank-ifsc" value="${esc(me.ifscCode || '')}" placeholder="e.g. SBIN0001234" style="text-transform:uppercase">
-        </div>
-        <div>
-          <label style="font-weight:600">UPI ID / Number (UI Number)</label>
-          <input type="text" id="p-bank-upi" value="${esc(me.upiId || '')}" placeholder="e.g. 9876543210@upi or yourname@okaxis">
-        </div>
-        <div>
-          <label style="font-weight:600">Bank Name</label>
-          <input type="text" id="p-bank-name" value="${esc(me.bankName || '')}" placeholder="e.g. State Bank of India">
-        </div>
-        <div>
-          <label style="font-weight:600">Account Holder Name</label>
-          <input type="text" id="p-bank-holder" value="${esc(me.accountHolder || me.name)}" placeholder="As per bank passbook">
-        </div>
-        <div>
-          <label style="font-weight:600">QR Code Image (Optional)</label>
-          <input type="file" id="p-qr-file" accept="image/*" style="font-size:12px;padding:6px">
-          <input type="hidden" id="p-qr-val" value="${esc(me.qrCode || '')}">
-          <div id="p-qr-preview-wrap" style="${me.qrCode ? 'display:block;' : 'display:none;'}margin-top:8px">
-            <img id="p-qr-preview" src="${esc(me.qrCode || '')}" style="width:100px;height:100px;object-fit:contain;border-radius:8px;border:1px solid var(--border)">
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Prominent Save Action -->
     <div style="margin:20px 0 36px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-gold btn-lg" id="btn-save-all-avail" data-action="saveAvail">
-        <span class="material-icons">save</span> Save Availability, Districts &amp; Bank Details
+        <span class="material-icons">save</span> Save Working Districts &amp; Availability
       </button>
     </div>
   `;
@@ -1564,35 +1672,14 @@ function setupAvailTabListeners(me) {
       ? me.workingDistricts
       : [me.district || (LOCATIONS[curState] && LOCATIONS[curState][0]) || 'Khordha']
   );
-  let curPrices = { ...(me.districtPrices || {}) };
   let slots = [...(me.timeSlots && me.timeSlots.length ? me.timeSlots : DEFAULT_SLOTS)];
 
   const stateSelect = $('#av-state', container);
   const stateLabel = $('#cur-state-name', container);
   const checkboxesWrap = $('#district-checkboxes', container);
-  const feeTableWrap = $('#district-fee-table', container);
   const slotsWrap = $('#slots-container', container);
 
-  // QR Code file upload preview
-  const qrFile = $('#p-qr-file', container);
-  const qrVal = $('#p-qr-val', container);
-  const qrPreview = $('#p-qr-preview', container);
-  const qrWrap = $('#p-qr-preview-wrap', container);
-  if (qrFile && qrVal && qrPreview && qrWrap) {
-    qrFile.onchange = (e) => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        qrVal.value = evt.target.result;
-        qrPreview.src = evt.target.result;
-        qrWrap.style.display = 'block';
-      };
-      reader.readAsDataURL(file);
-    };
-  }
-
-  if (!stateSelect || !checkboxesWrap || !feeTableWrap || !slotsWrap) return;
+  if (!stateSelect || !checkboxesWrap || !slotsWrap) return;
 
   function renderSlots() {
     if (!slots.length) {
@@ -1630,43 +1717,8 @@ function setupAvailTabListeners(me) {
     checkboxesWrap.querySelectorAll('input[type="checkbox"]').forEach((chk) => {
       chk.onchange = () => {
         const d = chk.value;
-        if (chk.checked) {
-          curDistricts.add(d);
-          if (!curPrices[d]) curPrices[d] = +$('#av-fee', container).value || me.fee || 1500;
-        } else {
-          curDistricts.delete(d);
-        }
-        renderDistrictFeeInputs();
-      };
-    });
-  }
-
-  function renderDistrictFeeInputs() {
-    const distArr = Array.from(curDistricts);
-    if (!distArr.length) {
-      feeTableWrap.innerHTML = '<div class="empty" style="padding:20px;grid-column:1/-1"><span class="muted">No districts selected. Select districts above to configure fees.</span></div>';
-      return;
-    }
-    feeTableWrap.innerHTML = distArr.map((d) => {
-      const price = curPrices[d] !== undefined ? curPrices[d] : (me.fee || 1500);
-      return `
-        <div class="district-fee-row">
-          <span class="district-fee-row-name">
-            <span class="material-icons">place</span>
-            ${esc(d)}
-          </span>
-          <div class="district-fee-input-wrap">
-            <span>₹</span>
-            <input type="number" class="dist-fee-input" data-district="${esc(d)}" value="${price}" min="100" step="50">
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    feeTableWrap.querySelectorAll('.dist-fee-input').forEach((inp) => {
-      inp.onchange = () => {
-        const d = inp.dataset.district;
-        curPrices[d] = Number(inp.value) || me.fee || 1500;
+        if (chk.checked) curDistricts.add(d);
+        else curDistricts.delete(d);
       };
     });
   }
@@ -1681,7 +1733,6 @@ function setupAvailTabListeners(me) {
       curDistricts.add(newStateDistricts[0]);
     }
     renderDistrictCheckboxes();
-    renderDistrictFeeInputs();
   };
 
   // Select All & Clear
@@ -1689,12 +1740,8 @@ function setupAvailTabListeners(me) {
   if (btnSelectAll) {
     btnSelectAll.onclick = () => {
       const allD = LOCATIONS[curState] || [];
-      allD.forEach((d) => {
-        curDistricts.add(d);
-        if (!curPrices[d]) curPrices[d] = +$('#av-fee', container).value || me.fee || 1500;
-      });
+      allD.forEach((d) => curDistricts.add(d));
       renderDistrictCheckboxes();
-      renderDistrictFeeInputs();
     };
   }
 
@@ -1703,19 +1750,6 @@ function setupAvailTabListeners(me) {
     btnClear.onclick = () => {
       curDistricts.clear();
       renderDistrictCheckboxes();
-      renderDistrictFeeInputs();
-    };
-  }
-
-  // Quick fill all fees
-  const btnApplyAll = $('#btn-apply-all-fees', container);
-  if (btnApplyAll) {
-    btnApplyAll.onclick = () => {
-      const val = +$('#quick-fill-fee', container).value;
-      if (!val || val <= 0) return toast('Please enter a valid amount', true);
-      curDistricts.forEach((d) => { curPrices[d] = val; });
-      renderDistrictFeeInputs();
-      toast(`Applied ₹${val.toLocaleString('en-IN')} to all ${curDistricts.size} selected districts!`);
     };
   }
 
@@ -1761,24 +1795,13 @@ function setupAvailTabListeners(me) {
   // Initial Renders
   renderSlots();
   renderDistrictCheckboxes();
-  renderDistrictFeeInputs();
 
   // Expose current state for saveAvail
-  S._availFormState = () => {
-    feeTableWrap.querySelectorAll('.dist-fee-input').forEach((inp) => {
-      curPrices[inp.dataset.district] = Number(inp.value) || me.fee || 1500;
-    });
-    const cleanPrices = {};
-    curDistricts.forEach((d) => {
-      cleanPrices[d] = curPrices[d] || +$('#av-fee', container).value || me.fee || 1500;
-    });
-    return {
-      curState,
-      workingDistricts: Array.from(curDistricts),
-      districtPrices: cleanPrices,
-      slots
-    };
-  };
+  S._availFormState = () => ({
+    curState,
+    workingDistricts: Array.from(curDistricts),
+    slots
+  });
 }
 
 function renderPanditProfileTab(me) {
@@ -2123,36 +2146,33 @@ const ACTIONS = {
       }
       if (!b) return toast('Booking record not found for ' + bId, true);
 
-      // Fetch assigned Pandit's bank details
-      let pandit = null;
-      if (b.panditEmail) {
-        try {
-          const pandits = await api('/pandits?email=' + encodeURIComponent(b.panditEmail));
-          if (pandits && pandits.length) pandit = pandits[0];
-        } catch (err) {}
-      }
-      if (!pandit && b.panditName) {
-        try {
-          const pandits = await api('/pandits');
-          pandit = (pandits || []).find((p) => p.name && p.name.trim().toLowerCase() === b.panditName.trim().toLowerCase());
-        } catch (err) {}
-      }
+      // Fetch centralized Platform Bank Details (managed exclusively by Admin)
+      let platformBank = {
+        accountHolder: 'PujaConnect Official Platform Account',
+        bankName: 'State Bank of India',
+        accountNumber: '40918237465',
+        ifscCode: 'SBIN0001234',
+        upiId: 'pujaconnect@upi',
+        qrCode: 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=pujaconnect@upi&pn=PujaConnect%20Vedic%20Services&cu=INR'
+      };
+      try {
+        const pb = await api('/platform-bank-details');
+        if (pb && (pb.accountNumber || pb.upiId)) platformBank = { ...platformBank, ...pb };
+      } catch (err) {}
 
       const fee = Number(b.fee) || 1500;
       const advance = Number(b.advanceAmount) || 0;
       const remaining = Math.max(0, fee - (b.advancePaid ? advance : 0));
 
-      const displayUpi = (pandit && pandit.upiId) ||
-        (b.panditEmail && b.panditEmail.includes('@') ? b.panditEmail.replace('@', '.') + '@upi' : 'pujaconnect.pandit@upi');
-
-      const qrImgHtml = (pandit && pandit.qrCode)
+      const displayUpi = platformBank.upiId || 'pujaconnect@upi';
+      const qrImgHtml = platformBank.qrCode
         ? `<div class="qr-preview-card" style="margin:16px 0;text-align:center">
              <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:var(--mahogany)">
                <span class="material-icons" style="font-size:16px;vertical-align:middle;color:var(--ochre)">qr_code_scanner</span>
-               Scan to Pay Pandit Directly (PhonePe / GPay / Paytm / BHIM)
+               Scan Official PujaConnect QR to Pay Dakshina (PhonePe / GPay / Paytm / BHIM)
              </div>
-             <img src="${esc(pandit.qrCode)}" class="qr-img" alt="Pandit UPI QR Code">
-             <div class="muted" style="font-size:11px;margin-top:6px">Tap and hold or scan with your banking app</div>
+             <img src="${esc(platformBank.qrCode)}" class="qr-img" style="max-width:180px;height:auto;border-radius:10px;border:1px solid #ebd9c2;background:#fff;padding:8px" alt="PujaConnect UPI QR Code">
+             <div class="muted" style="font-size:11px;margin-top:6px">Tap and hold or scan with any UPI/banking app</div>
            </div>`
         : '';
 
@@ -2161,47 +2181,50 @@ const ACTIONS = {
           <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:12px;padding:16px;margin-bottom:18px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
               <span class="booking-id-tag">${esc(b.bookingId || bId)}</span>
-              <span class="badge green">Pandit Approved ✅</span>
+              <span class="badge green">Booking Confirmed ✅</span>
             </div>
             <div style="font-size:14px;color:var(--mahogany)"><b>${esc(b.service || 'Sacred Ritual')}</b></div>
             <div style="font-size:13px;color:var(--muted);margin-top:4px">
-              📅 ${esc(b.date || 'Scheduled Date')} · ⏰ ${esc(b.time || '10:00 AM')} · Pandit: <b>${esc(b.panditName || 'Assigned Purohit')}</b>
+              📅 ${esc(b.date || 'Scheduled Date')} · ⏰ ${esc(b.time || '10:00 AM')} · Assigned Pandit: <b>${esc(b.panditName || 'Assigned Purohit')}</b>
             </div>
             <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #ebd9c2;display:flex;justify-content:space-between;align-items:center">
-              <span style="font-size:13px;font-weight:600">Remaining Amount to Pay:</span>
+              <span style="font-size:13px;font-weight:600">Total Dakshina to Pay:</span>
               <span style="font-size:22px;font-weight:700;color:var(--ochre)">${inr(remaining)}</span>
             </div>
           </div>
 
-          <!-- Pandit Bank Details Box -->
+          <!-- Official Platform Bank Details Box -->
           <div class="bank-details-box">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-weight:700;color:var(--mahogany);font-size:14.5px">
               <span class="material-icons" style="color:var(--ochre)">account_balance</span>
-              Assigned Pandit Bank &amp; UPI Details
+              PujaConnect Official Platform Bank &amp; UPI Details
             </div>
             <div class="bank-info-grid">
               <div class="bank-info-item">
                 <label>Account Holder Name</label>
-                <b>${esc((pandit && pandit.accountHolder) || b.panditName || 'Vedic Purohit')}</b>
+                <b>${esc(platformBank.accountHolder)}</b>
               </div>
               <div class="bank-info-item">
                 <label>Bank Name</label>
-                <b>${esc((pandit && pandit.bankName) || 'State Bank of India')}</b>
+                <b>${esc(platformBank.bankName)}</b>
               </div>
               <div class="bank-info-item">
                 <label>Bank Account Number</label>
-                <b style="font-family:monospace;letter-spacing:1px">${esc((pandit && pandit.bankAccount) || '987654321012')}</b>
+                <b style="font-family:monospace;letter-spacing:1px">${esc(platformBank.accountNumber)}</b>
               </div>
               <div class="bank-info-item">
                 <label>IFSC Code</label>
-                <b style="font-family:monospace;letter-spacing:1px">${esc((pandit && pandit.ifscCode) || 'SBIN0001234')}</b>
+                <b style="font-family:monospace;letter-spacing:1px">${esc(platformBank.ifscCode)}</b>
               </div>
               <div class="bank-info-item" style="grid-column: 1 / -1">
-                <label>UPI ID / UI Number</label>
-                <b style="font-family:monospace;color:var(--ochre);font-size:14px">${esc(displayUpi)}</b>
+                <label>Official Platform UPI ID</label>
+                <b style="font-family:monospace;color:var(--ochre);font-size:14.5px">${esc(displayUpi)}</b>
               </div>
             </div>
             ${qrImgHtml}
+            <div style="background:#fff8ed;border-left:3px solid var(--ochre);padding:8px 10px;margin-top:12px;font-size:11.5px;color:#8a5d3b">
+              ℹ️ Devotees pay directly to PujaConnect's verified platform account. Admin verifies payment and handles Pandit disbursements after ceremony completion.
+            </div>
           </div>
 
           <!-- Submit Payment Verification Form -->
