@@ -490,32 +490,57 @@ async function openBooking(arg) {
   let targetPanditId = null;
   let targetPujaName = '';
   let targetDistrict = '';
+  let targetDate = '';
+  let targetTime = '';
+  let targetAddress = '';
+  let targetPhone = '';
+  let targetBookingId = null;
+  let isRebook = false;
 
   if (typeof arg === 'string') {
     targetPanditId = arg;
   } else if (arg && typeof arg === 'object') {
-    targetPanditId = arg.panditId || null;
-    targetPujaName = arg.pujaName || arg.name || '';
+    targetPanditId = arg.panditId || arg.panditEmail || arg.preferredPanditEmail || null;
+    targetPujaName = arg.pujaName || arg.service || arg.name || '';
     targetDistrict = arg.district || '';
+    targetDate = arg.date || '';
+    targetTime = arg.time || '';
+    targetAddress = arg.address || '';
+    targetPhone = arg.phone || '';
+    targetBookingId = arg.bookingId || null;
+    isRebook = Boolean(arg.isRebook || targetBookingId);
   }
 
   if (!requireLogin(() => openBooking(arg))) return;
   const u = S.user;
 
+  // Ensure both Pandits and Pujas catalogs are loaded
+  const loadPromises = [];
   if (!S.pandits || !S.pandits.length) {
-    try { S.pandits = await api('/pandits?verified=true'); } catch {}
+    loadPromises.push(api('/pandits?verified=true').then(res => { S.pandits = res; }).catch(() => {}));
   }
+  if (!S.pujas || !S.pujas.length) {
+    loadPromises.push(api('/pujas').then(res => { S.pujas = res; }).catch(() => {}));
+  }
+  if (loadPromises.length) await Promise.all(loadPromises);
 
-  const selectedPandit = targetPanditId ? (S.pandits || []).find((x) => x._id === targetPanditId || x.email === targetPanditId) : null;
+  const selectedPandit = targetPanditId ? (S.pandits || []).find((x) => x._id === targetPanditId || (x.email && x.email.toLowerCase() === String(targetPanditId).toLowerCase())) : null;
   const allShortPujas = (S.pujas || []).filter((x) => x.type === 'Short').map((x) => x.name);
   const curState = S.filters.state || (selectedPandit && (selectedPandit.workingState || selectedPandit.state)) || u.state || 'Odisha';
   const availableDistricts = LOCATIONS[curState] || ['Khordha', 'Cuttack', 'Puri', 'Bhadrak', 'Balasore', 'Sambalpur'];
 
-  const sel = { date: '', time: '' };
+  const sel = { date: targetDate || '', time: targetTime || '' };
   const initialPuja = targetPujaName || (selectedPandit && selectedPandit.services && selectedPandit.services[0]) || S.filters.service || allShortPujas[0] || 'Satyanarayan Puja';
   const initialDistrict = targetDistrict || (selectedPandit && ((selectedPandit.workingDistricts && selectedPandit.workingDistricts[0]) || selectedPandit.district)) || S.filters.district || u.district || availableDistricts[0];
 
-  openModal('Book a Sacred Ritual', `
+  const modalTitle = isRebook ? `Rebook Sacred Ritual – ${esc(targetBookingId || 'Edit Details')}` : 'Book a Sacred Ritual';
+
+  openModal(modalTitle, `
+    ${isRebook ? `
+      <div style="background:#fff3e0;border-left:4px solid #e65100;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;color:#bf360c">
+        ℹ️ <strong>Rebooking with Updated Details:</strong> Please choose a new ceremony date and time slot for your ritual.
+      </div>
+    ` : ''}
     <div>
       <label>Puja / Sacred Ritual *</label>
       <select id="b-service">${opts(allShortPujas.length ? allShortPujas : ['Satyanarayan Puja', 'Griha Pravesh', 'Ganesh Puja', 'Rudrabhishek', 'Vastu Shanti'], initialPuja)}</select>
@@ -527,7 +552,7 @@ async function openBooking(arg) {
       </div>
       <div>
         <label>Ceremony Date *</label>
-        <input type="date" id="b-date" min="${today()}">
+        <input type="date" id="b-date" min="${today()}" value="${esc(targetDate || '')}">
       </div>
     </div>
     <div>
@@ -547,29 +572,34 @@ async function openBooking(arg) {
     </div>
     <div>
       <label>Ceremony Venue / Address *</label>
-      <textarea id="b-address" rows="2" placeholder="House no., apartment, landmark, locality"></textarea>
+      <textarea id="b-address" rows="2" placeholder="House no., apartment, landmark, locality">${esc(targetAddress || '')}</textarea>
     </div>
     <div class="form-grid" style="padding:0">
       <div>
         <label>Contact Mobile Phone *</label>
-        <input id="b-phone" value="${esc(u.phone || '')}" placeholder="10-digit mobile number">
+        <input id="b-phone" value="${esc(targetPhone || u.phone || '')}" placeholder="10-digit mobile number">
       </div>
       <div>
         <label>Devotee Email (for ceremony acknowledgement) *</label>
         <input id="b-email" value="${esc(u.email || '')}" readonly style="background:#fcf8f0;cursor:not-allowed">
       </div>
     </div>
-    <div class="cost-box">
-      <div class="row">
-        <span>Estimated Dakshina</span>
-        <b id="b-fee">₹1,199</b>
+    <div class="cost-box" style="margin-top:14px;background:#fff8ed;border:1.5px dashed var(--ochre);border-radius:12px;padding:14px">
+      <div class="row" style="align-items:center;justify-content:space-between">
+        <div>
+          <span style="font-size:14px;font-weight:700;color:var(--mahogany)">Estimated Dakshina</span>
+          <div id="b-fee-note" style="font-size:12px;color:var(--muted);margin-top:2px">
+            Standard fixed Vedic Dakshina for ritual
+          </div>
+        </div>
+        <b id="b-fee" style="font-size:24px;color:var(--ochre);font-weight:700">₹1,199</b>
       </div>
-      <small class="muted" style="display:block;margin-top:4px;font-size:12px">
+      <small class="muted" style="display:block;margin-top:6px;font-size:12px;border-top:1px dashed #ebd9c2;padding-top:6px">
         Dakshina rates are fixed district-wise by PujaConnect Admin. Payment is completed only after admin assignment and confirmation.
       </small>
     </div>
     <button class="btn btn-gold btn-lg" id="b-submit" style="width:100%;margin-top:12px">
-      <span class="material-icons">send</span> Submit Booking Request
+      <span class="material-icons">${isRebook ? 'event_repeat' : 'send'}</span> ${isRebook ? 'Submit Rebook Request' : 'Submit Booking Request'}
     </button>
   `, (m) => {
     const serviceSel = $('#b-service', m);
@@ -579,55 +609,82 @@ async function openBooking(arg) {
     const feeEl = $('#b-fee', m);
 
     const updatePanditsDropdown = () => {
-      const dist = districtSel.value;
+      const dist = districtSel ? districtSel.value : initialDistrict;
+      const ritual = serviceSel ? serviceSel.value : initialPuja;
       const eligible = (S.pandits || []).filter((p) => {
         if (!p.verified) return false;
         return (p.workingDistricts && p.workingDistricts.includes(dist)) || p.district === dist;
       });
 
-      let optionsHtml = '<option value="">✨ Any Available Verified Pandit (Auto-assigned by PujaConnect Admin)</option>';
+      const pujaDoc = (S.pujas || []).find((x) => (x.name || '').trim().toLowerCase() === (ritual || '').trim().toLowerCase());
+      const baseDakshina = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
+
+      let optionsHtml = `<option value="">✨ Any Available Verified Pandit (Auto-assigned by PujaConnect Admin) — Estimated Dakshina: ${inr(baseDakshina)}</option>`;
       eligible.forEach((p) => {
         const isSelected = selectedPandit && selectedPandit.email.toLowerCase() === p.email.toLowerCase();
-        optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''}>Pandit ${esc(p.name)} (${esc(p.district)}) — ${esc(p.exp || p.experience + ' Yrs')}</option>`;
+        const pFee = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || baseDakshina;
+        optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''}>Pandit ${esc(p.name)} (${esc(p.district)}) — Dakshina: ${inr(pFee)} (${esc(p.exp || p.experience + ' Yrs')})</option>`;
       });
       panditSel.innerHTML = optionsHtml;
       paintFee();
     };
 
     const paintFee = () => {
-      const dist = districtSel.value;
-      const ritual = serviceSel.value;
-      const pEmail = panditSel.value;
+      const dist = (districtSel ? districtSel.value : '') || initialDistrict;
+      const ritual = (serviceSel ? serviceSel.value : '') || initialPuja;
+      const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
       const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
 
-      let f = 1199;
+      let f = 0;
+      let noteText = '';
       if (p) {
-        f = (p.districtPrices && p.districtPrices[dist]) || p.fee || 1500;
+        f = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || 1500;
+        noteText = `Dakshina rate for Pandit ${p.name} in ${dist}`;
       } else {
-        const pujaDoc = (S.pujas || []).find((x) => x.name === ritual);
-        f = (pujaDoc && pujaDoc.baseFee) || 1199;
+        // Any Available Verified Pandit
+        const pujaDoc = (S.pujas || []).find((x) => (x.name || '').trim().toLowerCase() === (ritual || '').trim().toLowerCase());
+        if (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) {
+          f = pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, ''));
+        } else {
+          const eligibleInDist = (S.pandits || []).filter(
+            (x) => x.verified && ((x.workingDistricts && x.workingDistricts.includes(dist)) || x.district === dist)
+          );
+          const distPriceCandidate = eligibleInDist.find((x) => x.districtPrices && Number(x.districtPrices[dist]) > 0);
+          if (distPriceCandidate) {
+            f = Number(distPriceCandidate.districtPrices[dist]);
+          } else if (eligibleInDist.length && eligibleInDist[0].fee) {
+            f = Number(eligibleInDist[0].fee);
+          }
+        }
+        noteText = `Standard fixed Vedic Dakshina for ${ritual} in ${dist}`;
       }
-      feeEl.innerHTML = inr(f);
+      if (!f || isNaN(f) || f <= 0) f = 1199;
+      if (feeEl) feeEl.innerHTML = inr(f);
+      const noteEl = $('#b-fee-note', m);
+      if (noteEl) noteEl.textContent = noteText;
     };
 
     const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
     const drawSlots = () => {
       const d = dateInp.value;
       const box = $('#b-slots', m);
-      sel.time = '';
       if (!d) {
         box.innerHTML = '<span class="muted">Select a date to view live slots.</span>';
+        sel.time = '';
         return;
       }
       box.innerHTML = standardSlots.map((s) => `
-        <button type="button" class="slot" data-slot="${esc(s)}">${esc(s)}</button>
+        <button type="button" class="slot ${sel.time === s ? 'selected' : ''}" data-slot="${esc(s)}">${esc(s)}</button>
       `).join('');
     };
 
     updatePanditsDropdown();
-    serviceSel.onchange = updatePanditsDropdown;
-    districtSel.onchange = updatePanditsDropdown;
-    panditSel.onchange = paintFee;
+    paintFee();
+    if (dateInp.value) drawSlots();
+
+    serviceSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
+    districtSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
+    panditSel.onchange = () => { paintFee(); };
     dateInp.onchange = drawSlots;
 
     $('#b-slots', m).onclick = (e) => {
@@ -650,13 +707,16 @@ async function openBooking(arg) {
       const feeText = feeEl.textContent.replace(/[^0-9]/g, '');
       const fee = Number(feeText) || 1199;
 
-      const submitBtn = e.target;
+      const submitBtn = e.target.closest('button') || e.target;
       submitBtn.disabled = true;
-      submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Submitting Request...';
+      submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Submitting...';
 
       try {
-        const res = await api('/bookings', {
-          method: 'POST',
+        const endpoint = (isRebook && targetBookingId) ? `/bookings/${encodeURIComponent(targetBookingId)}/rebook` : '/bookings';
+        const method = (isRebook && targetBookingId) ? 'PUT' : 'POST';
+
+        const res = await api(endpoint, {
+          method,
           body: {
             userEmail: u.email,
             userName: u.name,
@@ -675,48 +735,44 @@ async function openBooking(arg) {
         const bk = res.booking || res;
         const devoteeEmail = bk.userEmail || u.email;
 
+        if (isRebook) {
+          toast('Puja rebooked with new details! Admin will assign an available Pandit shortly. 🙏');
+          renderDashboard();
+          return;
+        }
+
         // Display Success Screen as requested
         openModal('Booking Request Submitted', `
           <div style="text-align:center;padding:16px 8px">
-            <span class="material-icons" style="font-size:56px;color:#2e7d32">check_circle</span>
-            <h3 style="margin:12px 0 6px;color:var(--mahogany)">Booking Request Submitted! 🙏</h3>
-            <p style="font-size:15px;color:#2e1305;font-weight:600;margin:0 0 16px">
-              Our team will assign a verified Pandit as soon as possible.
+            <span class="material-icons" style="font-size:56px;color:var(--green)">check_circle</span>
+            <h3 style="margin:12px 0 6px;color:var(--mahogany)">Sacred Ritual Requested 🙏</h3>
+            <p style="color:var(--muted);font-size:14px;line-height:1.5;max-width:440px;margin:0 auto 18px">
+              Your ceremony booking request for <b>${esc(bk.service)}</b> has been submitted. Our team will verify pandit availability and assign a verified Pandit for your district.
             </p>
-            <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:12px;padding:16px;margin:0 0 16px;text-align:left;font-size:13.5px;line-height:1.7">
-              <div><b>Booking ID:</b> <span class="booking-id-tag">${esc(bk.bookingId)}</span></div>
-              <div><b>Sacred Ritual:</b> ${esc(bk.service)}</div>
-              <div><b>Ceremony Date &amp; Time:</b> ${esc(bk.date)} (${esc(bk.time)})</div>
-              <div><b>District:</b> <b>${esc(bk.district)}</b></div>
-              <div><b>Venue / City / Address:</b> ${esc(bk.address || bk.district)}</div>
-              <div><b>Preferred Pandit:</b> ${bk.preferredPanditName ? esc(bk.preferredPanditName) : 'Any Available Verified Pandit (Auto-assignment)'}</div>
+            <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:10px;padding:14px;text-align:left;max-width:440px;margin:0 auto 18px;font-size:13px;line-height:1.6">
+              <div><b>Booking ID:</b> ${esc(bk.bookingId)}</div>
+              <div><b>Ritual:</b> ${esc(bk.service)}</div>
+              <div><b>Preferred Pandit:</b> ${esc(bk.preferredPanditName || 'Any Available Verified Pandit')}</div>
+              <div><b>Ceremony Schedule:</b> ${esc(bk.date)} · ${esc(bk.time)}</div>
+              <div><b>District:</b> ${esc(bk.district)}</div>
               <div><b>Estimated Dakshina:</b> ${inr(bk.fee)}</div>
             </div>
-            ${res.emailSent !== false ? `
-              <div style="background:#f1f8e9;border:1px solid #c8e6c9;border-radius:8px;padding:12px 14px;color:#2e7d32;font-size:13px;text-align:left;margin-bottom:18px">
-                ✓ An acknowledgement email with your ceremony details has been sent to <b>${esc(devoteeEmail)}</b>.<br>
-                ✓ Once our administration assigns the Pandit and the Pandit accepts the ceremony, you will automatically receive the official confirmation email.
-              </div>
-            ` : `
-              <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:8px;padding:12px 14px;color:#8a5d3b;font-size:13px;text-align:left;margin-bottom:18px">
-                ✓ Booking request registered successfully with ID <b>${esc(bk.bookingId)}</b>.<br>
-                ✓ Our administration is reviewing your requirement and will assign a verified Pandit as soon as possible.
-              </div>
-            `}
-            <button class="btn btn-gold btn-lg" onclick="closeModal(); showView('dashboard');" style="width:100%">
-              Go to Devotee Dashboard
-            </button>
+            <div style="display:flex;gap:10px;justify-content:center">
+              <button class="btn btn-gold" onclick="closeModal();showView('dashboard')">
+                <span class="material-icons">dashboard</span> Go to Devotee Dashboard
+              </button>
+            </div>
           </div>
         `);
-        showView('dashboard');
+        renderDashboard();
       } catch (err) {
-        toast(err.message, true);
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '<span class="material-icons">send</span> Submit Booking Request';
+        submitBtn.innerHTML = `<span class="material-icons">${isRebook ? 'event_repeat' : 'send'}</span> ${isRebook ? 'Submit Rebook Request' : 'Submit Booking Request'}`;
+        toast(err.message, true);
       }
     };
-  });
 }
+
 
 /* ---------- admin direct portal (passwordless) ---------- */
 async function openAdminDirect() {
@@ -1043,6 +1099,7 @@ async function userDash(root) {
   const tab = S.dashTab || 'bookings';
   const upcoming = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').length;
   const pendingPayments = bookings.filter((b) => b.paymentStatus !== 'Paid' && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')).length;
+  const rebookNeeded = bookings.filter(b => b.slotUnavailable || b.status === 'Rejected' || (b.status === 'Cancelled' && (b.slotUnavailable || (b.rejectionReason && b.rejectionReason.toLowerCase().includes('pandit'))))).length;
   const initial = (S.user.name || 'D').charAt(0).toUpperCase();
 
   root.innerHTML = `
@@ -1060,6 +1117,23 @@ async function userDash(root) {
         <button class="btn btn-outline btn-sm" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>
       </div>
     </div>
+
+    ${rebookNeeded > 0 ? `
+      <div style="background:#fff3e0;border:1.5px solid #ffcc80;border-left:5px solid #e65100;border-radius:12px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="material-icons" style="font-size:32px;color:#e65100">event_busy</span>
+          <div>
+            <div style="font-weight:700;color:#bf360c;font-size:14.5px">
+              ⚠️ Attention: ${rebookNeeded} Ceremony Booking(s) Need Rebooking
+            </div>
+            <div style="font-size:13px;color:#6d2800;margin-top:2px">
+              No verified Pandit was available for your chosen time slot. Click below to view and update details for rebooking.
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-gold btn-sm" data-action="dashTab" data-tab="bookings"><span class="material-icons" style="font-size:14px;vertical-align:middle">event_repeat</span> View &amp; Rebook Now</button>
+      </div>
+    ` : ''}
 
     <!-- Quick Stat Cards (Tappable on both Mobile & Desktop) -->
     <div class="stats">
@@ -1083,9 +1157,9 @@ async function userDash(root) {
         <span class="subtab-icon-wrap"><span class="material-icons">event</span></span>
         <div class="subtab-info">
           <span class="subtab-title">My Bookings</span>
-          <span class="subtab-sub">${bookings.length} Registered</span>
+          <span class="subtab-sub">${rebookNeeded > 0 ? `${rebookNeeded} To Rebook` : `${bookings.length} Registered`}</span>
         </div>
-        <span class="subtab-badge">${bookings.length}</span>
+        ${rebookNeeded > 0 ? `<span class="subtab-badge alert" style="background:#e65100;color:#fff">${rebookNeeded}</span>` : `<span class="subtab-badge">${bookings.length}</span>`}
       </button>
 
       <button class="subtab ${tab === 'payments' ? 'active' : ''}" data-action="dashTab" data-tab="payments">
@@ -1263,23 +1337,79 @@ function renderDevoteeBookingsTab(bookings) {
       </div>
     `;
   }
+
+  const rejectedBookings = bookings.filter(b => b.slotUnavailable || b.status === 'Rejected' || (b.status === 'Cancelled' && (b.slotUnavailable || (b.rejectionReason && b.rejectionReason.toLowerCase().includes('pandit')))));
+
   return `
+    ${rejectedBookings.length ? `
+      <div style="background:#fff3e0;border:1.5px solid #ffcc80;border-left:5px solid #e65100;border-radius:12px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="material-icons" style="font-size:32px;color:#e65100">event_busy</span>
+          <div>
+            <div style="font-weight:700;color:#bf360c;font-size:14.5px">
+              ${rejectedBookings.length} Ceremony Request(s) Require Rebooking
+            </div>
+            <div style="font-size:13px;color:#6d2800;margin-top:2px">
+              No verified Vedic Pandit was available for the requested time slot. Click "Rebook / Update Details" on the booking card below to choose another convenient date or time slot.
+            </div>
+          </div>
+        </div>
+      </div>
+    ` : ''}
+
     <div class="booking-cards-grid">
-      ${bookings.map((b) => `
-        <div class="booking-card">
+      ${bookings.map((b) => {
+        const isSlotRejected = b.slotUnavailable || b.status === 'Rejected' || (b.status === 'Cancelled' && (b.slotUnavailable || (b.rejectionReason && b.rejectionReason.toLowerCase().includes('pandit'))));
+        const fee = b.fee || 1199;
+
+        let badgeHtml = '';
+        if (isSlotRejected) {
+          badgeHtml = `<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a"><span class="material-icons" style="font-size:12px;vertical-align:middle">event_busy</span> Rejected – No Pandit Available</span>`;
+        } else if (b.status === 'Pending Assignment') {
+          badgeHtml = `<span class="badge amber"><span class="material-icons" style="font-size:12px;vertical-align:middle">hourglass_top</span> Pending Pandit Assignment</span>`;
+        } else {
+          badgeHtml = statusBadge(b.status);
+        }
+
+        return `
+        <div class="booking-card" ${isSlotRejected ? 'style="border-color:#ffcc80;box-shadow:0 4px 16px rgba(230,81,0,0.08)"' : ''}>
           <div>
             <div class="booking-card-top">
               <span class="booking-id-tag">${esc(b.bookingId)}</span>
-              ${statusBadge(b.status)}
+              ${badgeHtml}
             </div>
             <h4>${esc(b.service)}</h4>
+
+            ${isSlotRejected ? `
+              <div style="background:#fff3e0;border:1px solid #ffcc80;border-left:4px solid #e65100;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;color:#bf360c;line-height:1.5">
+                <div style="font-weight:700;display:flex;align-items:center;gap:6px">
+                  <span class="material-icons" style="font-size:16px">info</span> No Pandit Available for this Time Slot:
+                </div>
+                <div style="margin-top:2px">${esc(b.rejectionReason || 'No verified Pandit is available for this date and time slot in your district.')}</div>
+                <div style="margin-top:6px;font-weight:600;color:#d84315">
+                  👉 Click "Rebook / Update Ceremony Details" below to pick a new date or time slot.
+                </div>
+              </div>
+            ` : ''}
+
             <div class="booking-meta-row" style="margin-top:8px">
               <span class="material-icons">person</span>
-              <span><strong>${esc(b.panditName)}</strong></span>
+              <span>Preferred Pandit: <strong>${esc(b.preferredPanditName || 'Any Available Verified Pandit')}</strong></span>
             </div>
+            ${b.panditEmail ? `
+              <div class="booking-meta-row">
+                <span class="material-icons">badge</span>
+                <span>Assigned Pandit: <strong>${esc(b.panditName)}</strong></span>
+              </div>
+            ` : (!isSlotRejected ? `
+              <div class="booking-meta-row">
+                <span class="material-icons">badge</span>
+                <span class="muted">Assigned Pandit: <em>To Be Assigned by Admin</em></span>
+              </div>
+            ` : '')}
             <div class="booking-meta-row">
               <span class="material-icons">schedule</span>
-              <span>${esc(b.date)} at <b>${esc(b.time || '10:00 AM')}</b></span>
+              <span>Ceremony Schedule: ${esc(b.date)} at <b>${esc(b.time || '10:00 AM')}</b></span>
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">place</span>
@@ -1287,11 +1417,16 @@ function renderDevoteeBookingsTab(bookings) {
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">payments</span>
-              <span>Dakshina: <b>${inr(b.fee)}</b> <small class="muted">(${b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' ? 'Paid & Verified' : (b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending' ? 'Under Processing' : (b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected' ? 'Payment Rejected' : (b.paymentStatus || 'Pending')))})</small></span>
+              <span>Estimated Dakshina: <b>${inr(fee)}</b> <small class="muted">(${b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' ? 'Paid & Verified' : (b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending' ? 'Under Processing' : (b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected' ? 'Payment Rejected' : (b.paymentStatus || 'Pending')))})</small></span>
             </div>
           </div>
           <div class="booking-card-footer">
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              ${isSlotRejected ? `
+                <button class="btn btn-gold btn-sm" data-action="rebookBooking" data-id="${esc(b.bookingId)}">
+                  <span class="material-icons" style="font-size:15px;vertical-align:middle">event_repeat</span> Rebook / Update Ceremony Details
+                </button>
+              ` : ''}
               <button class="btn btn-dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}"><span class="material-icons">print</span> Slip</button>
               ${b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' ? `
                 <button class="btn btn-gold btn-sm" data-action="viewBill" data-id="${esc(b.bookingId)}">
@@ -1301,11 +1436,11 @@ function renderDevoteeBookingsTab(bookings) {
                 <span class="badge amber" style="font-size:11px"><span class="material-icons" style="font-size:13px">hourglass_top</span> Under Processing</span>
               ` : (b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected') ? `
                 <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
-                  <span class="material-icons">refresh</span> Repay (${inr(b.fee)})
+                  <span class="material-icons">refresh</span> Repay (${inr(fee)})
                 </button>
-              ` : (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved') ? `
+              ` : (!isSlotRejected && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')) ? `
                 <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
-                  <span class="material-icons">payments</span> Pay (${inr(b.fee)})
+                  <span class="material-icons">payments</span> Pay (${inr(fee)})
                 </button>
               ` : ''}
             </div>
@@ -1317,7 +1452,8 @@ function renderDevoteeBookingsTab(bookings) {
             </div>
           </div>
         </div>
-      `).join('')}
+        `;
+      }).join('')}
     </div>
   `;
 }
@@ -2373,6 +2509,23 @@ const ACTIONS = {
   findFor: (d) => { S.filters.service = d.name; showView('pandits'); },
   planLong: (d) => { S.longPreset = d.name; showView('long'); },
   bookPandit: (d) => openBooking(d.id),
+  rebookBooking: (d) => {
+    const b = (S.bookings || []).find((x) => x.bookingId === d.id);
+    if (!b) return toast('Booking record not found', true);
+    openBooking({
+      bookingId: b.bookingId,
+      service: b.service,
+      district: b.district,
+      date: b.date,
+      time: b.time,
+      address: b.address,
+      phone: b.phone || (S.user ? S.user.phone : ''),
+      panditEmail: b.preferredPanditEmail || '',
+      preferredPanditEmail: b.preferredPanditEmail || '',
+      fee: b.fee,
+      isRebook: true
+    });
+  },
   slip: (d) => printSlip(S.bookings.find((b) => b.bookingId === d.id)),
   cancelBooking: async (d) => {
     const ok = await appConfirm({

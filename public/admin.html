@@ -607,30 +607,54 @@
                 <tbody>
                   ${list.map(b => {
                     const wasRejected = (b.rejectedPandits && b.rejectedPandits.length > 0) || b.panditApproval === 'Rejected';
+                    const isSlotUnavailable = b.slotUnavailable || b.status === 'Rejected' || (b.status === 'Cancelled' && (b.slotUnavailable || (b.rejectionReason && b.rejectionReason.toLowerCase().includes('pandit'))));
+                    
                     let statusBadgeHtml = '';
-                    let actionBtnHtml = '';
-
-                    if (b.status === 'Pending Assignment' && wasRejected) {
+                    if (isSlotUnavailable) {
+                      statusBadgeHtml = `
+                        <span class="badge red"><span class="material-icons" style="font-size:12px;vertical-align:middle">event_busy</span> Rejected: No Pandit Available</span>
+                        <div style="font-size:11px;color:#c62828;margin-top:2px;font-weight:600">Devotee notified to rebook</div>
+                      `;
+                    } else if (b.status === 'Pending Assignment' && wasRejected) {
                       statusBadgeHtml = `
                         <span class="badge red">⚠️ Rejected by Pandit</span>
-                        <div style="font-size:11px;color:#c62828;margin-top:3px;font-weight:600">Offer rejected – Try another Pandit</div>
+                        <div style="font-size:11px;color:#c62828;margin-top:3px;font-weight:600">Offer rejected – Assign another Pandit</div>
                       `;
-                      actionBtnHtml = `<button class="btn btn-gold btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Reassign Pandit</button>`;
                     } else if (b.status === 'Pending Assignment') {
                       statusBadgeHtml = `<span class="badge amber">Pending Assignment</span>`;
-                      actionBtnHtml = `<button class="btn btn-gold btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Assign Pandit</button>`;
                     } else if (b.status === 'Pending Pandit Confirmation') {
                       statusBadgeHtml = `
                         <span class="badge blue">Offered to ${esc(b.panditName)}</span>
                         <div class="muted" style="font-size:11px;margin-top:2px">Awaiting Pandit Acceptance</div>
                       `;
-                      actionBtnHtml = `<button class="btn btn-outline dark btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Change Pandit</button>`;
                     } else if (b.status === 'Confirmed') {
                       statusBadgeHtml = `<span class="badge green">Confirmed (${esc(b.panditName)}) ✅</span>`;
-                      actionBtnHtml = `<button class="btn btn-outline dark btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Change</button>`;
                     } else {
                       statusBadgeHtml = `<span class="badge">${esc(b.status)}</span>`;
-                      actionBtnHtml = `<button class="btn btn-outline dark btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')">Inspect</button>`;
+                    }
+
+                    // Actions:
+                    // 1. Assign Pandit button
+                    const assignBtnHtml = `
+                      <button class="btn ${isSlotUnavailable || wasRejected ? 'btn-gold' : b.panditEmail ? 'btn-outline dark' : 'btn-gold'} btn-sm" onclick="openAdminBookingAssignModal('${esc(b.bookingId)}')" title="Assign verified Pandit">
+                        <span class="material-icons" style="font-size:13px;vertical-align:middle">person_add</span> ${b.panditEmail && !isSlotUnavailable ? 'Change Pandit' : 'Assign Pandit'}
+                      </button>
+                    `;
+
+                    // 2. Rejected: No Pandit Available for this time slot button / status
+                    let rejectSlotBtnHtml = '';
+                    if (isSlotUnavailable) {
+                      rejectSlotBtnHtml = `
+                        <span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a;padding:5px 8px;font-size:11.5px;display:inline-flex;align-items:center;gap:4px">
+                          <span class="material-icons" style="font-size:13px">cancel</span> Rejected: No Pandit Available for this time slot
+                        </span>
+                      `;
+                    } else {
+                      rejectSlotBtnHtml = `
+                        <button class="btn btn-red btn-sm" onclick="rejectBookingSlotClash('${esc(b.bookingId)}')" title="Reject booking if no Pandit is available for this time slot">
+                          <span class="material-icons" style="font-size:13px;vertical-align:middle">event_busy</span> Rejected: No Pandit Available for this time slot
+                        </button>
+                      `;
                     }
 
                     return `
@@ -641,7 +665,12 @@
                         <td><b>${esc(b.district)}</b><br><small class="muted">📅 ${esc(b.date)} (${esc(b.time)})</small></td>
                         <td>${b.preferredPanditName ? `<span class="badge" style="background:#fff8ed;color:#8a5d3b;border:1px solid #ebd9c2">★ ${esc(b.preferredPanditName)}</span>` : '<span class="muted" style="font-size:12px">Any Available Pandit</span>'}</td>
                         <td>${statusBadgeHtml}</td>
-                        <td>${actionBtnHtml}</td>
+                        <td>
+                          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                            ${assignBtnHtml}
+                            ${rejectSlotBtnHtml}
+                          </div>
+                        </td>
                       </tr>
                     `;
                   }).join('')}
@@ -748,6 +777,34 @@
           };
         }
       });
+    }
+
+    async function rejectBookingSlotClash(id) {
+      const b = (S.bookings || []).find(x => x.bookingId === id);
+      const defaultReason = 'No verified Vedic Pandit is available for this date and time slot. Please reschedule or rebook with another date/time.';
+      const reason = await adminPrompt({
+        title: 'Reject Ceremony Slot (No Pandit Available for this time slot)',
+        message: `Devotee ${b ? b.userName : ''} requested ${b ? b.service : 'Puja'} on ${b ? b.date + ' at ' + (b.time || '') : 'this slot'}.`,
+        label: 'Rejection Reason (will be emailed to devotee with Rebook link):',
+        placeholder: defaultReason,
+        defaultValue: defaultReason,
+        confirmText: 'Reject Slot & Send Rebook Mail',
+        confirmClass: 'btn-red',
+        icon: 'event_busy'
+      });
+      if (reason === null) return;
+
+      try {
+        await api('/bookings/' + encodeURIComponent(id) + '/reject-slot', {
+          method: 'POST',
+          body: { reason: reason.trim() || defaultReason }
+        });
+        toast('Booking marked as Rejected (No Pandit for Slot). Rebook email sent to Devotee! 🙏');
+        closeModal();
+        loadData();
+      } catch (e) {
+        toast(e.message, true);
+      }
     }
 
     // 1. KYC Queue

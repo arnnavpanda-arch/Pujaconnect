@@ -567,7 +567,7 @@ app.post('/api/bookings', wrap(async (req, res) => {
     if (preferredPandit) {
       fee = (preferredPandit.districtPrices && preferredPandit.districtPrices[b.district]) || preferredPandit.fee || 1500;
     } else {
-      const pujaDoc = await Puja.findOne({ name: b.service });
+      const pujaDoc = await Puja.findOne({ name: new RegExp('^' + (b.service || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
       fee = (pujaDoc && pujaDoc.baseFee) || 1199;
     }
   }
@@ -591,7 +591,7 @@ app.post('/api/bookings', wrap(async (req, res) => {
     district: b.district,
     address: b.address || '',
     preferredPanditEmail: preferredPandit ? preferredPandit.email : '',
-    preferredPanditName: preferredPandit ? preferredPandit.name : '',
+    preferredPanditName: preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit',
     panditEmail: '',
     panditName: 'To Be Assigned by Admin',
     status: 'Pending Assignment',
@@ -958,6 +958,92 @@ app.put('/api/bookings/:id/reschedule', wrap(async (req, res) => {
   b.date = date; b.time = time; b.status = 'Confirmed';
   await b.save();
   res.json(b);
+}));
+
+// Admin rejects booking because no pandit is available for requested time slot
+app.post('/api/bookings/:id/reject-slot', adminOnly, wrap(async (req, res) => {
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  const reason = req.body && req.body.reason ? String(req.body.reason).trim() : 'No verified Vedic Pandit available for this time slot. Please reschedule or rebook with a different date/time.';
+  b.status = 'Rejected';
+  b.adminApproval = 'Rejected';
+  b.slotUnavailable = true;
+  b.rejectionReason = reason;
+  b.panditEmail = '';
+  b.panditName = 'No Pandit Available for Slot';
+  await b.save();
+
+  // Send Rebook Puja notification email to devotee
+  await sendSafe('BOOKING_SLOT_UNAVAILABLE_REBOOK', b.userEmail, {
+    ...b.toObject(),
+    rejectionReason: reason
+  });
+
+  res.json({ ok: true, booking: b, message: 'Booking marked as slot unavailable and rebook notice sent to devotee.' });
+}));
+
+// Devotee rebooks puja with updated details (date, time, venue, etc.)
+app.put('/api/bookings/:id/rebook', wrap(async (req, res) => {
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  const { date, time, address, service, district, phone, panditEmail, fee } = req.body || {};
+  if (!date || !time) return res.status(400).json({ error: 'Ceremony date and time slot are required' });
+
+  if (service) b.service = service;
+  if (district) b.district = district;
+  if (address) b.address = address;
+  if (phone) b.phone = phone;
+  b.date = date;
+  b.time = time;
+
+  let preferredPandit = null;
+  if (panditEmail && lc(panditEmail) !== 'any' && lc(panditEmail) !== '') {
+    preferredPandit = await Pandit.findOne({ email: lc(panditEmail), verified: true });
+    b.preferredPanditEmail = preferredPandit ? preferredPandit.email : '';
+    b.preferredPanditName = preferredPandit ? preferredPandit.name : '';
+  } else {
+    b.preferredPanditEmail = '';
+    b.preferredPanditName = 'Any Available Verified Pandit';
+  }
+
+  let newFee = Number(fee);
+  if (!newFee) {
+    if (preferredPandit) {
+      newFee = (preferredPandit.districtPrices && preferredPandit.districtPrices[b.district]) || preferredPandit.fee || 1500;
+    } else {
+      const pujaDoc = await Puja.findOne({ name: new RegExp('^' + (b.service || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+      newFee = (pujaDoc && pujaDoc.baseFee) || 1199;
+    }
+  }
+  b.fee = newFee;
+
+  const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
+  const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
+  b.adminFeePercent = commPct;
+  b.adminFeeAmount = Math.round((newFee * commPct) / 100);
+  b.panditNetPayout = Math.max(0, newFee - b.adminFeeAmount);
+
+  b.status = 'Pending Assignment';
+  b.adminApproval = 'Pending';
+  b.panditApproval = 'Pending';
+  b.slotUnavailable = false;
+  b.rejectionReason = '';
+  b.rejectedPandits = [];
+  b.panditEmail = '';
+  b.panditName = 'To Be Assigned by Admin';
+  await b.save();
+
+  // Send acknowledgement email to devotee
+  await sendSafe('BOOKING_REQUEST_RECEIVED', b.userEmail, {
+    ...b.toObject(),
+    preferredPanditName: preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit',
+    district: b.district,
+    address: b.address || b.district
+  });
+
+  res.json({ ok: true, booking: b, message: 'Puja rebooked successfully! Our team will assign a verified Pandit for your new slot.' });
 }));
 
 // ---- Long (multi-day) pujas ----
