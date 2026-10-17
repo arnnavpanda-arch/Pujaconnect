@@ -481,9 +481,15 @@ async function openBooking(arg) {
       <label>Ceremony Venue / Address *</label>
       <textarea id="b-address" rows="2" placeholder="House no., apartment, landmark, locality"></textarea>
     </div>
-    <div>
-      <label>Contact Mobile Phone *</label>
-      <input id="b-phone" value="${esc(u.phone || '')}" placeholder="10-digit mobile number">
+    <div class="form-grid" style="padding:0">
+      <div>
+        <label>Contact Mobile Phone *</label>
+        <input id="b-phone" value="${esc(u.phone || '')}" placeholder="10-digit mobile number">
+      </div>
+      <div>
+        <label>Devotee Email (for ceremony acknowledgement) *</label>
+        <input id="b-email" value="${esc(u.email || '')}" readonly style="background:#fcf8f0;cursor:not-allowed">
+      </div>
     </div>
     <div class="cost-box">
       <div class="row">
@@ -599,6 +605,7 @@ async function openBooking(arg) {
 
         closeModal();
         const bk = res.booking || res;
+        const devoteeEmail = bk.userEmail || u.email;
 
         // Display Success Screen as requested
         openModal('Booking Request Submitted', `
@@ -612,15 +619,22 @@ async function openBooking(arg) {
               <div><b>Booking ID:</b> <span class="booking-id-tag">${esc(bk.bookingId)}</span></div>
               <div><b>Sacred Ritual:</b> ${esc(bk.service)}</div>
               <div><b>Ceremony Date &amp; Time:</b> ${esc(bk.date)} (${esc(bk.time)})</div>
-              <div><b>District:</b> ${esc(bk.district)}</div>
-              <div><b>Venue:</b> ${esc(bk.address || bk.district)}</div>
+              <div><b>District:</b> <b>${esc(bk.district)}</b></div>
+              <div><b>Venue / City / Address:</b> ${esc(bk.address || bk.district)}</div>
               <div><b>Preferred Pandit:</b> ${bk.preferredPanditName ? esc(bk.preferredPanditName) : 'Any Available Verified Pandit (Auto-assignment)'}</div>
               <div><b>Estimated Dakshina:</b> ${inr(bk.fee)}</div>
             </div>
-            <div style="background:#f1f8e9;border:1px solid #c8e6c9;border-radius:8px;padding:12px 14px;color:#2e7d32;font-size:13px;text-align:left;margin-bottom:18px">
-              ✓ An acknowledgement email with your ceremony details has been sent to <b>${esc(u.email)}</b>.<br>
-              ✓ Once our administration assigns the Pandit and the Pandit accepts the ceremony, you will automatically receive the official confirmation email.
-            </div>
+            ${res.emailSent !== false ? `
+              <div style="background:#f1f8e9;border:1px solid #c8e6c9;border-radius:8px;padding:12px 14px;color:#2e7d32;font-size:13px;text-align:left;margin-bottom:18px">
+                ✓ An acknowledgement email with your ceremony details has been sent to <b>${esc(devoteeEmail)}</b>.<br>
+                ✓ Once our administration assigns the Pandit and the Pandit accepts the ceremony, you will automatically receive the official confirmation email.
+              </div>
+            ` : `
+              <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:8px;padding:12px 14px;color:#8a5d3b;font-size:13px;text-align:left;margin-bottom:18px">
+                ✓ Booking request registered successfully with ID <b>${esc(bk.bookingId)}</b>.<br>
+                ✓ Our administration is reviewing your requirement and will assign a verified Pandit as soon as possible.
+              </div>
+            `}
             <button class="btn btn-gold btn-lg" onclick="closeModal(); showView('dashboard');" style="width:100%">
               Go to Devotee Dashboard
             </button>
@@ -1192,7 +1206,7 @@ function renderDevoteeBookingsTab(bookings) {
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">place</span>
-              <span>${esc(b.address || b.district)}</span>
+              <span>District: <b>${esc(b.district || 'N/A')}</b>${b.address ? ` · Venue/City: ${esc(b.address)}` : ''}</span>
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">payments</span>
@@ -1461,7 +1475,7 @@ function renderPanditCeremoniesTab(bookings) {
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">place</span>
-              <span>${esc(b.address || b.district)}</span>
+              <span>District: <b>${esc(b.district || 'N/A')}</b>${b.address ? ` · Venue/City: ${esc(b.address)}` : ''}</span>
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">payments</span>
@@ -1622,7 +1636,7 @@ function renderPanditAvailTab(me) {
       <div class="day-pills-wrap" id="av-days">
         ${DAYS.map((d) => `
           <label class="day-toggle-pill">
-            <input type="checkbox" value="${d}" ${(me.availableDays || []).includes(d) ? 'checked' : ''}>
+            <input type="checkbox" value="${d}" ${(me.availableDays && me.availableDays.length ? me.availableDays : DAYS).includes(d) ? 'checked' : ''}>
             <span class="day-pill-text">${d}</span>
           </label>
         `).join('')}
@@ -2001,37 +2015,51 @@ const ACTIONS = {
   },
   setStatus: async (d) => { try { await api(`/bookings/${d.id}/status`, { method: 'PUT', body: { status: d.status } }); toast('Updated'); renderDashboard(); } catch (e) { toast(e.message, true); } },
   longResp: async (d) => { try { await api(`/long-puja-requests/${d.id}/pandit-response`, { method: 'PUT', body: { panditEmail: S.user.email, response: d.resp } }); toast('Response recorded'); renderDashboard(); } catch (e) { toast(e.message, true); } },
-  saveAvail: async () => {
+  saveAvail: async (d, el) => {
     if (!S.me) return;
-    const days = [...document.querySelectorAll('#av-days input:checked')].map((i) => i.value);
-    const formState = typeof S._availFormState === 'function' ? S._availFormState() : null;
-    const slots = formState && formState.slots && formState.slots.length
-      ? formState.slots
-      : ($('#av-slots') ? $('#av-slots').value.split('\n').map((s) => s.trim()).filter(Boolean) : DEFAULT_SLOTS);
-
-    if (!days.length) return toast('Please select at least one available day', true);
-    if (!slots.length) return toast('Please configure at least one time slot', true);
-
-    const fee = +$('#av-fee').value || S.me.fee || 1500;
-    const workingState = formState ? formState.curState : (S.me.workingState || S.me.state || 'Odisha');
-    const workingDistricts = formState && formState.workingDistricts && formState.workingDistricts.length
-      ? formState.workingDistricts
-      : (S.me.workingDistricts || [S.me.district]);
-    const districtPrices = formState ? formState.districtPrices : (S.me.districtPrices || {});
-
-    // Bank & UPI details
-    const bankAccount = $('#p-bank-acc') ? $('#p-bank-acc').value.trim() : (S.me.bankAccount || '');
-    const ifscCode = $('#p-bank-ifsc') ? $('#p-bank-ifsc').value.trim().toUpperCase() : (S.me.ifscCode || '');
-    const upiId = $('#p-bank-upi') ? $('#p-bank-upi').value.trim() : (S.me.upiId || '');
-    const bankName = $('#p-bank-name') ? $('#p-bank-name').value.trim() : (S.me.bankName || '');
-    const accountHolder = $('#p-bank-holder') ? $('#p-bank-holder').value.trim() : (S.me.accountHolder || S.me.name);
-    const qrCode = $('#p-qr-val') ? $('#p-qr-val').value.trim() : (S.me.qrCode || '');
-
+    const saveBtn = el || document.getElementById('btn-save-all-avail');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="material-icons spin">sync</span> Saving...';
+    }
     try {
-      const updated = await api('/pandits/' + S.me._id, {
+      const days = [...document.querySelectorAll('#av-days input:checked')].map((i) => i.value);
+      const finalDays = days.length ? days : (S.me.availableDays && S.me.availableDays.length ? S.me.availableDays : DAYS);
+
+      const formState = typeof S._availFormState === 'function' ? S._availFormState() : null;
+      const slots = formState && formState.slots && formState.slots.length
+        ? formState.slots
+        : ($('#av-slots') ? $('#av-slots').value.split('\n').map((s) => s.trim()).filter(Boolean) : DEFAULT_SLOTS);
+
+      if (!slots.length) {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<span class="material-icons">save</span> Save Working Districts &amp; Availability'; }
+        return toast('Please configure at least one time slot', true);
+      }
+
+      const domDistricts = [...document.querySelectorAll('#district-checkboxes input:checked')].map((i) => i.value);
+      const workingDistricts = domDistricts.length
+        ? domDistricts
+        : (formState && formState.workingDistricts && formState.workingDistricts.length
+            ? formState.workingDistricts
+            : (S.me.workingDistricts && S.me.workingDistricts.length ? S.me.workingDistricts : [S.me.district || 'Khordha']));
+
+      const workingState = $('#av-state') ? $('#av-state').value : (formState ? formState.curState : (S.me.workingState || S.me.state || 'Odisha'));
+      const feeEl = $('#av-fee');
+      const fee = (feeEl ? +feeEl.value : 0) || (S.me && S.me.fee) || 1500;
+      const districtPrices = formState ? formState.districtPrices : (S.me.districtPrices || {});
+
+      // Bank & UPI details
+      const bankAccount = $('#p-bank-acc') ? $('#p-bank-acc').value.trim() : (S.me.bankAccount || '');
+      const ifscCode = $('#p-bank-ifsc') ? $('#p-bank-ifsc').value.trim().toUpperCase() : (S.me.ifscCode || '');
+      const upiId = $('#p-bank-upi') ? $('#p-bank-upi').value.trim() : (S.me.upiId || '');
+      const bankName = $('#p-bank-name') ? $('#p-bank-name').value.trim() : (S.me.bankName || '');
+      const accountHolder = $('#p-bank-holder') ? $('#p-bank-holder').value.trim() : (S.me.accountHolder || S.me.name);
+      const qrCode = $('#p-qr-val') ? $('#p-qr-val').value.trim() : (S.me.qrCode || '');
+
+      const updated = await api('/pandits/' + (S.me._id || S.me.email), {
         method: 'PUT',
         body: {
-          availableDays: days,
+          availableDays: finalDays,
           timeSlots: slots,
           fee,
           workingState,
@@ -2046,10 +2074,57 @@ const ACTIONS = {
         }
       });
       S.me = updated;
-      toast('Availability, districts & bank payout details saved successfully! 🙏');
+      toast('Working districts & availability saved successfully! 🙏');
       renderDashboard();
     } catch (e) {
-      toast(e.message, true);
+      toast(e.message || 'Failed to save availability', true);
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<span class="material-icons">save</span> Save Working Districts &amp; Availability';
+      }
+    }
+  },
+  panditAcceptBooking: async (d, el) => {
+    const bookingId = d.id;
+    if (!bookingId) return toast('Booking ID missing', true);
+    const btn = el || document.querySelector(`[data-action="panditAcceptBooking"][data-id="${bookingId}"]`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Accepting...'; }
+    try {
+      await api('/bookings/' + encodeURIComponent(bookingId) + '/pandit-response', {
+        method: 'PUT',
+        body: {
+          response: 'Accept',
+          panditEmail: S.user ? S.user.email : ''
+        }
+      });
+      toast('Ceremony accepted successfully! Booking confirmed. Devotee has been notified. 🙏');
+      renderDashboard();
+    } catch (e) {
+      toast(e.message || 'Failed to accept ceremony', true);
+      if (btn) { btn.disabled = false; btn.textContent = '✓ Accept Ceremony'; }
+    }
+  },
+  panditRejectBooking: async (d, el) => {
+    const bookingId = d.id;
+    if (!bookingId) return toast('Booking ID missing', true);
+    const reason = prompt('Please enter a brief reason for declining (optional):', 'Unavailable on this slot');
+    if (reason === null) return;
+    const btn = el || document.querySelector(`[data-action="panditRejectBooking"][data-id="${bookingId}"]`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Declining...'; }
+    try {
+      await api('/bookings/' + encodeURIComponent(bookingId) + '/pandit-response', {
+        method: 'PUT',
+        body: {
+          response: 'Reject',
+          rejectionReason: reason || 'Unavailable on this slot',
+          panditEmail: S.user ? S.user.email : ''
+        }
+      });
+      toast('Ceremony offer declined and returned to Admin for reassignment.');
+      renderDashboard();
+    } catch (e) {
+      toast(e.message || 'Failed to reject ceremony offer', true);
+      if (btn) { btn.disabled = false; btn.textContent = '✕ Reject Offer'; }
     }
   },
   dashTab: (d) => {
