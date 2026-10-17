@@ -1473,8 +1473,22 @@ async function panditDash(root) {
     api('/bookings?panditEmail=' + encodeURIComponent(email)).catch(() => []),
     api('/long-puja-requests?panditEmail=' + encodeURIComponent(email)).catch(() => [])
   ]);
-  const me = plist[0];
-  if (!me) { root.innerHTML = '<div class="empty">Pandit profile not found. Please ensure you are registered.</div>'; return; }
+  let me = plist[0];
+  if (!me && S.me && S.me.email && S.me.email.toLowerCase() === email.toLowerCase()) {
+    me = S.me;
+  }
+  if (!me) {
+    me = {
+      name: S.user.name,
+      email: S.user.email,
+      phone: S.user.phone || '',
+      district: S.user.district || 'Khordha',
+      city: S.user.city || 'Bhubaneswar',
+      fee: 1500,
+      status: S.user.status || 'Pending Review',
+      verified: S.user.status === 'Verified'
+    };
+  }
   S.me = me;
   const tab = S.dashTab || 'ceremonies';
   const earned = bookings.filter((b) => b.status === 'Completed').reduce((s, b) => s + (b.fee || 0), 0);
@@ -1962,11 +1976,9 @@ function renderPanditProfileTab(me) {
               <span class="material-icons" style="font-size:18px;color:var(--ochre)">account_balance</span>
               Bank Details for Dakshina Payouts
             </div>
-            ${(me.verified || me.status === 'Verified') ? `
-              <button class="btn btn-gold btn-sm" data-action="dashTab" data-tab="bank">
-                <span class="material-icons">edit</span> ${me.bankAccount ? 'Update Bank Details' : 'Add Bank Details'}
-              </button>
-            ` : '<span class="badge amber">Unlocks after Admin Verification</span>'}
+            <button class="btn btn-gold btn-sm" data-action="dashTab" data-tab="bank">
+              <span class="material-icons">edit</span> ${me.bankAccount ? 'Update Bank Details' : 'Add Bank Details'}
+            </button>
           </div>
           ${me.bankAccount ? `
             <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:12px;font-size:13px">
@@ -1978,7 +1990,7 @@ function renderPanditProfileTab(me) {
             </div>
           ` : `
             <p class="muted" style="margin:0;font-size:13px">
-              ${(me.verified || me.status === 'Verified') ? 'No bank account added yet. Click above to provide your bank account details for direct Dakshina payouts.' : 'Bank account details can be submitted from your dashboard once your profile is verified by the Super Admin.'}
+              No bank account added yet. Click above to provide your bank account details for direct Dakshina payouts.
             </p>
           `}
         </div>
@@ -1988,29 +2000,7 @@ function renderPanditProfileTab(me) {
 }
 
 function renderPanditBankTab(me) {
-  const isVerified = me.verified || me.status === 'Verified';
-
-  if (!isVerified) {
-    return `
-      <div class="panel-section-box">
-        <div class="section-box-header">
-          <div class="box-icon" style="background:#fff3e0;color:#e65100"><span class="material-icons">lock</span></div>
-          <div style="flex:1">
-            <h4>Bank &amp; Payout Account (Locked)</h4>
-            <p class="muted">Bank account details can be provided through this dashboard once your profile is verified by the Super Admin.</p>
-          </div>
-          <span class="badge amber">KYC Status: ${esc(me.status || 'Pending Review')}</span>
-        </div>
-        <div style="background:#fff8ed;border:1px dashed #d99a19;border-radius:10px;padding:18px;margin-top:16px;line-height:1.6;font-size:13.5px;color:#3b2115">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-            <span class="material-icons" style="color:var(--ochre)">info</span>
-            <b>Verification in Progress</b>
-          </div>
-          Our administration is currently reviewing your identity and Vedic credentials. As soon as your profile is verified by the Super Admin, this banking section will unlock automatically for you to provide your bank account details for direct Dakshina payouts.
-        </div>
-      </div>
-    `;
-  }
+  const isVerified = Boolean(me.verified || me.status === 'Verified');
 
   return `
     <div class="panel-section-box">
@@ -2020,12 +2010,25 @@ function renderPanditBankTab(me) {
           <h4>Pandit Bank &amp; Dakshina Payout Account</h4>
           <p class="muted">Provide your verified bank details to receive ceremony Dakshina payments directly into your account.</p>
         </div>
-        <span class="badge green"><span class="material-icons" style="font-size:13px">verified</span> Verified Pandit</span>
+        ${isVerified
+          ? '<span class="badge green"><span class="material-icons" style="font-size:13px">verified</span> Verified Pandit</span>'
+          : `<span class="badge amber">KYC Status: ${esc(me.status || 'Pending Review')}</span>`
+        }
       </div>
 
       <div style="background:#f0fff4;border:1px solid #c8e6c9;border-left:4px solid #2e7d32;padding:14px 16px;border-radius:8px;margin-top:16px;font-size:13.5px;color:#1b5e20;line-height:1.6">
         <b>💡 Direct Payout Policy:</b> When an Admin verifies a customer's payment, you receive an automated email that your money will be credited to your account within 24 hours. When the Admin processes the payout, it will be transferred directly to this account number and an email confirmation will be sent to you.
       </div>
+
+      ${!isVerified ? `
+        <div style="background:#fff8ed;border:1px dashed #d99a19;border-radius:10px;padding:14px 16px;margin-top:14px;line-height:1.5;font-size:13px;color:#3b2115">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span class="material-icons" style="color:var(--ochre);font-size:18px">info</span>
+            <b>KYC Verification Note</b>
+          </div>
+          You can save and update your payout account details now. Once your Vedic credentials are verified by the Super Admin, direct ceremony Dakshina payouts will automatically transfer to this bank account.
+        </div>
+      ` : ''}
 
       ${me.bankAccount ? `
         <div style="margin-top:20px;background:#ffffff;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px;box-shadow:0 4px 14px rgba(53,22,5,0.04)">
@@ -2444,12 +2447,16 @@ const ACTIONS = {
     const bankName = $('#pandit-bank-name') ? $('#pandit-bank-name').value.trim() : '';
     const upi = $('#pandit-bank-upi') ? $('#pandit-bank-upi').value.trim() : '';
 
-    if (!acc) return toast('Please enter your Bank Account Number', true);
-    if (accConfirm && acc !== accConfirm) return toast('Bank Account numbers do not match. Please re-check.', true);
-    if (!ifsc) return toast('Please enter your Bank IFSC Code', true);
+    const cleanAcc = acc.replace(/[\s-]/g, '');
+    const cleanConfirm = accConfirm.replace(/[\s-]/g, '');
+    const cleanIfsc = ifsc.replace(/[\s-]/g, '').toUpperCase();
+
+    if (!cleanAcc) return toast('Please enter your Bank Account Number', true);
+    if (cleanConfirm && cleanAcc !== cleanConfirm) return toast('Bank Account numbers do not match. Please re-check.', true);
+    if (!cleanIfsc) return toast('Please enter your Bank IFSC Code', true);
 
     const btn = document.querySelector('[data-action="savePanditBank"]');
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving Bank Details...'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="material-icons spin">sync</span> Saving Bank Details...'; }
 
     try {
       const pId = me._id ? encodeURIComponent(me._id) : encodeURIComponent(me.email || (S.user && S.user.email) || '');
@@ -2457,15 +2464,16 @@ const ACTIONS = {
         method: 'PUT',
         body: {
           email: me.email || (S.user && S.user.email) || '',
-          bankAccount: acc,
-          ifscCode: ifsc,
+          bankAccount: cleanAcc,
+          ifscCode: cleanIfsc,
           bankName,
           accountHolder: name,
           upiId: upi
         }
       });
-      S.me = res.pandit || { ...me, bankAccount: acc, ifscCode: ifsc, bankName, accountHolder: name, upiId: upi };
+      S.me = (res && res.pandit) ? res.pandit : { ...me, bankAccount: cleanAcc, ifscCode: cleanIfsc, bankName, accountHolder: name, upiId: upi };
       toast('Bank details saved successfully! Dakshina will be credited to this account. 🙏');
+      S.dashTab = 'bank';
       renderDashboard();
     } catch (e) {
       toast(e.message || 'Failed to save bank details', true);

@@ -1909,8 +1909,8 @@
         const saveBtn = document.getElementById('btn-save-admin-p-bank');
         if (!saveBtn) return;
         saveBtn.onclick = async () => {
-          const acc = document.getElementById('adm-p-acc').value.trim();
-          const ifsc = document.getElementById('adm-p-ifsc').value.trim().toUpperCase();
+          const acc = document.getElementById('adm-p-acc').value.replace(/[\s-]/g, '').trim();
+          const ifsc = document.getElementById('adm-p-ifsc').value.replace(/[\s-]/g, '').trim().toUpperCase();
           const bankName = document.getElementById('adm-p-bank').value.trim();
           const holder = document.getElementById('adm-p-holder').value.trim() || p.name;
           const upi = document.getElementById('adm-p-upi').value.trim();
