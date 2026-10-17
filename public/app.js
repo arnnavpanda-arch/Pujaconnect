@@ -225,6 +225,74 @@ function openModal(title, html, onMount, wide = false) {
 }
 const closeModal = () => ($('#modal-root').innerHTML = '');
 
+function appConfirm({
+  title = 'Confirmation Required',
+  message = 'Are you sure you want to proceed?',
+  detail = '',
+  confirmText = 'Confirm',
+  confirmClass = 'btn-gold',
+  cancelText = 'Cancel',
+  icon = 'help_outline'
+} = {}) {
+  return new Promise((resolve) => {
+    openModal(title, `
+      <div style="text-align:center;padding:12px 8px">
+        <span class="material-icons" style="font-size:46px;color:var(--ochre);display:block;margin-bottom:10px">${icon}</span>
+        <h4 style="margin:0 0 8px;font-size:16.5px;color:var(--mahogany)">${esc(message)}</h4>
+        ${detail ? `<p style="font-size:13px;color:var(--muted);margin:0 0 18px;line-height:1.5">${esc(detail)}</p>` : '<div style="margin-bottom:18px"></div>'}
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <button type="button" class="btn btn-outline" id="app-confirm-cancel" style="min-width:110px">${esc(cancelText)}</button>
+          <button type="button" class="btn ${confirmClass}" id="app-confirm-ok" style="min-width:130px">${esc(confirmText)}</button>
+        </div>
+      </div>
+    `, (m) => {
+      const cancelBtn = $('#app-confirm-cancel', m);
+      const okBtn = $('#app-confirm-ok', m);
+      if (cancelBtn) cancelBtn.onclick = () => { closeModal(); resolve(false); };
+      if (okBtn) okBtn.onclick = () => { closeModal(); resolve(true); };
+    });
+  });
+}
+
+function appPrompt({
+  title = 'Action Required',
+  message = '',
+  label = 'Details',
+  placeholder = '',
+  defaultValue = '',
+  confirmText = 'Submit',
+  confirmClass = 'btn-gold',
+  cancelText = 'Cancel',
+  icon = 'edit_note'
+} = {}) {
+  return new Promise((resolve) => {
+    openModal(title, `
+      <div style="padding:6px 4px">
+        ${message ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;color:var(--mahogany);font-weight:600;font-size:14px"><span class="material-icons" style="color:var(--ochre);font-size:22px">${icon}</span><span>${esc(message)}</span></div>` : ''}
+        <div style="margin-bottom:16px">
+          <label style="font-weight:600;display:block;margin-bottom:6px;font-size:13px">${esc(label)}</label>
+          <textarea id="app-prompt-input" rows="3" placeholder="${esc(placeholder)}" style="width:100%;box-sizing:border-box;border:1.5px solid var(--ochre);border-radius:8px;padding:10px;font-family:inherit;font-size:13.5px;line-height:1.4">${esc(defaultValue)}</textarea>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+          <button type="button" class="btn btn-outline" id="app-prompt-cancel">${esc(cancelText)}</button>
+          <button type="button" class="btn ${confirmClass}" id="app-prompt-ok">${esc(confirmText)}</button>
+        </div>
+      </div>
+    `, (m) => {
+      const inp = $('#app-prompt-input', m);
+      if (inp) { inp.focus(); inp.select(); }
+      const cancelBtn = $('#app-prompt-cancel', m);
+      const okBtn = $('#app-prompt-ok', m);
+      if (cancelBtn) cancelBtn.onclick = () => { closeModal(); resolve(null); };
+      if (okBtn) okBtn.onclick = () => {
+        const val = ($('#app-prompt-input', m).value || '').trim();
+        closeModal();
+        resolve(val);
+      };
+    });
+  });
+}
+
 /* ---------- navigation ---------- */
 function renderNav() {
   const u = S.user;
@@ -2014,17 +2082,51 @@ const ACTIONS = {
   bookPandit: (d) => openBooking(d.id),
   slip: (d) => printSlip(S.bookings.find((b) => b.bookingId === d.id)),
   cancelBooking: async (d) => {
-    if (!confirm('Cancel this booking?')) return;
+    const ok = await appConfirm({
+      title: 'Cancel Ceremony Booking',
+      message: 'Are you sure you want to cancel this booking?',
+      detail: 'This will cancel your scheduled ritual slot.',
+      confirmText: 'Yes, Cancel',
+      confirmClass: 'btn-red',
+      icon: 'cancel'
+    });
+    if (!ok) return;
     try { await api(`/bookings/${d.id}/status`, { method: 'PUT', body: { status: 'Cancelled' } }); toast('Booking cancelled'); renderDashboard(); } catch (e) { toast(e.message, true); }
   },
-  reschedule: async (d) => {
+  reschedule: (d) => {
     const b = S.bookings.find((x) => x.bookingId === d.id);
-    const date = prompt('New date (YYYY-MM-DD):', b.date);
-    if (!date || date === b.date) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < today()) return toast('Enter a valid future date (YYYY-MM-DD)', true);
-    const time = prompt('Time slot:', b.time);
-    if (!time) return;
-    try { await api(`/bookings/${d.id}/reschedule`, { method: 'PUT', body: { date, time } }); toast('Booking rescheduled'); renderDashboard(); } catch (e) { toast(e.message, true); }
+    if (!b) return toast('Booking record not found', true);
+    openModal('Reschedule Ceremony Slot', `
+      <div>
+        <label style="font-weight:600">Select New Ceremony Date *</label>
+        <input type="date" id="resched-date" min="${today()}" value="${esc(b.date || '')}">
+      </div>
+      <div style="margin-top:12px">
+        <label style="font-weight:600">Select New Time Slot *</label>
+        <select id="resched-time">
+          ${opts(['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'], b.time || '08:00 AM - 11:00 AM')}
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button type="button" class="btn btn-gold" id="btn-confirm-resched"><span class="material-icons">event</span> Confirm Reschedule</button>
+      </div>
+    `, (m) => {
+      $('#btn-confirm-resched', m).onclick = async () => {
+        const date = $('#resched-date', m).value;
+        const time = $('#resched-time', m).value;
+        if (!date) return toast('Please select a ceremony date', true);
+        if (!time) return toast('Please select a time slot', true);
+        try {
+          await api(`/bookings/${d.id}/reschedule`, { method: 'PUT', body: { date, time } });
+          closeModal();
+          toast('Booking rescheduled successfully! 🙏');
+          renderDashboard();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      };
+    });
   },
   setStatus: async (d) => { try { await api(`/bookings/${d.id}/status`, { method: 'PUT', body: { status: d.status } }); toast('Updated'); renderDashboard(); } catch (e) { toast(e.message, true); } },
   longResp: async (d) => { try { await api(`/long-puja-requests/${d.id}/pandit-response`, { method: 'PUT', body: { panditEmail: S.user.email, response: d.resp } }); toast('Response recorded'); renderDashboard(); } catch (e) { toast(e.message, true); } },
@@ -2120,7 +2222,16 @@ const ACTIONS = {
   panditRejectBooking: async (d, el) => {
     const bookingId = d.id;
     if (!bookingId) return toast('Booking ID missing', true);
-    const reason = prompt('Please enter a brief reason for declining (optional):', 'Unavailable on this slot');
+    const reason = await appPrompt({
+      title: 'Decline Ceremony Assignment',
+      message: `Decline ceremony offer for booking ${bookingId}?`,
+      label: 'Reason for Declining (optional)',
+      placeholder: 'e.g. Unavailable on this slot',
+      defaultValue: 'Unavailable on this slot',
+      confirmText: 'Decline Offer',
+      confirmClass: 'btn-red',
+      icon: 'event_busy'
+    });
     if (reason === null) return;
     const btn = el || document.querySelector(`[data-action="panditRejectBooking"][data-id="${bookingId}"]`);
     if (btn) { btn.disabled = true; btn.textContent = 'Declining...'; }
@@ -2213,7 +2324,18 @@ const ACTIONS = {
   panditStatus: async (d) => { try { await api(`/pandits/${d.id}/status`, { method: 'PUT', body: { status: d.status } }); toast('Pandit ' + d.status.toLowerCase() + '. Email sent.'); renderDashboard(); } catch (e) { toast(e.message, true); } },
   assign: (d) => openAssign(d.id),
   editPuja: (d) => openPujaEditor(d.id),
-  delPuja: async (d) => { if (!confirm('Delete this puja from the catalog?')) return; try { await api('/pujas/' + d.id, { method: 'DELETE' }); toast('Deleted'); renderDashboard(); } catch (e) { toast(e.message, true); } },
+  delPuja: async (d) => {
+    const ok = await appConfirm({
+      title: 'Delete Ritual Service',
+      message: 'Delete this puja from the catalog?',
+      detail: 'This ritual service will be permanently deleted from the devotee catalog.',
+      confirmText: 'Delete Puja',
+      confirmClass: 'btn-red',
+      icon: 'delete_forever'
+    });
+    if (!ok) return;
+    try { await api('/pujas/' + d.id, { method: 'DELETE' }); toast('Deleted'); renderDashboard(); } catch (e) { toast(e.message, true); }
+  },
   modalBackdrop: (d, el, ev) => { if (ev.target === el) closeModal(); },
   payBooking: async (d) => {
     try {

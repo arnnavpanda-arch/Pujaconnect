@@ -339,6 +339,77 @@
     }
     function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
 
+    function adminConfirm({
+      title = 'Confirmation Required',
+      message = 'Are you sure you want to proceed?',
+      detail = '',
+      confirmText = 'Confirm',
+      confirmClass = 'btn-gold',
+      cancelText = 'Cancel',
+      icon = 'help_outline'
+    } = {}) {
+      return new Promise((resolve) => {
+        openModal(title, `
+          <div style="text-align:center;padding:12px 8px">
+            <span class="material-icons" style="font-size:46px;color:var(--admin-gold);display:block;margin-bottom:10px">${icon}</span>
+            <h4 style="margin:0 0 8px;font-size:16.5px;color:#2c180a">${esc(message)}</h4>
+            ${detail ? `<p style="font-size:13px;color:#7a6252;margin:0 0 18px;line-height:1.5">${esc(detail)}</p>` : '<div style="margin-bottom:18px"></div>'}
+            <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+              <button type="button" class="btn btn-outline" id="admin-confirm-cancel" style="min-width:110px">${esc(cancelText)}</button>
+              <button type="button" class="btn ${confirmClass}" id="admin-confirm-ok" style="min-width:130px">${esc(confirmText)}</button>
+            </div>
+          </div>
+        `, (m) => {
+          const cancelBtn = document.getElementById('admin-confirm-cancel');
+          const okBtn = document.getElementById('admin-confirm-ok');
+          if (cancelBtn) cancelBtn.onclick = () => { closeModal(); resolve(false); };
+          if (okBtn) okBtn.onclick = () => { closeModal(); resolve(true); };
+        });
+      });
+    }
+
+    function adminPrompt({
+      title = 'Action Required',
+      message = '',
+      label = 'Rejection Reason',
+      placeholder = '',
+      defaultValue = '',
+      confirmText = 'Submit',
+      confirmClass = 'btn-gold',
+      cancelText = 'Cancel',
+      icon = 'edit_note'
+    } = {}) {
+      return new Promise((resolve) => {
+        openModal(title, `
+          <div style="padding:6px 4px">
+            ${message ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;color:#2c180a;font-weight:600;font-size:14px"><span class="material-icons" style="color:var(--admin-gold);font-size:22px">${icon}</span><span>${esc(message)}</span></div>` : ''}
+            <div style="margin-bottom:16px">
+              <label style="font-weight:600;display:block;margin-bottom:6px;font-size:13px">${esc(label)}</label>
+              <textarea id="admin-prompt-input" rows="3" placeholder="${esc(placeholder)}" style="width:100%;box-sizing:border-box;border:1.5px solid #d99a19;border-radius:8px;padding:10px;font-family:inherit;font-size:13.5px;line-height:1.4">${esc(defaultValue)}</textarea>
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end">
+              <button type="button" class="btn btn-outline" id="admin-prompt-cancel">${esc(cancelText)}</button>
+              <button type="button" class="btn ${confirmClass}" id="admin-prompt-ok">${esc(confirmText)}</button>
+            </div>
+          </div>
+        `, (m) => {
+          const inp = document.getElementById('admin-prompt-input');
+          if (inp) {
+            inp.focus();
+            inp.select();
+          }
+          const cancelBtn = document.getElementById('admin-prompt-cancel');
+          const okBtn = document.getElementById('admin-prompt-ok');
+          if (cancelBtn) cancelBtn.onclick = () => { closeModal(); resolve(null); };
+          if (okBtn) okBtn.onclick = () => {
+            const val = (document.getElementById('admin-prompt-input').value || '').trim();
+            closeModal();
+            resolve(val);
+          };
+        });
+      });
+    }
+
     function statusBadge(s) {
       const cls = { 'Verified': 'green', 'Pending Review': 'amber', 'Rejected': 'red', 'Confirmed': 'green', 'Completed': 'green', 'Cancelled': 'red', 'Assigned': 'green' }[s] || 'amber';
       return `<span class="badge ${cls}">${esc(s)}</span>`;
@@ -1111,7 +1182,15 @@
     }
 
     async function deletePuja(id) {
-      if (!confirm('Are you sure you want to delete this puja from the catalog?')) return;
+      const confirmed = await adminConfirm({
+        title: 'Delete Ritual from Catalog',
+        message: 'Are you sure you want to remove this ritual?',
+        detail: 'This ritual service will be deleted and no longer appear in devotee catalogs.',
+        confirmText: 'Delete Ritual',
+        confirmClass: 'btn-red',
+        icon: 'delete_forever'
+      });
+      if (!confirmed) return;
       try {
         await api(`/pujas/${id}`, { method: 'DELETE' });
         toast('Puja deleted from catalog');
@@ -1189,7 +1268,16 @@
     }
 
     async function verifyBookingPayment(id) {
-      if (!confirm(`Verify payment for booking ${id} and issue official bill?\n\nThis will confirm the booking, generate the invoice/bill for the devotee, and send an email alert to the assigned Pandit to check their bank account for credited Dakshina.`)) return;
+      const confirmed = await adminConfirm({
+        title: 'Verify & Confirm Payment',
+        message: `Verify payment for booking ${id} and issue official bill?`,
+        detail: 'This will officially verify the devotee payment, generate the downloadable Dakshina bill/receipt, and send an email alert to the assigned Pandit.',
+        confirmText: 'Verify & Issue Bill',
+        confirmClass: 'btn-green',
+        icon: 'verified'
+      });
+      if (!confirmed) return;
+
       try {
         await api('/bookings/' + id + '/verify-payment', { method: 'POST' });
         toast('Payment verified! Bill issued and Pandit credit alert email sent. 🙏');
@@ -1200,8 +1288,17 @@
     }
 
     async function rejectBookingPayment(id) {
-      const defaultReason = 'Transaction reference unconfirmed in bank statement or mismatched amount';
-      const reason = prompt(`Reject payment verification for booking ${id}?\n\nPlease enter the rejection reason that will be sent to the devotee:`, defaultReason);
+      const defaultReason = 'Transaction reference could not be verified in bank records';
+      const reason = await adminPrompt({
+        title: 'Reject Payment Verification',
+        message: `Rejecting payment proof for booking ${id}`,
+        label: 'Rejection Reason (will be emailed to devotee)',
+        placeholder: 'e.g. Invalid UTR / unconfirmed credit',
+        defaultValue: defaultReason,
+        confirmText: 'Reject Payment',
+        confirmClass: 'btn-red',
+        icon: 'cancel'
+      });
       if (reason === null) return;
 
       try {
