@@ -319,7 +319,11 @@ function showView(name) {
 
   // Close nav drawer if open
   const drawer = $('#nav-drawer');
-  if (drawer) drawer.classList.remove('open');
+  if (drawer) {
+    drawer.classList.remove('open');
+    const btn = $('#hamburger-btn') || $('.hamburger-btn');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
 
   document.querySelectorAll('.view-section').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
   document.querySelectorAll('.drawer-link').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
@@ -771,6 +775,7 @@ async function openBooking(arg) {
         toast(err.message, true);
       }
     };
+  });
 }
 
 
@@ -2475,7 +2480,10 @@ const ACTIONS = {
   nav: (d) => showView(d.view),
   toggleMenu: () => {
     const drawer = $('#nav-drawer');
-    if (drawer) drawer.classList.toggle('open');
+    if (!drawer) return;
+    const isOpen = drawer.classList.toggle('open');
+    const btn = $('#hamburger-btn') || $('.hamburger-btn');
+    if (btn) btn.setAttribute('aria-expanded', String(isOpen));
   },
   closeModal,
   login: () => {
@@ -3212,9 +3220,21 @@ document.addEventListener('click', (ev) => {
   fn(el.dataset, el, ev);
 });
 
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') {
+    const drawer = $('#nav-drawer');
+    if (drawer && drawer.classList.contains('open')) {
+      drawer.classList.remove('open');
+      const btn = $('#hamburger-btn') || $('.hamburger-btn');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+  }
+});
+
 /* ---------- boot ---------- */
 (async function init() {
-  $('#yr').textContent = new Date().getFullYear();
+  const yrEl = $('#yr');
+  if (yrEl) yrEl.textContent = new Date().getFullYear();
   renderNav();
   await loadPujas();
   renderHomePujas();
