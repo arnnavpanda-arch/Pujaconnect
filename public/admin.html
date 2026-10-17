@@ -260,10 +260,10 @@
 
     <!-- Subtabs -->
     <div class="admin-tabs">
-      <button class="admin-tab" data-tab="bookings" onclick="switchAdminTab('bookings')">
+      <button class="admin-tab active" data-tab="bookings" onclick="switchAdminTab('bookings')">
         <span class="material-icons">event_available</span> Bookings &amp; Assignments <span id="badge-bookings-count" class="admin-tab-pill">0</span>
       </button>
-      <button class="admin-tab active" data-tab="kyc" onclick="switchAdminTab('kyc')">
+      <button class="admin-tab" data-tab="kyc" onclick="switchAdminTab('kyc')">
         <span class="material-icons">verified_user</span> KYC Queue <span id="badge-kyc-count" class="admin-tab-pill">0</span>
       </button>
       <button class="admin-tab" data-tab="pandits" onclick="switchAdminTab('pandits')">
@@ -298,8 +298,8 @@
   <div id="toast" class="toast"></div>
 
   <script>
-    let TOKEN = '';
-    let CURRENT_TAB = 'kyc';
+    let TOKEN = localStorage.getItem('pc_admin_token') || localStorage.getItem('admin_token') || localStorage.getItem('pc_token') || '';
+    let CURRENT_TAB = 'bookings';
     let SEARCH_QUERY = '';
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
@@ -450,16 +450,18 @@
           api('/bookings').catch(() => []),
           api('/platform-commission').catch(() => ({ commissionPercent: 10 }))
         ]);
-        S.stats = stats;
-        S.adminPandits = pandits;
-        S.adminLongs = longs;
-        S.users = users;
-        S.pujas = pujas;
+        S.stats = stats || {};
+        S.adminPandits = Array.isArray(pandits) ? pandits : [];
+        S.adminLongs = Array.isArray(longs) ? longs : [];
+        S.users = Array.isArray(users) ? users : [];
+        S.pujas = Array.isArray(pujas) ? pujas : [];
+        S.bookings = Array.isArray(bookings) ? bookings : [];
         S.commissionPercent = (commissionData && (typeof commissionData.percent === 'number' ? commissionData.percent : commissionData.commissionPercent)) ?? 10;
 
         renderKpis();
         renderActiveTab();
       } catch (e) {
+        console.error('loadData error:', e);
         document.getElementById('admin-view-root').innerHTML = `<div class="empty error">Error loading admin data: ${esc(e.message)}</div>`;
       }
     }
@@ -473,13 +475,17 @@
       const eligiblePayoutBookings = (S.bookings || []).filter(b => b.panditEmail && (b.paymentStatus === 'Paid' || ['Completed', 'Confirmed', 'In Progress'].includes(b.status)));
       const pendPanditPayouts = eligiblePayoutBookings.filter(b => b.panditPayoutStatus !== 'Paid').length;
 
-      document.getElementById('badge-kyc-count').textContent = pendKyc;
-      document.getElementById('badge-long-count').textContent = pendLong;
+      const kycBadge = document.getElementById('badge-kyc-count');
+      if (kycBadge) kycBadge.textContent = pendKyc;
+      const longBadge = document.getElementById('badge-long-count');
+      if (longBadge) longBadge.textContent = pendLong;
       const pendBookings = (S.bookings || []).filter(b => b.status === 'Pending Assignment' || b.panditApproval === 'Rejected').length;
       const bookBadge = document.getElementById('badge-bookings-count');
       if (bookBadge) bookBadge.textContent = pendBookings;
       const payoutBadge = document.getElementById('badge-pandit-payouts-count');
       if (payoutBadge) payoutBadge.textContent = pendPanditPayouts;
+      const paymentsBadge = document.getElementById('badge-payments-count');
+      if (paymentsBadge) paymentsBadge.textContent = pendPayments;
 
       const kpis = [
         { label: 'Pending Pandit Assignment', val: pendBookings, icon: 'person_search', alert: pendBookings > 0 },
@@ -2265,13 +2271,17 @@
     (async function init() {
       try {
         const r = await api('/auth/admin-direct', { method: 'POST' });
-        TOKEN = r.token;
-        toast('Super Admin Access Granted 🛡️');
+        if (r && r.token) {
+          TOKEN = r.token;
+          localStorage.setItem('admin_token', r.token);
+          localStorage.setItem('pc_admin_token', r.token);
+          toast('Super Admin Access Granted 🛡️');
+        }
       } catch (e) {
-        console.warn('Direct auth fallback');
+        console.warn('Direct admin auth notice:', e.message);
       }
       document.getElementById('btn-refresh-db').onclick = () => loadData();
-      loadData();
+      await loadData();
     })();
   </script>
 </body>
