@@ -1150,8 +1150,8 @@ function renderDevoteePaymentTrackingTab(bookings) {
       ${bookings.map((b) => {
         const fee = b.fee || 1500;
         const advance = b.advanceAmount || 0;
-        const isPaid = b.paymentStatus === 'Paid';
-        const isVerifying = b.paymentStatus === 'Verification Pending';
+        const isPaid = b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified';
+        const isVerifying = b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending';
         const isRejected = b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected';
         const remaining = Math.max(0, isPaid ? 0 : fee - (b.advancePaid ? advance : 0));
         const isPanditApproved = b.status === 'Confirmed' || b.status === 'In Progress' || b.panditApproval === 'Approved';
@@ -1160,7 +1160,7 @@ function renderDevoteePaymentTrackingTab(bookings) {
         if (isPaid) {
           statusSnippet = `<span class="badge green"><span class="material-icons" style="font-size:14px">check_circle</span> Paid &amp; Verified</span>`;
         } else if (isVerifying) {
-          statusSnippet = `<span class="badge amber"><span class="material-icons" style="font-size:14px">hourglass_top</span> Payment Verification Pending</span>`;
+          statusSnippet = `<span class="badge amber"><span class="material-icons" style="font-size:14px">hourglass_top</span> Under Processing</span>`;
         } else if (isRejected) {
           statusSnippet = `<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a"><span class="material-icons" style="font-size:14px">cancel</span> Payment Rejected</span>${b.paymentRejectionReason ? `<br><small class="muted" style="color:#c62828;font-size:12px;margin-top:2px;display:inline-block">Reason: ${esc(b.paymentRejectionReason)}</small>` : ''}`;
         } else if (b.status === 'Cancelled') {
@@ -1179,20 +1179,20 @@ function renderDevoteePaymentTrackingTab(bookings) {
         } else if (isVerifying) {
           actionButton = `
             <div style="display:flex;align-items:center;gap:6px;color:var(--ochre);font-weight:600;font-size:13px">
-              <span class="material-icons">pending_actions</span> Proof Submitted (Ref: ${esc(b.paymentProof || 'Submitted')})
+              <span class="material-icons">hourglass_top</span> Under Processing (Ref: ${esc(b.paymentProof || 'Submitted')})
             </div>
           `;
         } else if (isRejected) {
           actionButton = `
             <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
-              <span class="material-icons">refresh</span> Re-submit Payment Proof (${inr(remaining)})
+              <span class="material-icons">refresh</span> Repay Dakshina (${inr(fee)})
             </button>
           `;
         } else if (b.status !== 'Cancelled') {
           if (isPanditApproved) {
             actionButton = `
               <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
-                <span class="material-icons">account_balance_wallet</span> Pay Remaining Dakshina (${inr(remaining)})
+                <span class="material-icons">account_balance_wallet</span> Pay Dakshina (${inr(fee)})
               </button>
             `;
           } else {
@@ -1287,25 +1287,25 @@ function renderDevoteeBookingsTab(bookings) {
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">payments</span>
-              <span>Dakshina: <b>${inr(b.fee)}</b> <small class="muted">(${esc(b.paymentStatus || 'Pending')})</small></span>
+              <span>Dakshina: <b>${inr(b.fee)}</b> <small class="muted">(${b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' ? 'Paid & Verified' : (b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending' ? 'Under Processing' : (b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected' ? 'Payment Rejected' : (b.paymentStatus || 'Pending')))})</small></span>
             </div>
           </div>
           <div class="booking-card-footer">
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               <button class="btn btn-dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}"><span class="material-icons">print</span> Slip</button>
-              ${b.paymentStatus === 'Paid' ? `
+              ${b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' ? `
                 <button class="btn btn-gold btn-sm" data-action="viewBill" data-id="${esc(b.bookingId)}">
                   <span class="material-icons">receipt_long</span> Bill
                 </button>
-              ` : b.paymentStatus === 'Verification Pending' ? `
-                <span class="badge amber" style="font-size:11px"><span class="material-icons" style="font-size:13px">hourglass_top</span> Verifying</span>
+              ` : (b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending') ? `
+                <span class="badge amber" style="font-size:11px"><span class="material-icons" style="font-size:13px">hourglass_top</span> Under Processing</span>
               ` : (b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected') ? `
                 <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
-                  <span class="material-icons">payments</span> Re-submit Pay (${inr(Math.max(0, (b.fee || 1500) - (b.advancePaid ? (b.advanceAmount || 0) : 0)))})
+                  <span class="material-icons">refresh</span> Repay (${inr(b.fee)})
                 </button>
               ` : (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved') ? `
                 <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
-                  <span class="material-icons">payments</span> Pay (${inr(Math.max(0, (b.fee || 1500) - (b.advancePaid ? (b.advanceAmount || 0) : 0)))})
+                  <span class="material-icons">payments</span> Pay (${inr(b.fee)})
                 </button>
               ` : ''}
             </div>
@@ -1570,9 +1570,10 @@ function renderPanditCeremoniesTab(bookings) {
   return `
     <div class="booking-cards-grid">
       ${bookings.map((b) => {
-        const isUserPaid = b.paymentStatus === 'Paid' || b.advancePaid;
+        const isUserPaid = b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified';
+        const isUnderProcessing = b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending';
         const isAdminPaid = b.panditPayoutStatus === 'Paid';
-        const isCeremonyEnded = b.status === 'Completed' || isUserPaid;
+        const isCeremonyEnded = b.status === 'Completed';
 
         const mainFee = Number(b.fee) || 1500;
         const feePercent = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : 10);
@@ -1585,8 +1586,8 @@ function renderPanditCeremoniesTab(bookings) {
             <div class="booking-card-top">
               <span class="booking-id-tag">${esc(b.bookingId)}</span>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                ${isCeremonyEnded ? `<span class="badge green"><span class="material-icons" style="font-size:13px;vertical-align:middle">task_alt</span> Ceremony Ended</span>` : statusBadge(b.status)}
-                ${isAdminPaid ? `<span class="badge green" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;font-weight:700"><span class="material-icons" style="font-size:13px;vertical-align:middle">payments</span> Paid (${inr(netFee)})</span>` : (isUserPaid ? `<span class="badge amber" style="background:#fff8ed;color:#8a5d3b;border:1px solid #ebd9c2"><span class="material-icons" style="font-size:13px;vertical-align:middle">hourglass_top</span> Payout Pending</span>` : '')}
+                ${isCeremonyEnded ? `<span class="badge green"><span class="material-icons" style="font-size:13px;vertical-align:middle">task_alt</span> Ceremony Completed</span>` : statusBadge(b.status)}
+                ${isAdminPaid ? `<span class="badge green" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;font-weight:700"><span class="material-icons" style="font-size:13px;vertical-align:middle">payments</span> Paid (${inr(netFee)})</span>` : (isUserPaid ? `<span class="badge amber" style="background:#fff8ed;color:#8a5d3b;border:1px solid #ebd9c2"><span class="material-icons" style="font-size:13px;vertical-align:middle">hourglass_top</span> Payout Pending</span>` : (isUnderProcessing ? `<span class="badge amber" style="font-size:11px"><span class="material-icons" style="font-size:13px;vertical-align:middle">hourglass_top</span> Payment Under Processing</span>` : ''))}
               </div>
             </div>
             <h4>${esc(b.service)}</h4>
@@ -2274,11 +2275,13 @@ function printSlip(b) {
   const w = window.open('', '_blank');
   if (!w) return toast('Please allow pop-ups to download the slip', true);
   const mainFee = Number(b.fee) || 1500;
-  const feePct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : 10);
-  const adminFee = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((mainFee * feePct) / 100));
-  const netFee = b.panditPayoutAmount || b.panditNetPayout || Math.max(0, mainFee - adminFee);
+  const payStatusDisplay = (b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified') 
+    ? 'Paid & Verified ✅' 
+    : ((b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending') 
+      ? 'Under Processing' 
+      : ((b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected') ? 'Payment Rejected' : (b.paymentStatus || 'Pending')));
 
-  w.document.write(`<html><head><title>${esc(b.bookingId)}</title><style>body{font-family:Georgia,serif;padding:40px;color:#3b2115}h1{color:#351605;border-bottom:3px solid #d99a19;padding-bottom:8px}td{padding:8px 16px 8px 0;font-family:Arial}</style></head><body><h1>ॐ PujaConnect – Ceremony Slip</h1><table>
+  w.document.write(`<html><head><title>${esc(b.bookingId)}</title><style>body{font-family:Georgia,serif;padding:40px;color:#3b2115}h1{color:#351605;border-bottom:3px solid #d99a19;padding-bottom:8px}table{width:100%;border-collapse:collapse;margin-top:16px}td{padding:10px 16px 10px 0;font-family:Arial;border-bottom:1px solid #f0e0cc}td:first-child{width:38%;color:#6b4d3a}</style></head><body><h1>ॐ PujaConnect – Ceremony Slip</h1><table>
     ${[
       ['Booking ID', b.bookingId],
       ['Devotee Name', b.userName],
@@ -2287,10 +2290,8 @@ function printSlip(b) {
       ['Ceremony Date', b.date],
       ['Ceremony Time', b.time],
       ['Ceremony Venue', b.address || b.district],
-      ['Total Customer Dakshina', inr(mainFee)],
-      [`Admin Platform Charge (${feePct}%)`, `-${inr(adminFee)} (${feePct}%)`],
-      ['Remaining Net Pandit Dakshina', inr(netFee)],
-      ['Devotee Payment', b.paymentStatus],
+      ['Dakshina Amount (Devotee Pay Amount)', inr(mainFee)],
+      ['Payment Status', payStatusDisplay],
       ['Ceremony Status', b.status]
     ].map(([k, v]) => `<tr><td><b>${k}</b></td><td>${esc(v)}</td></tr>`).join('')}</table><p style="margin-top:30px">Please keep this official ceremony slip for your records. 🙏</p><script>window.print()<\/script></body></html>`);
   w.document.close();
@@ -2849,7 +2850,7 @@ const ACTIONS = {
                 body: { paymentProof: proof, paymentMethod: mode }
               });
               closeModal();
-              toast('Dakshina payment received! Ceremony concluded and official bill generated. 🙏');
+              toast('Dakshina payment submitted! Your payment is under processing and awaiting Admin verification. 🙏');
               renderDashboard();
             } catch (err) {
               submitBtn.disabled = false;
@@ -2942,18 +2943,25 @@ const ACTIONS = {
         </table>
 
         <div class="invoice-summary">
-          <div class="invoice-total-row">
-            <span>Customer Dakshina Subtotal</span>
-            <span>${inr(bMainFee)}</span>
-          </div>
-          <div class="invoice-total-row">
-            <span>Admin Platform Coordination Charge (${bFeePct}%)</span>
-            <span style="color:#c62828">-${inr(bFeeCut)} (${bFeePct}%)</span>
-          </div>
-          <div class="invoice-total-row grand">
-            <span>Remaining Net Pandit Dakshina</span>
-            <span>${inr(bNetPayout)}</span>
-          </div>
+          ${(S.user && S.user.role === 'admin') ? `
+            <div class="invoice-total-row">
+              <span>Customer Dakshina Subtotal</span>
+              <span>${inr(bMainFee)}</span>
+            </div>
+            <div class="invoice-total-row">
+              <span>Admin Platform Coordination Charge (${bFeePct}%)</span>
+              <span style="color:#c62828">-${inr(bFeeCut)} (${bFeePct}%)</span>
+            </div>
+            <div class="invoice-total-row grand">
+              <span>Remaining Net Pandit Dakshina</span>
+              <span>${inr(bNetPayout)}</span>
+            </div>
+          ` : `
+            <div class="invoice-total-row grand">
+              <span>Total Dakshina Pay Amount</span>
+              <span style="color:#2e7d32">${inr(bMainFee)}</span>
+            </div>
+          `}
         </div>
 
         <div class="invoice-footer">
@@ -2961,12 +2969,12 @@ const ACTIONS = {
           <div style="font-size:12px;color:var(--muted);line-height:1.5">
             <b>Devotee Payment Mode:</b> ${esc(b.paymentMethod || 'UPI / Bank Transfer')}<br>
             <b>Transaction Ref / UTR:</b> <code style="font-size:11px">${esc(b.paymentProof || 'VERIFIED')}</code><br>
-            <b>Ceremony Status:</b> <span style="color:#2e7d32;font-weight:700">Completed (Ceremony Ended)</span><br>
-            ${b.panditPayoutStatus === 'Paid' ? `
+            <b>Ceremony Status:</b> <span style="color:#2e7d32;font-weight:700">Completed (Paid &amp; Verified)</span><br>
+            ${(S.user && S.user.role === 'admin') ? (b.panditPayoutStatus === 'Paid' ? `
               <b>Admin Pandit Payout:</b> <span style="color:#1b5e20;font-weight:700">Paid (${inr(b.panditPayoutAmount || bNetPayout)}) via ${esc(b.panditPayoutMethod || 'Bank Transfer')} · Ref: <code>${esc(b.panditPayoutTxnId || 'SETTLED')}</code>${b.panditPayoutDate ? ` on ${new Date(b.panditPayoutDate).toLocaleDateString('en-IN')}` : ''}</span><br>
             ` : `
               <b>Admin Pandit Payout:</b> <span style="color:var(--ochre);font-weight:700">Pending Admin Transfer of ${inr(bNetPayout)} (Scheduled within 24 Hours)</span><br>
-            `}
+            `) : ''}
             <span style="font-style:italic;color:var(--ochre)">"May Lord Ganesha and the Divine Deities bestow health, peace &amp; prosperity on your family."</span>
           </div>
         </div>

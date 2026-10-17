@@ -673,9 +673,13 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
     panditName: pandit.name,
     district: b.district,
     address: b.address || b.district,
+    fee,
+    totalPujaCost: fee,
     adminFeePercent: commPct,
     adminFeeAmount,
-    netDakshina: panditNetPayout
+    adminFee: adminFeeAmount,
+    netDakshina: panditNetPayout,
+    panditFee: panditNetPayout
   });
 
   res.json({ ok: true, booking: b });
@@ -762,90 +766,34 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
-  b.paymentStatus = 'Paid';
-  b.status = 'Completed'; // Ceremony ends automatically once user pays!
+  // When devotee submits payment, status is 'Under Processing'.
+  // Do NOT prematurely mark ceremony as 'Completed' or 'Paid' yet!
+  b.paymentStatus = 'Under Processing';
   b.advanceAmount = b.fee;
-  b.advancePaid = true;
+  b.advancePaid = false;
   b.paymentProof = String(paymentProof).trim();
   b.paymentMethod = paymentMethod || 'UPI/Bank Transfer';
   b.paymentDate = new Date();
-  if (!b.invoiceId) {
-    b.invoiceId = 'INV-' + b.bookingId.replace('PUJA-', '') + '-' + Date.now().toString().slice(-4);
-    b.invoiceGeneratedAt = new Date();
-  }
+  b.paymentRejectionReason = '';
   await b.save();
 
-  // Fetch assigned pandit to extract bank and contact details
-  let pandit = null;
-  if (b.panditEmail) {
-    pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
-  }
-
-  const mainFee = Number(b.fee) || 1500;
-  const feePct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : 10);
-  const feeCut = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((mainFee * feePct) / 100));
-  const netDakshina = Number(b.panditNetPayout !== undefined && b.panditNetPayout > 0 ? b.panditNetPayout : Math.max(0, mainFee - feeCut));
-
-  // 1. Notify assigned pandit that devotee paid and money will be credited within 24 hours
-  if (b.panditEmail) {
-    await sendSafe('PANDIT_PAYMENT_VERIFIED_NOTICE', b.panditEmail, {
-      bookingId: b.bookingId,
-      service: b.service,
-      panditName: (pandit && pandit.name) || b.panditName || 'Pandit ji',
-      userName: b.userName,
-      userPhone: b.phone || '',
-      userEmail: b.userEmail,
-      date: b.date,
-      time: b.time,
-      district: b.district,
-      address: b.address,
-      totalAmount: mainFee,
-      amount: mainFee,
-      adminFeePercent: feePct,
-      adminFeeAmount: feeCut,
-      netAmount: netDakshina,
-      upiId: (pandit && pandit.upiId) || '',
-      bankAccount: (pandit && pandit.bankAccount) || '',
-      bankName: (pandit && pandit.bankName) || '',
-      ifscCode: (pandit && pandit.ifscCode) || '',
-      accountHolder: (pandit && pandit.accountHolder) || (pandit && pandit.name) || '',
-      qrCode: (pandit && pandit.qrCode) || '',
-      paymentProof: b.paymentProof,
-      paymentMethod: b.paymentMethod
-    });
-  }
-
-  // 2. Send complete payment receipt email to devotee
-  await sendSafe('PAYMENT_RECEIPT', b.userEmail, {
-    bookingId: b.bookingId,
-    userName: b.userName,
-    userPhone: b.phone || '',
-    userEmail: b.userEmail,
-    reference: b.invoiceId || b.bookingId,
-    service: b.service,
-    panditName: (pandit && pandit.name) || b.panditName || 'Assigned Pandit',
-    date: b.date,
-    time: b.time,
-    district: b.district,
-    address: b.address,
-    total: b.fee,
-    amount: b.fee,
-    advanceAmount: b.fee,
-    paymentProof: b.paymentProof,
-    paymentMethod: b.paymentMethod
+  res.json({
+    ok: true,
+    booking: b,
+    message: 'Payment submitted successfully! Your payment is under processing and awaiting Admin verification.'
   });
-
-  res.json({ ok: true, booking: b });
 }));
 
 app.post('/api/bookings/:id/verify-payment', wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
-  b.paymentStatus = 'Paid';
-  b.status = 'Completed'; // Ceremony ends automatically once payment is verified!
+  // When Admin verifies payment, devotee is marked 'Paid & Verified' and ceremony is marked Completed!
+  b.paymentStatus = 'Paid & Verified';
+  b.status = 'Completed';
   b.advanceAmount = b.fee;
   b.advancePaid = true;
+  b.paymentRejectionReason = '';
   if (!b.invoiceId) {
     b.invoiceId = 'INV-' + b.bookingId.replace('PUJA-', '') + '-' + Date.now().toString().slice(-4);
     b.invoiceGeneratedAt = new Date();
@@ -980,13 +928,18 @@ app.post('/api/bookings/:id/reject-payment', wrap(async (req, res) => {
   b.paymentRejectionReason = rejectionReason;
   b.advancePaid = false;
   b.advanceAmount = 0;
+  if (b.status === 'Completed') {
+    b.status = 'Confirmed';
+  }
   await b.save();
 
-  // Send payment rejection notification email to devotee
+  // Send payment rejection notification email to devotee so they can repay
   await sendSafe('PAYMENT_REJECTED', b.userEmail, {
     bookingId: b.bookingId,
     userName: b.userName,
     service: b.service,
+    fee: b.fee,
+    amount: b.fee,
     paymentProof: b.paymentProof,
     reason: rejectionReason
   });
