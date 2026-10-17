@@ -436,25 +436,26 @@
       }
     }
 
-    let S = { adminPandits: [], adminLongs: [], pujas: [], users: [], bookings: [], stats: {} };
+    let S = { adminPandits: [], adminLongs: [], pujas: [], users: [], bookings: [], stats: {}, commissionPercent: 10 };
 
     async function loadData() {
       await checkDb();
       try {
-        const [stats, pandits, longs, users, pujas, bookings] = await Promise.all([
+        const [stats, pandits, longs, users, pujas, bookings, commissionData] = await Promise.all([
           api('/admin/stats').catch(() => ({ users: 0, pandits: 0, verifiedPandits: 0, pendingPandits: 0, bookings: 0, completed: 0, revenue: 0, longRequests: 0, pendingLong: 0 })),
           api('/pandits').catch(() => []),
           api('/long-puja-requests').catch(() => []),
           api('/users').catch(() => []),
           api('/pujas').catch(() => []),
-          api('/bookings').catch(() => [])
+          api('/bookings').catch(() => []),
+          api('/platform-commission').catch(() => ({ commissionPercent: 10 }))
         ]);
         S.stats = stats;
         S.adminPandits = pandits;
         S.adminLongs = longs;
         S.users = users;
         S.pujas = pujas;
-        S.bookings = bookings;
+        S.commissionPercent = (commissionData && (typeof commissionData.percent === 'number' ? commissionData.percent : commissionData.commissionPercent)) ?? 10;
 
         renderKpis();
         renderActiveTab();
@@ -1405,16 +1406,16 @@
 
           <div class="invoice-summary">
             <div class="invoice-total-row">
-              <span>Subtotal</span>
+              <span>Customer Dakshina Subtotal</span>
               <span>${inr(b.fee || 1500)}</span>
             </div>
             <div class="invoice-total-row">
-              <span>Platform &amp; Coordination Fee</span>
-              <span>₹0 (Waived)</span>
+              <span>Admin Platform Coordination Charge (${b.adminFeePercent ?? S.commissionPercent ?? 10}%)</span>
+              <span style="color:#c62828">- ${inr(b.adminFeeAmount || Math.round(((b.fee || 1500) * (b.adminFeePercent ?? S.commissionPercent ?? 10)) / 100))}</span>
             </div>
             <div class="invoice-total-row grand">
-              <span>Total Dakshina Received</span>
-              <span>${inr(b.fee || 1500)}</span>
+              <span>Remaining Net Pandit Dakshina</span>
+              <span style="color:#2e7d32">${inr(b.panditNetPayout || b.panditPayoutAmount || Math.max(0, (b.fee || 1500) - (b.adminFeeAmount || Math.round(((b.fee || 1500) * (b.adminFeePercent ?? S.commissionPercent ?? 10)) / 100))))}</span>
             </div>
           </div>
 
@@ -1596,16 +1597,74 @@
         );
       }
 
+      const currentPct = Number(S.commissionPercent !== undefined ? S.commissionPercent : 10);
+
       root.innerHTML = `
         <div class="admin-panel">
           <div class="admin-panel-head">
             <div>
               <h3 style="margin:0"><span class="material-icons" style="color:var(--admin-gold)">account_balance_wallet</span> Pandit Payment Management</h3>
-              <p class="muted" style="margin:4px 0 0;font-size:12.5px">Direct Dakshina payouts to Pandits who performed rituals for devotees</p>
+              <p class="muted" style="margin:4px 0 0;font-size:12.5px">Platform commission split &amp; direct Dakshina payouts to Pandits who performed rituals for devotees</p>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               ${pending.length ? `<span class="badge red">${pending.length} pending payout</span>` : '<span class="badge green">All payouts settled</span>'}
               <span class="badge">${eligible.length} eligible ceremonies</span>
+            </div>
+          </div>
+
+          <!-- Platform Commission % Configuration Panel (Applies to all Pujas & Payments) -->
+          <div style="background:linear-gradient(135deg, #fffcf7 0%, #fff8ed 100%);border:1.5px solid #ebd9c2;border-left:5px solid #d99a19;border-radius:12px;padding:18px 20px;margin-bottom:22px;box-shadow:0 4px 14px rgba(53,22,5,0.04)">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
+              <div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span class="material-icons" style="color:var(--admin-gold);font-size:24px">tune</span>
+                  <h3 style="margin:0;font-size:16.5px;color:var(--admin-dark)">Platform Commission &amp; Dakshina Split Settings</h3>
+                </div>
+                <p style="margin:4px 0 0;font-size:12.5px;color:#6b5244;line-height:1.5">
+                  Set the Admin platform fee % once. The Admin platform charge is deducted from the total puja amount, and the remaining Dakshina is shown as the amount to pay the Pandit. Updating this applies to all payments.
+                </p>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1.5px solid #d99a19;border-radius:10px;padding:8px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.04)">
+                <span class="muted" style="font-size:12.5px;font-weight:600">Active Commission:</span>
+                <b style="font-size:22px;color:var(--admin-gold)">${currentPct}%</b>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(290px, 1fr));gap:18px;margin-top:16px;padding-top:16px;border-top:1px dashed #ebd9c2;align-items:center">
+              <div>
+                <label style="font-weight:700;font-size:13px;color:var(--admin-dark);display:block;margin-bottom:6px">
+                  Set Platform Fee % (Applicable for All Pujas &amp; Payments):
+                </label>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                  <div style="position:relative;max-width:140px">
+                    <input type="number" id="global-commission-input" value="${currentPct}" min="0" max="100" step="0.5" style="font-size:16px;font-weight:700;padding:8px 30px 8px 12px;border:1.5px solid #d99a19;border-radius:8px;width:100%" oninput="updateCommissionLivePreview(this.value)">
+                    <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-weight:700;color:var(--admin-dark)">%</span>
+                  </div>
+                  <button class="btn btn-gold btn-md" id="btn-save-global-commission" onclick="saveGlobalCommissionPercent()">
+                    <span class="material-icons" style="font-size:16px">check_circle</span> Save &amp; Apply % to All Payments
+                  </button>
+                </div>
+              </div>
+
+              <!-- Live Split Calculation Demonstration Box -->
+              <div id="commission-live-preview" style="background:#fff;border:1.5px solid #ebd9c2;border-radius:10px;padding:12px 16px;font-size:12.5px;color:#3b2115">
+                <div style="font-weight:700;margin-bottom:5px;color:var(--admin-dark);display:flex;align-items:center;gap:5px">
+                  <span class="material-icons" style="font-size:16px;color:var(--admin-gold)">calculate</span>
+                  Live Payout Formula Preview (for a ₹2,000 Puja):
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+                  <span class="muted">Main Ceremony Dakshina:</span>
+                  <b>₹2,000</b>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:3px;color:#c62828">
+                  <span>Admin Platform Charge (${currentPct}%):</span>
+                  <b>-₹${Math.round(2000 * currentPct / 100)}</b>
+                </div>
+                <div style="display:flex;justify-content:space-between;border-top:1px dashed #ebd9c2;padding-top:5px;color:#1b5e20;font-weight:700">
+                  <span>Dakshina Shown to Pay Pandit:</span>
+                  <b style="font-size:14.5px">₹${Math.max(0, 2000 - Math.round(2000 * currentPct / 100))}</b>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1642,8 +1701,8 @@
                     <tr>
                       <th style="min-width:180px">Ceremony &amp; Devotee (Customer) All Details</th>
                       <th style="min-width:160px">Assigned Pandit Details</th>
-                      <th style="min-width:180px">Pandit Bank Account</th>
-                      <th style="min-width:110px">Dakshina / Payout</th>
+                      <th style="min-width:210px">Pandit Bank &amp; UPI QR Account</th>
+                      <th style="min-width:160px">Dakshina &amp; Platform Split</th>
                       <th style="min-width:130px">Payout Status</th>
                       <th style="min-width:120px;text-align:right">Action</th>
                     </tr>
@@ -1654,6 +1713,11 @@
                       const isPaid = b.panditPayoutStatus === 'Paid';
                       const hasBank = p && p.bankAccount;
                       const devoteePaid = b.paymentStatus === 'Paid';
+
+                      const mainFee = Number(b.fee) || 1500;
+                      const feePct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : (S.commissionPercent ?? 10));
+                      const adminFeeAmount = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((mainFee * feePct) / 100));
+                      const netDakshina = Number(b.panditNetPayout !== undefined && b.panditNetPayout > 0 ? b.panditNetPayout : (b.panditPayoutAmount || Math.max(0, mainFee - adminFeeAmount)));
 
                       return `
                         <tr>
@@ -1684,40 +1748,71 @@
                                   <span style="font-family:monospace;font-weight:700;font-size:13px;background:#fff8ed;padding:2px 6px;border-radius:4px;border:1px solid #ebd9c2;color:#1b5e20">${esc(p.bankAccount)}</span>
                                 </div>
                                 <div><span class="muted">IFSC:</span> <b style="font-family:monospace">${esc(p.ifscCode || 'N/A')}</b></div>
-                                ${p.upiId ? `<div><span class="muted">UPI:</span> ${esc(p.upiId)}</div>` : ''}
-                                <button class="btn btn-outline dark btn-sm" style="margin-top:5px;font-size:11px;padding:2px 8px" onclick="openAdminPanditBankModal('${esc(p ? (p._id || p.email) : b.panditEmail)}')">
-                                  <span class="material-icons" style="font-size:12px">edit</span> Edit Bank Details
+                                ${p.upiId ? `<div><span class="muted">UPI ID:</span> <b style="color:var(--admin-dark)">${esc(p.upiId)}</b></div>` : ''}
+
+                                <!-- Pandit Uploaded QR Code Preview -->
+                                ${p && p.qrCode ? `
+                                  <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #ebd9c2;display:flex;align-items:center;gap:10px">
+                                    <div style="position:relative;cursor:pointer" onclick="openQrViewModal('${esc(p.qrCode)}', 'Pandit ${esc(p.name)} – UPI QR Code')">
+                                      <img src="${esc(p.qrCode)}" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1.5px solid #d99a19;padding:2px;background:#fff;display:block" alt="UPI QR">
+                                      <span class="material-icons" style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.65);color:#fff;font-size:11px;border-radius:3px;padding:1px">fullscreen</span>
+                                    </div>
+                                    <div>
+                                      <span class="badge green" style="font-size:10px;cursor:pointer" onclick="openQrViewModal('${esc(p.qrCode)}', 'Pandit ${esc(p.name)} – UPI QR Code')">
+                                        <span class="material-icons" style="font-size:11px;vertical-align:middle">qr_code_scanner</span> Uploaded QR
+                                      </span>
+                                      <div class="muted" style="font-size:11px;margin-top:2px;cursor:pointer" onclick="openQrViewModal('${esc(p.qrCode)}', 'Pandit ${esc(p.name)} – UPI QR Code')">Click to scan/view</div>
+                                    </div>
+                                  </div>
+                                ` : `
+                                  <div style="margin-top:4px">
+                                    <span class="badge" style="font-size:10px;background:#f5f5f5;color:#888">QR Not Uploaded</span>
+                                  </div>
+                                `}
+
+                                <button class="btn btn-outline dark btn-sm" style="margin-top:6px;font-size:11px;padding:2px 8px" onclick="openAdminPanditBankModal('${esc(p ? (p._id || p.email) : b.panditEmail)}')">
+                                  <span class="material-icons" style="font-size:12px">edit</span> Edit Bank &amp; QR
                                 </button>
                               </div>
                             ` : `
                               <div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;padding:8px;font-size:11.5px;color:#e65100">
                                 <strong>⚠️ No Bank Details</strong><br>
-                                Pandit has not submitted bank details yet.<br>
+                                Pandit has not submitted bank/QR details yet.<br>
                                 <button class="btn btn-gold btn-sm" style="margin-top:6px;font-size:11px;padding:3px 10px" onclick="openAdminPanditBankModal('${esc(p ? (p._id || p.email) : b.panditEmail)}')">
-                                  <span class="material-icons" style="font-size:13px">account_balance</span> Enter Bank Details
+                                  <span class="material-icons" style="font-size:13px">account_balance</span> Enter Bank &amp; QR
                                 </button>
                               </div>
                             `}
                           </td>
                           <td>
-                            <b style="color:#2e7d32;font-size:15px">${inr(b.panditPayoutAmount || b.fee || 1500)}</b><br>
-                            <small class="muted">Total Dakshina: ${inr(b.fee || 1500)}</small>
+                            <!-- Uncompacted Dakshina & Platform Cut Breakdown -->
+                            <div style="font-size:12.5px;line-height:1.5">
+                              <div><span class="muted">Total Dakshina:</span> <b>${inr(mainFee)}</b></div>
+                              <div style="color:#c62828;margin:2px 0">
+                                <span class="muted">Admin Charge (${feePct}%):</span> <b>-${inr(adminFeeAmount)}</b>
+                              </div>
+                              <div style="border-top:1px dashed #ebd9c2;padding-top:4px;margin-top:4px">
+                                <span class="muted">Amount to Pay Pandit:</span><br>
+                                <b style="color:#1b5e20;font-size:15px">${inr(netDakshina)}</b>
+                              </div>
+                            </div>
                           </td>
                           <td>
                             ${isPaid ? `
                               <span class="badge green">Paid &amp; Transferred ✅</span><br>
-                              <div style="font-size:11px;margin-top:3px;color:#2e7d32;line-height:1.3">
+                              <div style="font-size:11px;margin-top:4px;color:#2e7d32;line-height:1.3">
                                 <code>Ref: ${esc(b.panditPayoutTxnId || 'Direct')}</code><br>
                                 <span class="muted">${b.panditPayoutDate ? new Date(b.panditPayoutDate).toLocaleDateString() : ''}</span>
                               </div>
                             ` : `
                               <span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100">Pending Payout</span>
+                              <div style="font-size:11px;margin-top:4px;color:#e65100">Due: <b>${inr(netDakshina)}</b></div>
                             `}
                           </td>
                           <td style="text-align:right">
                             ${!isPaid ? `
                               <button class="btn btn-green btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}')">
-                                <span class="material-icons" style="font-size:14px">payments</span> Pay
+                                <span class="material-icons" style="font-size:14px">payments</span> Pay Dakshina
                               </button>
                             ` : `
                               <button class="btn btn-outline dark btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}', true)">
@@ -1747,15 +1842,99 @@
       }
     }
 
+    // Live formula calculation when admin types % in Pandit Payment Management
+    window.updateCommissionLivePreview = function(val) {
+      const box = document.getElementById('commission-live-preview');
+      if (!box) return;
+      const pct = Math.max(0, Math.min(100, Number(val) || 0));
+      const cut = Math.round(2000 * pct / 100);
+      const net = Math.max(0, 2000 - cut);
+      box.innerHTML = `
+        <div style="font-weight:700;margin-bottom:5px;color:var(--admin-dark);display:flex;align-items:center;gap:5px">
+          <span class="material-icons" style="font-size:16px;color:var(--admin-gold)">calculate</span>
+          Live Payout Formula Preview (for a ₹2,000 Puja):
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span class="muted">Main Ceremony Dakshina:</span>
+          <b>₹2,000</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px;color:#c62828">
+          <span>Admin Platform Charge (${pct}%):</span>
+          <b>-₹${cut}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;border-top:1px dashed #ebd9c2;padding-top:5px;color:#1b5e20;font-weight:700">
+          <span>Dakshina Shown to Pay Pandit:</span>
+          <b style="font-size:14.5px">₹${net}</b>
+        </div>
+      `;
+    };
+
+    // Admin updates platform commission % once and updates all payments
+    window.saveGlobalCommissionPercent = async function() {
+      const input = document.getElementById('global-commission-input');
+      const btn = document.getElementById('btn-save-global-commission');
+      if (!input) return;
+      const newPct = Math.max(0, Math.min(100, Number(input.value) || 0));
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="material-icons spin" style="font-size:16px">sync</span> Updating All Payments...';
+      }
+
+      try {
+        const res = await api('/platform-commission', {
+          method: 'PUT',
+          body: { percent: newPct, commissionPercent: newPct }
+        });
+        const savedPercent = res.percent !== undefined ? res.percent : newPct;
+        S.commissionPercent = savedPercent;
+        toast(`Platform commission set to ${savedPercent}%! All pending puja payments updated. 🙏`);
+        await loadData();
+      } catch (e) {
+        toast(e.message || 'Failed to update commission percentage', true);
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span class="material-icons" style="font-size:16px">check_circle</span> Save &amp; Apply % to All Payments';
+        }
+      }
+    };
+
+    // Lightbox modal to view Pandit QR code in high definition for scanning
+    window.openQrViewModal = function(url, title) {
+      if (!url) return;
+      openModal(title || 'UPI QR Code – Ready to Scan', `
+        <div style="text-align:center;padding:10px 0">
+          <div style="background:#fff;border:2px solid #d99a19;border-radius:14px;padding:16px;display:inline-block;box-shadow:0 8px 24px rgba(0,0,0,0.08);margin-bottom:14px">
+            <img src="${esc(url)}" style="max-width:280px;width:100%;height:auto;display:block;border-radius:6px" alt="UPI QR Code">
+          </div>
+          <div style="font-size:13.5px;color:var(--admin-dark);font-weight:600">
+            Scan using PhonePe, Google Pay, Paytm, or any UPI banking app
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:4px">
+            High resolution QR code linked directly to Pandit payout profile.
+          </div>
+          <div style="margin-top:18px">
+            <button class="btn btn-gold" onclick="closeModal()">Close</button>
+          </div>
+        </div>
+      `);
+    };
+
     async function openPanditPayModal(bookingId, isResend = false) {
       const b = (S.bookings || []).find(x => x.bookingId === bookingId);
       if (!b) return toast('Booking not found', true);
 
       const p = (S.adminPandits || []).find(x => (x.email || '').toLowerCase() === (b.panditEmail || '').toLowerCase());
       const hasBank = p && p.bankAccount;
-      const defaultAmount = b.panditPayoutAmount || b.fee || 1500;
+
+      const mainFee = Number(b.fee) || 1500;
+      const feePct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : (S.commissionPercent ?? 10));
+      const adminFeeAmount = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((mainFee * feePct) / 100));
+      const netDakshina = Number(b.panditNetPayout !== undefined && b.panditNetPayout > 0 ? b.panditNetPayout : (b.panditPayoutAmount || Math.max(0, mainFee - adminFeeAmount)));
+
+      const defaultAmount = b.panditPayoutAmount || netDakshina;
       const defaultTxn = b.panditPayoutTxnId || ('PAYOUT-' + b.bookingId.replace(/[^0-9]/g, '') + '-' + Date.now().toString().slice(-4));
-      const defaultMethod = b.panditPayoutMethod || 'Direct Bank Transfer (IMPS/NEFT)';
+      const defaultMethod = b.panditPayoutMethod || (p && p.qrCode ? 'UPI Transfer' : 'Direct Bank Transfer (IMPS/NEFT)');
 
       openModal(isResend ? `Pandit Payout Receipt – ${b.bookingId}` : `Pay Pandit Dakshina – ${b.bookingId}`, `
         <div style="font-size:13.5px;color:#3b2115">
@@ -1773,16 +1952,38 @@
               <div><span class="muted">Devotee Email:</span> <b>${esc(b.userEmail)}</b></div>
               <div><span class="muted">Date &amp; Time:</span> <b>${esc(b.date)} at ${esc(b.time || '10:00 AM')}</b></div>
               <div style="grid-column:1 / -1"><span class="muted">Ceremony Venue:</span> <b>${esc(b.address || b.district)}</b></div>
-              <div><span class="muted">Customer Dakshina:</span> <b>${inr(b.fee)}</b></div>
+              <div><span class="muted">Customer Dakshina:</span> <b>${inr(mainFee)}</b></div>
               <div><span class="muted">Customer Payment:</span> <b style="color:#2e7d32">${b.paymentStatus === 'Paid' ? 'Paid & Verified ✅' : esc(b.paymentStatus)}</b></div>
             </div>
           </div>
 
+          <!-- Uncompacted Fee & Platform Cut Calculation Breakdown -->
+          <div style="background:#ffffff;border:1.5px solid #ebd9c2;border-left:4px solid var(--admin-gold);border-radius:10px;padding:14px;margin-bottom:14px">
+            <h4 style="margin:0 0 10px;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:18px;color:var(--admin-gold)">calculate</span>
+              Dakshina Split &amp; Payout Calculation
+            </h4>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:12px;font-size:13px">
+              <div style="background:#fffcf7;padding:10px;border-radius:8px;border:1px solid #ebd9c2">
+                <span class="muted" style="font-size:12px;display:block">1. Main Total Dakshina</span>
+                <b style="font-size:16px;color:var(--admin-dark)">${inr(mainFee)}</b>
+              </div>
+              <div style="background:#fffcf7;padding:10px;border-radius:8px;border:1px solid #ebd9c2">
+                <span class="muted" style="font-size:12px;display:block">2. Admin Platform Fee (${feePct}%)</span>
+                <b style="font-size:16px;color:#c62828">-${inr(adminFeeAmount)}</b>
+              </div>
+              <div style="background:#f0fff4;padding:10px;border-radius:8px;border:1.5px solid #a5d6a7">
+                <span class="muted" style="font-size:12px;display:block;color:#1b5e20">3. Net Dakshina to Pay Pandit</span>
+                <b style="font-size:18px;color:#1b5e20">${inr(netDakshina)}</b>
+              </div>
+            </div>
+          </div>
+
           <!-- Pandit Bank Account Details -->
-          <div style="background:#ffffff;border:1.5px solid #c8e6c9;border-left:4px solid #2e7d32;border-radius:10px;padding:14px;margin-bottom:16px">
+          <div style="background:#ffffff;border:1.5px solid #c8e6c9;border-left:4px solid #2e7d32;border-radius:10px;padding:14px;margin-bottom:14px">
             <h4 style="margin:0 0 10px;color:#1b5e20;display:flex;align-items:center;gap:6px">
               <span class="material-icons" style="font-size:18px">account_balance</span>
-              Pandit &amp; Bank Account Details
+              Pandit Bank Account Details
             </h4>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
               <div><span class="muted">Pandit Name:</span> <b>${esc(b.panditName)}</b></div>
@@ -1804,7 +2005,54 @@
             ` : `
               <div style="margin-top:10px;display:flex;justify-content:flex-end">
                 <button class="btn btn-outline dark btn-sm" onclick="closeModal(); openAdminPanditBankModal('${esc(p ? (p._id || p.email) : b.panditEmail)}', '${esc(b.bookingId)}');">
-                  <span class="material-icons" style="font-size:13px">edit</span> Update Pandit Bank Details
+                  <span class="material-icons" style="font-size:13px">edit</span> Update Pandit Bank &amp; QR Details
+                </button>
+              </div>
+            `}
+          </div>
+
+          <!-- Pandit Uploaded UPI QR Code Section (Prompt Requirement) -->
+          <div style="background:#ffffff;border:1.5px solid #d99a19;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 3px 12px rgba(217,154,25,0.08)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;border-bottom:1px solid #ebd9c2;padding-bottom:8px">
+              <h4 style="margin:0;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+                <span class="material-icons" style="color:var(--admin-gold);font-size:20px">qr_code_scanner</span>
+                Pandit UPI QR Code for Dakshina Payment
+              </h4>
+              ${p && p.qrCode ? `<span class="badge green"><span class="material-icons" style="font-size:12px;vertical-align:middle">check_circle</span> Uploaded QR Active</span>` : '<span class="badge amber">No QR Uploaded</span>'}
+            </div>
+
+            ${p && p.qrCode ? `
+              <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+                <div style="text-align:center">
+                  <div style="background:#fff;border:2px solid #d99a19;border-radius:12px;padding:8px;display:inline-block;box-shadow:0 4px 10px rgba(0,0,0,0.06);cursor:pointer" onclick="openQrViewModal('${esc(p.qrCode)}', 'Pandit ${esc(b.panditName)} – UPI QR Code')" title="Click to view full screen">
+                    <img src="${esc(p.qrCode)}" style="width:160px;height:160px;object-fit:contain;display:block" alt="Pandit UPI QR">
+                  </div>
+                  <div style="font-size:11px;color:var(--admin-gold);font-weight:700;margin-top:6px;cursor:pointer" onclick="openQrViewModal('${esc(p.qrCode)}', 'Pandit ${esc(b.panditName)} – UPI QR Code')">
+                    <span class="material-icons" style="font-size:13px;vertical-align:middle">fullscreen</span> Click to Enlarge / Full Screen
+                  </div>
+                </div>
+                <div style="flex:1;min-width:240px;font-size:13px;line-height:1.6">
+                  <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:8px;padding:12px;margin-bottom:10px">
+                    <strong style="color:var(--admin-dark)">Scan &amp; Pay via UPI Banking App:</strong><br>
+                    <span class="muted" style="font-size:12px">Open Google Pay, PhonePe, Paytm, or BHIM and scan this QR code to transfer Pandit's Net Dakshina of <b>${inr(netDakshina)}</b> directly.</span>
+                  </div>
+                  ${p.upiId ? `
+                    <div style="display:flex;align-items:center;gap:8px;background:#f5f5f5;padding:8px 12px;border-radius:6px;border:1px solid #ddd">
+                      <span class="muted" style="font-size:12px">UPI ID:</span>
+                      <strong style="font-family:monospace;font-size:13px;color:#1b5e20">${esc(p.upiId)}</strong>
+                      <button type="button" class="btn btn-outline dark btn-sm" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="navigator.clipboard.writeText('${esc(p.upiId)}');toast('UPI ID copied to clipboard!')">Copy</button>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            ` : `
+              <div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;padding:12px;font-size:12.5px;color:#e65100;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+                <div>
+                  <strong>No UPI QR Code uploaded by Pandit.</strong><br>
+                  <span style="font-size:12px">You can settle using Direct Bank Transfer (IMPS/NEFT)${p && p.upiId ? ` or UPI ID: <b>${esc(p.upiId)}</b>` : ''}.</span>
+                </div>
+                <button type="button" class="btn btn-gold btn-sm" onclick="closeModal(); openAdminPanditBankModal('${esc(p ? (p._id || p.email) : b.panditEmail)}', '${esc(b.bookingId)}');">
+                  <span class="material-icons" style="font-size:14px">upload</span> Upload QR Code for Pandit
                 </button>
               </div>
             `}
@@ -1815,29 +2063,30 @@
             <h4 style="margin:0 0 10px;color:var(--admin-dark)">Payout Transfer Parameters</h4>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
               <div>
-                <label style="font-weight:600;font-size:12.5px">Dakshina Payout Amount (₹) *</label>
+                <label style="font-weight:600;font-size:12.5px">Dakshina Payout Amount to Pay (₹) *</label>
                 <input id="modal-pay-amount" type="number" value="${defaultAmount}" style="margin-top:4px">
+                <small class="muted" style="font-size:11px">Pre-calculated Net Dakshina (${inr(mainFee)} - ${feePct}% Platform Charge)</small>
               </div>
               <div>
                 <label style="font-weight:600;font-size:12.5px">Transfer Method</label>
                 <select id="modal-pay-method" style="margin-top:4px">
+                  <option value="UPI Transfer (QR Code)" ${defaultMethod.includes('UPI') ? 'selected' : ''}>UPI Transfer (QR Code / VPA)</option>
                   <option value="Direct Bank Transfer (IMPS/NEFT)" ${defaultMethod.includes('IMPS') ? 'selected' : ''}>Direct Bank Transfer (IMPS / NEFT)</option>
-                  <option value="UPI Transfer" ${defaultMethod.includes('UPI') ? 'selected' : ''}>UPI Transfer</option>
                   <option value="RTGS" ${defaultMethod.includes('RTGS') ? 'selected' : ''}>RTGS Transfer</option>
                   <option value="Cash / Handover" ${defaultMethod.includes('Cash') ? 'selected' : ''}>Cash / Handover</option>
                 </select>
               </div>
               <div style="grid-column:1 / -1">
-                <label style="font-weight:600;font-size:12.5px">Bank UTR / Payout Transaction Reference *</label>
-                <input id="modal-pay-txnid" type="text" value="${esc(defaultTxn)}" placeholder="e.g. UTR / IMPS Reference Number" style="margin-top:4px;font-family:monospace">
+                <label style="font-weight:600;font-size:12.5px">Bank UTR / UPI Payout Transaction Reference *</label>
+                <input id="modal-pay-txnid" type="text" value="${esc(defaultTxn)}" placeholder="e.g. UTR / UPI Reference Number" style="margin-top:4px;font-family:monospace">
               </div>
             </div>
           </div>
 
           <div style="background:#e8f5e9;border:1px solid #c8e6c9;padding:12px;border-radius:8px;margin-bottom:16px;font-size:12.5px;color:#1b5e20;line-height:1.5">
-            <strong>📧 Email Notification to Pandit:</strong><br>
-            Pressing <em>Confirm Payout &amp; Send Email</em> will immediately send an official email to <strong>${esc(b.panditEmail)}</strong> stating:<br>
-            <em>"Your money amount [amount] is credited to your account number [account_number]."</em> with all ceremony and customer details included without compacting.
+            <strong>📧 Official Email Notification to Pandit:</strong><br>
+            Pressing <em>Confirm Payout &amp; Send Email</em> will immediately send an official uncompacted email to <strong>${esc(b.panditEmail)}</strong> stating:<br>
+            <em>"Your net money amount [amount] (after ${feePct}% platform charge) is credited to your account number [account_number]."</em> with all ceremony, devotee and payout details.
           </div>
 
           <div style="display:flex;gap:10px;justify-content:flex-end">
@@ -1861,7 +2110,13 @@
           try {
             await api('/bookings/' + encodeURIComponent(b.bookingId) + '/pay-pandit', {
               method: 'POST',
-              body: { amount: amt, txnId, method }
+              body: {
+                amount: amt,
+                txnId,
+                method,
+                adminFeePercent: feePct,
+                adminFeeAmount: adminFeeAmount
+              }
             });
             closeModal();
             toast(`Dakshina of ₹${amt} paid to Pandit ${b.panditName}! Confirmation email sent. 🙏`);
@@ -1875,15 +2130,44 @@
       });
     }
 
+    // Admin opens Pandit Bank & QR Modal
+    window.handleAdminPanditQrUpload = function(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      if (file.size > 3 * 1024 * 1024) {
+        alert('Please upload an image smaller than 3MB.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const dataUrl = e.target.result;
+        const urlInput = document.getElementById('adm-p-qr');
+        if (urlInput) urlInput.value = dataUrl;
+        window.updateAdminPanditQrPreview(dataUrl);
+      };
+      reader.readAsDataURL(file);
+    };
+
+    window.updateAdminPanditQrPreview = function(url) {
+      const box = document.getElementById('adm-p-qr-preview-box');
+      const img = document.getElementById('adm-p-qr-preview-img');
+      if (!url || !url.trim()) {
+        if (box) box.style.display = 'none';
+      } else {
+        if (img) img.src = url.trim();
+        if (box) box.style.display = 'block';
+      }
+    };
+
     function openAdminPanditBankModal(idOrEmail, returnBookingId) {
       let p = (S.adminPandits || []).find(x => x._id === idOrEmail || (x.email || '').toLowerCase() === String(idOrEmail || '').toLowerCase());
       if (!p) {
-        p = { _id: idOrEmail, email: idOrEmail, name: 'Assigned Pandit', bankAccount: '', ifscCode: '', bankName: '', accountHolder: '', upiId: '' };
+        p = { _id: idOrEmail, email: idOrEmail, name: 'Assigned Pandit', bankAccount: '', ifscCode: '', bankName: '', accountHolder: '', upiId: '', qrCode: '' };
       }
 
       openModal(`Pandit Bank & Payout Details – ${p.name}`, `
         <div style="font-size:13.5px;color:#3b2115">
-          <p class="muted" style="margin-top:0">Configure direct bank payout account for <strong>${esc(p.name)}</strong> (${esc(p.email)}):</p>
+          <p class="muted" style="margin-top:0">Configure direct bank &amp; UPI QR payout account for <strong>${esc(p.name)}</strong> (${esc(p.email)}):</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
             <div>
               <label style="font-weight:600;font-size:12.5px;display:block;margin-bottom:4px">Account Holder Name *</label>
@@ -1905,6 +2189,28 @@
               <label style="font-weight:600;font-size:12.5px;display:block;margin-bottom:4px">UPI ID (Optional)</label>
               <input type="text" id="adm-p-upi" value="${esc(p.upiId || '')}" placeholder="e.g. name@okhdfcbank">
             </div>
+
+            <!-- Upload QR Code for Pandit (Optional) -->
+            <div style="grid-column:1 / -1">
+              <label style="font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                <span class="material-icons" style="font-size:16px;color:var(--admin-gold)">qr_code_scanner</span>
+                Pandit UPI QR Code (Optional – PhonePe / GPay / Paytm / BHIM)
+              </label>
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <input type="file" id="adm-p-qr-file" accept="image/*" style="font-size:12px" onchange="handleAdminPanditQrUpload(this)">
+                <span class="muted" style="font-size:12px">OR URL:</span>
+                <input type="text" id="adm-p-qr" value="${esc(p.qrCode || '')}" placeholder="https://... or uploaded image data" style="flex:1;min-width:200px" oninput="updateAdminPanditQrPreview(this.value)">
+              </div>
+              <div id="adm-p-qr-preview-box" style="margin-top:10px;${p.qrCode ? '' : 'display:none;'}">
+                <div style="display:inline-flex;align-items:center;gap:12px;background:#fff;border:1.5px solid #ebd9c2;border-radius:8px;padding:8px 12px">
+                  <img id="adm-p-qr-preview-img" src="${esc(p.qrCode || '')}" style="width:72px;height:72px;object-fit:contain;border:1px solid #ddd;border-radius:4px" alt="QR Preview">
+                  <div>
+                    <span class="badge green" style="font-size:11px">QR Attached</span>
+                    <button type="button" class="btn btn-outline red btn-sm" style="margin-top:4px;display:block;font-size:11px;padding:2px 8px" onclick="document.getElementById('adm-p-qr').value='';updateAdminPanditQrPreview('');">Remove QR</button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <button class="btn btn-gold btn-lg" id="btn-save-admin-p-bank" style="width:100%">
             <span class="material-icons">save</span> Save Bank &amp; Payout Details
@@ -1919,6 +2225,7 @@
           const bankName = document.getElementById('adm-p-bank').value.trim();
           const holder = document.getElementById('adm-p-holder').value.trim() || p.name;
           const upi = document.getElementById('adm-p-upi').value.trim();
+          const qr = document.getElementById('adm-p-qr') ? document.getElementById('adm-p-qr').value.trim() : (p.qrCode || '');
 
           if (!acc) return toast('Bank Account Number is required', true);
           if (!ifsc) return toast('Bank IFSC Code is required', true);
@@ -1936,7 +2243,8 @@
                 ifscCode: ifsc,
                 bankName,
                 accountHolder: holder,
-                upiId: upi
+                upiId: upi,
+                qrCode: qr
               }
             });
             closeModal();

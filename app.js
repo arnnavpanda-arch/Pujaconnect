@@ -357,7 +357,7 @@ app.put(['/api/pandits/:id/bank-details', '/api/pandits/bank-details', '/api/pan
     } catch {}
   }
 
-  const { bankAccount, bankName, ifscCode, accountHolder, upiId } = req.body || {};
+  const { bankAccount, bankName, ifscCode, accountHolder, upiId, qrCode } = req.body || {};
   const cleanAcc = String(bankAccount || '').replace(/[\s-]/g, '').trim();
   const cleanIfsc = String(ifscCode || '').replace(/[\s-]/g, '').trim().toUpperCase();
 
@@ -401,7 +401,8 @@ app.put(['/api/pandits/:id/bank-details', '/api/pandits/bank-details', '/api/pan
         bankName: String(bankName || '').trim(),
         ifscCode: cleanIfsc,
         accountHolder: String(accountHolder || fallbackName).trim(),
-        upiId: String(upiId || '').trim()
+        upiId: String(upiId || '').trim(),
+        qrCode: String(qrCode || '').trim()
       });
       return res.json({ ok: true, pandit: p });
     }
@@ -414,6 +415,9 @@ app.put(['/api/pandits/:id/bank-details', '/api/pandits/bank-details', '/api/pan
     accountHolder: String(accountHolder || p.accountHolder || p.name).trim(),
     upiId: String(upiId || '').trim()
   };
+  if (qrCode !== undefined) {
+    update.qrCode = String(qrCode || '').trim();
+  }
 
   const updated = await Pandit.findByIdAndUpdate(
     p._id,
@@ -422,6 +426,47 @@ app.put(['/api/pandits/:id/bank-details', '/api/pandits/bank-details', '/api/pan
   ).lean();
 
   res.json({ ok: true, pandit: updated || { ...(p.toObject ? p.toObject() : p), ...update } });
+}));
+
+const DEFAULT_PLATFORM_COMMISSION = 10; // Default 10% platform fee
+
+app.get('/api/platform-commission', wrap(async (req, res) => {
+  const s = await AppSetting.findOne({ key: 'admin_commission_percent' });
+  const percent = s && typeof s.value === 'number' ? s.value : (s && s.value && typeof s.value.percent === 'number' ? s.value.percent : DEFAULT_PLATFORM_COMMISSION);
+  res.json({ ok: true, percent, commissionPercent: percent });
+}));
+
+app.put('/api/platform-commission', adminOnly, wrap(async (req, res) => {
+  const inputVal = req.body.percent !== undefined ? req.body.percent : req.body.commissionPercent;
+  const percent = Math.max(0, Math.min(100, Number(inputVal !== undefined && inputVal !== '' ? inputVal : DEFAULT_PLATFORM_COMMISSION)));
+  const s = await AppSetting.findOneAndUpdate(
+    { key: 'admin_commission_percent' },
+    { value: percent },
+    { upsert: true, new: true }
+  );
+
+  // Apply the updated percentage to all pending / unsettled bookings so it updates all payments
+  let updatedBookingsCount = 0;
+  const pendingBookings = await Booking.find({ panditPayoutStatus: { $ne: 'Paid' } });
+  for (const b of pendingBookings) {
+    const mainFee = Number(b.fee) || 1500;
+    const adminCut = Math.round((mainFee * percent) / 100);
+    const netPayout = Math.max(0, mainFee - adminCut);
+    b.adminFeePercent = percent;
+    b.adminFeeAmount = adminCut;
+    b.panditNetPayout = netPayout;
+    b.panditPayoutAmount = netPayout;
+    await b.save();
+    updatedBookingsCount++;
+  }
+
+  res.json({
+    ok: true,
+    percent: s.value,
+    commissionPercent: s.value,
+    updatedBookingsCount,
+    message: `Platform commission updated to ${percent}% and applied to ${updatedBookingsCount} pending payments.`
+  });
 }));
 
 // Admin fixes district-wise amounts for a Pandit
@@ -530,6 +575,11 @@ app.post('/api/bookings', wrap(async (req, res) => {
   const advanceAmount = Number(b.advanceAmount) || 0;
   const bookingId = await uniqueId(Booking, 'bookingId', 'PUJA');
 
+  const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
+  const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : DEFAULT_PLATFORM_COMMISSION;
+  const adminFeeAmount = Math.round((fee * commPct) / 100);
+  const panditNetPayout = Math.max(0, fee - adminFeeAmount);
+
   const booking = await Booking.create({
     bookingId,
     userEmail: lc(b.userEmail),
@@ -550,6 +600,9 @@ app.post('/api/bookings', wrap(async (req, res) => {
     rejectedPandits: [],
     rejectionReason: '',
     fee,
+    adminFeePercent: commPct,
+    adminFeeAmount,
+    panditNetPayout,
     advanceAmount,
     advancePaid: advanceAmount > 0,
     paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= fee ? 'Paid' : 'Partial',
@@ -598,20 +651,31 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
   }
 
   const fee = (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || b.fee;
+  const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
+  const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
+  const adminFeeAmount = Math.round((fee * commPct) / 100);
+  const panditNetPayout = Math.max(0, fee - adminFeeAmount);
+
   b.panditEmail = pandit.email;
   b.panditName = pandit.name;
   b.fee = fee;
+  b.adminFeePercent = commPct;
+  b.adminFeeAmount = adminFeeAmount;
+  b.panditNetPayout = panditNetPayout;
   b.status = 'Pending Pandit Confirmation';
   b.panditApproval = 'Pending';
   b.adminApproval = 'Approved';
   await b.save();
 
-  // Send assignment offer alert to Pandit
+  // Send assignment offer alert to Pandit with uncompacted fee and admin charge % breakdown
   await sendSafe('PANDIT_NEW_BOOKING', pandit.email, {
     ...b.toObject(),
     panditName: pandit.name,
     district: b.district,
-    address: b.address || b.district
+    address: b.address || b.district,
+    adminFeePercent: commPct,
+    adminFeeAmount,
+    netDakshina: panditNetPayout
   });
 
   res.json({ ok: true, booking: b });
@@ -717,6 +781,11 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
     pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
   }
 
+  const mainFee = Number(b.fee) || 1500;
+  const feePct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : 10);
+  const feeCut = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((mainFee * feePct) / 100));
+  const netDakshina = Number(b.panditNetPayout !== undefined && b.panditNetPayout > 0 ? b.panditNetPayout : Math.max(0, mainFee - feeCut));
+
   // 1. Notify assigned pandit that devotee paid and money will be credited within 24 hours
   if (b.panditEmail) {
     await sendSafe('PANDIT_PAYMENT_VERIFIED_NOTICE', b.panditEmail, {
@@ -730,12 +799,17 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
       time: b.time,
       district: b.district,
       address: b.address,
-      amount: b.fee,
+      totalAmount: mainFee,
+      amount: mainFee,
+      adminFeePercent: feePct,
+      adminFeeAmount: feeCut,
+      netAmount: netDakshina,
       upiId: (pandit && pandit.upiId) || '',
       bankAccount: (pandit && pandit.bankAccount) || '',
       bankName: (pandit && pandit.bankName) || '',
       ifscCode: (pandit && pandit.ifscCode) || '',
       accountHolder: (pandit && pandit.accountHolder) || (pandit && pandit.name) || '',
+      qrCode: (pandit && pandit.qrCode) || '',
       paymentProof: b.paymentProof,
       paymentMethod: b.paymentMethod
     });
@@ -784,6 +858,11 @@ app.post('/api/bookings/:id/verify-payment', wrap(async (req, res) => {
     pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
   }
 
+  const vMainFee = Number(b.fee) || 1500;
+  const vFeePct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : 10);
+  const vFeeCut = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((vMainFee * vFeePct) / 100));
+  const vNetDakshina = Number(b.panditNetPayout !== undefined && b.panditNetPayout > 0 ? b.panditNetPayout : Math.max(0, vMainFee - vFeeCut));
+
   // 1. Notify assigned pandit that devotee paid and money will be credited within 24 hours
   if (b.panditEmail) {
     await sendSafe('PANDIT_PAYMENT_VERIFIED_NOTICE', b.panditEmail, {
@@ -797,12 +876,17 @@ app.post('/api/bookings/:id/verify-payment', wrap(async (req, res) => {
       time: b.time,
       district: b.district,
       address: b.address,
-      amount: b.fee,
+      totalAmount: vMainFee,
+      amount: vMainFee,
+      adminFeePercent: vFeePct,
+      adminFeeAmount: vFeeCut,
+      netAmount: vNetDakshina,
       upiId: (pandit && pandit.upiId) || '',
       bankAccount: (pandit && pandit.bankAccount) || '',
       bankName: (pandit && pandit.bankName) || '',
       ifscCode: (pandit && pandit.ifscCode) || '',
       accountHolder: (pandit && pandit.accountHolder) || (pandit && pandit.name) || '',
+      qrCode: (pandit && pandit.qrCode) || '',
       paymentProof: b.paymentProof,
       paymentMethod: b.paymentMethod
     });
@@ -837,12 +921,18 @@ app.post('/api/bookings/:id/pay-pandit', adminOnly, wrap(async (req, res) => {
   if (!b.panditEmail) return res.status(400).json({ error: 'No pandit assigned to this booking' });
 
   const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
-  const { amount, txnId, method } = req.body || {};
+  const { amount, txnId, method, adminFeePercent, adminFeeAmount } = req.body || {};
 
-  const payoutAmount = Number(amount) || b.fee || (pandit && pandit.fee) || 1500;
+  const mainFee = Number(b.fee) || (pandit && pandit.fee) || 1500;
+  const percent = Number(adminFeePercent !== undefined ? adminFeePercent : (b.adminFeePercent !== undefined ? b.adminFeePercent : 10));
+  const feeDeduction = Number(adminFeeAmount !== undefined ? adminFeeAmount : Math.round((mainFee * percent) / 100));
+  const payoutAmount = Number(amount) || Math.max(0, mainFee - feeDeduction);
   const payoutTxn = txnId ? String(txnId).trim() : ('PAYOUT-' + b.bookingId.replace(/[^0-9]/g, '') + '-' + Date.now().toString().slice(-4));
   const payoutMethod = method || 'Direct Bank Transfer (IMPS/NEFT)';
 
+  b.adminFeePercent = percent;
+  b.adminFeeAmount = feeDeduction;
+  b.panditNetPayout = payoutAmount;
   b.panditPayoutStatus = 'Paid';
   b.panditPayoutAmount = payoutAmount;
   b.panditPayoutDate = new Date();
@@ -862,12 +952,16 @@ app.post('/api/bookings/:id/pay-pandit', adminOnly, wrap(async (req, res) => {
     time: b.time,
     district: b.district,
     address: b.address,
+    mainFee,
+    adminFeePercent: percent,
+    adminFeeAmount: feeDeduction,
     amount: payoutAmount,
     bankAccount: (pandit && pandit.bankAccount) || '',
     bankName: (pandit && pandit.bankName) || '',
     ifscCode: (pandit && pandit.ifscCode) || '',
     accountHolder: (pandit && pandit.accountHolder) || (pandit && pandit.name) || '',
     upiId: (pandit && pandit.upiId) || '',
+    qrCode: (pandit && pandit.qrCode) || '',
     payoutTxnId: payoutTxn,
     payoutMethod,
     paymentProof: b.paymentProof
