@@ -1515,6 +1515,9 @@ async function panditDash(root) {
       <button class="subtab ${tab === 'avail' ? 'active' : ''}" data-action="dashTab" data-tab="avail">
         <span class="material-icons">schedule</span> Availability &amp; Dakshina
       </button>
+      <button class="subtab ${tab === 'bank' ? 'active' : ''}" data-action="dashTab" data-tab="bank">
+        <span class="material-icons">account_balance</span> Bank &amp; Payout Account ${me.bankAccount ? '<span class="subtab-badge green">✓ Linked</span>' : (me.verified ? '<span class="subtab-badge alert">Setup</span>' : '')}
+      </button>
       <button class="subtab ${tab === 'profile' ? 'active' : ''}" data-action="dashTab" data-tab="profile">
         <span class="material-icons">account_circle</span> My Profile
       </button>
@@ -1524,6 +1527,7 @@ async function panditDash(root) {
       ${tab === 'ceremonies' ? renderPanditCeremoniesTab(bookings) : ''}
       ${tab === 'long' ? renderPanditLongTab(longs, email) : ''}
       ${tab === 'avail' ? renderPanditAvailTab(me) : ''}
+      ${tab === 'bank' ? renderPanditBankTab(me) : ''}
       ${tab === 'profile' ? renderPanditProfileTab(me) : ''}
     </div>
   `;
@@ -1950,6 +1954,132 @@ function renderPanditProfileTab(me) {
             </div>
           </div>
         ` : ''}
+
+        <!-- Dedicated Pandit Bank Details Section -->
+        <div class="profile-field" style="grid-column:1 / -1;background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:10px;padding:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+            <div class="profile-field-label" style="font-size:14px;font-weight:700;color:var(--dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:18px;color:var(--ochre)">account_balance</span>
+              Bank Details for Dakshina Payouts
+            </div>
+            ${(me.verified || me.status === 'Verified') ? `
+              <button class="btn btn-gold btn-sm" data-action="dashTab" data-tab="bank">
+                <span class="material-icons">edit</span> ${me.bankAccount ? 'Update Bank Details' : 'Add Bank Details'}
+              </button>
+            ` : '<span class="badge amber">Unlocks after Admin Verification</span>'}
+          </div>
+          ${me.bankAccount ? `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:12px;font-size:13px">
+              <div><span class="muted" style="display:block;font-size:11.5px">Account Holder</span> <b>${esc(me.accountHolder || me.name)}</b></div>
+              <div><span class="muted" style="display:block;font-size:11.5px">Bank Name</span> <b>${esc(me.bankName || 'Registered Bank')}</b></div>
+              <div><span class="muted" style="display:block;font-size:11.5px">Account Number</span> <b style="font-family:monospace;letter-spacing:1px;color:#1b5e20">${esc(me.bankAccount)}</b></div>
+              <div><span class="muted" style="display:block;font-size:11.5px">IFSC Code</span> <b style="font-family:monospace">${esc(me.ifscCode || 'N/A')}</b></div>
+              ${me.upiId ? `<div><span class="muted" style="display:block;font-size:11.5px">UPI ID</span> <b>${esc(me.upiId)}</b></div>` : ''}
+            </div>
+          ` : `
+            <p class="muted" style="margin:0;font-size:13px">
+              ${(me.verified || me.status === 'Verified') ? 'No bank account added yet. Click above to provide your bank account details for direct Dakshina payouts.' : 'Bank account details can be submitted from your dashboard once your profile is verified by the Super Admin.'}
+            </p>
+          `}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderPanditBankTab(me) {
+  const isVerified = me.verified || me.status === 'Verified';
+
+  if (!isVerified) {
+    return `
+      <div class="panel-section-box">
+        <div class="section-box-header">
+          <div class="box-icon" style="background:#fff3e0;color:#e65100"><span class="material-icons">lock</span></div>
+          <div style="flex:1">
+            <h4>Bank &amp; Payout Account (Locked)</h4>
+            <p class="muted">Bank account details can be provided through this dashboard once your profile is verified by the Super Admin.</p>
+          </div>
+          <span class="badge amber">KYC Status: ${esc(me.status || 'Pending Review')}</span>
+        </div>
+        <div style="background:#fff8ed;border:1px dashed #d99a19;border-radius:10px;padding:18px;margin-top:16px;line-height:1.6;font-size:13.5px;color:#3b2115">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <span class="material-icons" style="color:var(--ochre)">info</span>
+            <b>Verification in Progress</b>
+          </div>
+          Our administration is currently reviewing your identity and Vedic credentials. As soon as your profile is verified by the Super Admin, this banking section will unlock automatically for you to provide your bank account details for direct Dakshina payouts.
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="panel-section-box">
+      <div class="section-box-header">
+        <div class="box-icon"><span class="material-icons">account_balance</span></div>
+        <div style="flex:1">
+          <h4>Pandit Bank &amp; Dakshina Payout Account</h4>
+          <p class="muted">Provide your verified bank details to receive ceremony Dakshina payments directly into your account.</p>
+        </div>
+        <span class="badge green"><span class="material-icons" style="font-size:13px">verified</span> Verified Pandit</span>
+      </div>
+
+      <div style="background:#f0fff4;border:1px solid #c8e6c9;border-left:4px solid #2e7d32;padding:14px 16px;border-radius:8px;margin-top:16px;font-size:13.5px;color:#1b5e20;line-height:1.6">
+        <b>💡 Direct Payout Policy:</b> When an Admin verifies a customer's payment, you receive an automated email that your money will be credited to your account within 24 hours. When the Admin processes the payout, it will be transferred directly to this account number and an email confirmation will be sent to you.
+      </div>
+
+      ${me.bankAccount ? `
+        <div style="margin-top:20px;background:#ffffff;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px;box-shadow:0 4px 14px rgba(53,22,5,0.04)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:1px solid #f2e4d4;padding-bottom:10px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="material-icons" style="color:#2e7d32">check_circle</span>
+              <strong style="color:var(--mahogany);font-size:15px">Currently Linked Bank Account</strong>
+            </div>
+            <span class="badge green">Active Payout Account</span>
+          </div>
+          <div class="bank-info-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:14px">
+            <div><label class="muted" style="font-size:12px;display:block">Account Holder</label><b style="font-size:14px">${esc(me.accountHolder || me.name)}</b></div>
+            <div><label class="muted" style="font-size:12px;display:block">Bank Name</label><b style="font-size:14px">${esc(me.bankName || 'Registered Bank')}</b></div>
+            <div><label class="muted" style="font-size:12px;display:block">Account Number</label><b style="font-size:15px;font-family:monospace;letter-spacing:1px;color:#1b5e20">${esc(me.bankAccount)}</b></div>
+            <div><label class="muted" style="font-size:12px;display:block">IFSC Code</label><b style="font-size:14px;font-family:monospace">${esc(me.ifscCode || 'N/A')}</b></div>
+            ${me.upiId ? `<div><label class="muted" style="font-size:12px;display:block">UPI ID</label><b style="font-size:14px">${esc(me.upiId)}</b></div>` : ''}
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="margin-top:24px">
+        <h4 style="margin:0 0 14px;font-size:16px;color:var(--mahogany)">${me.bankAccount ? 'Update Bank Account Details' : 'Enter Bank Account Details'}</h4>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:16px">
+          <div>
+            <label for="pandit-bank-holder" style="font-weight:600;font-size:13px">Account Holder Name *</label>
+            <input id="pandit-bank-holder" type="text" value="${esc(me.accountHolder || me.name)}" placeholder="Full name as printed in passbook" style="margin-top:4px">
+          </div>
+          <div>
+            <label for="pandit-bank-name" style="font-weight:600;font-size:13px">Bank Name *</label>
+            <input id="pandit-bank-name" type="text" value="${esc(me.bankName || '')}" placeholder="e.g. State Bank of India, HDFC Bank, ICICI" style="margin-top:4px">
+          </div>
+          <div>
+            <label for="pandit-bank-acc" style="font-weight:600;font-size:13px">Bank Account Number *</label>
+            <input id="pandit-bank-acc" type="text" value="${esc(me.bankAccount || '')}" placeholder="Enter full account number" style="margin-top:4px;font-family:monospace">
+          </div>
+          <div>
+            <label for="pandit-bank-acc-confirm" style="font-weight:600;font-size:13px">Confirm Bank Account Number *</label>
+            <input id="pandit-bank-acc-confirm" type="text" value="${esc(me.bankAccount || '')}" placeholder="Re-enter bank account number" style="margin-top:4px;font-family:monospace">
+          </div>
+          <div>
+            <label for="pandit-bank-ifsc" style="font-weight:600;font-size:13px">Bank IFSC Code *</label>
+            <input id="pandit-bank-ifsc" type="text" value="${esc(me.ifscCode || '')}" placeholder="e.g. SBIN0001234" style="margin-top:4px;font-family:monospace;text-transform:uppercase">
+          </div>
+          <div>
+            <label for="pandit-bank-upi" style="font-weight:600;font-size:13px">UPI ID (Optional)</label>
+            <input id="pandit-bank-upi" type="text" value="${esc(me.upiId || '')}" placeholder="e.g. yourname@okhdfcbank" style="margin-top:4px">
+          </div>
+        </div>
+
+        <div style="margin-top:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <button type="button" class="btn btn-gold btn-lg" data-action="savePanditBank">
+            <span class="material-icons">save</span> Save Bank &amp; Payout Details
+          </button>
+        </div>
       </div>
     </div>
   `;
@@ -2293,6 +2423,45 @@ const ACTIONS = {
         } catch (e) { toast(e.message, true); }
       };
     });
+  },
+  savePanditBank: async () => {
+    const me = S.me;
+    if (!me) return;
+    if (!me.verified && me.status !== 'Verified') {
+      return toast('Bank details can only be configured after profile is verified by Admin.', true);
+    }
+    const acc = $('#pandit-bank-acc') ? $('#pandit-bank-acc').value.trim() : '';
+    const accConfirm = $('#pandit-bank-acc-confirm') ? $('#pandit-bank-acc-confirm').value.trim() : '';
+    const ifsc = $('#pandit-bank-ifsc') ? $('#pandit-bank-ifsc').value.trim().toUpperCase() : '';
+    const name = $('#pandit-bank-holder') ? $('#pandit-bank-holder').value.trim() : (me.accountHolder || me.name || '');
+    const bankName = $('#pandit-bank-name') ? $('#pandit-bank-name').value.trim() : '';
+    const upi = $('#pandit-bank-upi') ? $('#pandit-bank-upi').value.trim() : '';
+
+    if (!acc) return toast('Please enter your Bank Account Number', true);
+    if (accConfirm && acc !== accConfirm) return toast('Bank Account numbers do not match. Please re-check.', true);
+    if (!ifsc) return toast('Please enter your Bank IFSC Code', true);
+
+    const btn = document.querySelector('[data-action="savePanditBank"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving Bank Details...'; }
+
+    try {
+      const res = await api('/pandits/' + (me._id || me.email) + '/bank-details', {
+        method: 'PUT',
+        body: {
+          bankAccount: acc,
+          ifscCode: ifsc,
+          bankName,
+          accountHolder: name,
+          upiId: upi
+        }
+      });
+      S.me = res.pandit || { ...me, bankAccount: acc, ifscCode: ifsc, bankName, accountHolder: name, upiId: upi };
+      toast('Bank details saved successfully! Dakshina will be credited to this account. 🙏');
+      renderDashboard();
+    } catch (e) {
+      toast(e.message || 'Failed to save bank details', true);
+      if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-icons">save</span> Save Bank &amp; Payout Details'; }
+    }
   },
   editPanditProfile: () => {
     const me = S.me;

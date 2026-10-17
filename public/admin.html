@@ -278,6 +278,9 @@
       <button class="admin-tab" data-tab="payments" onclick="switchAdminTab('payments')">
         <span class="material-icons">payments</span> Payment Verifications <span id="badge-payments-count" class="admin-tab-pill">0</span>
       </button>
+      <button class="admin-tab" data-tab="pandit-payouts" onclick="switchAdminTab('pandit-payouts')">
+        <span class="material-icons">account_balance_wallet</span> Pandit Payment <span id="badge-pandit-payouts-count" class="admin-tab-pill">0</span>
+      </button>
       <button class="admin-tab" data-tab="platform-bank" onclick="switchAdminTab('platform-bank')">
         <span class="material-icons">account_balance</span> Platform Bank &amp; UPI
       </button>
@@ -466,18 +469,24 @@
       const pendLong = S.adminLongs.filter(l => l.status === 'Pending Admin').length;
       const pendPayments = (S.bookings || []).filter(b => b.paymentStatus === 'Verification Pending').length;
 
+      const eligiblePayoutBookings = (S.bookings || []).filter(b => b.panditEmail && (b.paymentStatus === 'Paid' || ['Completed', 'Confirmed', 'In Progress'].includes(b.status)));
+      const pendPanditPayouts = eligiblePayoutBookings.filter(b => b.panditPayoutStatus !== 'Paid').length;
+
       document.getElementById('badge-kyc-count').textContent = pendKyc;
       document.getElementById('badge-long-count').textContent = pendLong;
       const pendBookings = (S.bookings || []).filter(b => b.status === 'Pending Assignment' || b.panditApproval === 'Rejected').length;
       const bookBadge = document.getElementById('badge-bookings-count');
       if (bookBadge) bookBadge.textContent = pendBookings;
+      const payoutBadge = document.getElementById('badge-pandit-payouts-count');
+      if (payoutBadge) payoutBadge.textContent = pendPanditPayouts;
 
       const kpis = [
         { label: 'Pending Pandit Assignment', val: pendBookings, icon: 'person_search', alert: pendBookings > 0 },
         { label: 'Registered Devotees', val: s.users || 0, icon: 'people' },
         { label: 'Verified Pandits', val: s.verifiedPandits || 0, icon: 'verified' },
         { label: 'Pending KYC Review', val: pendKyc, icon: 'pending_actions', alert: pendKyc > 0 },
-        { label: 'Pending Payment Verification', val: pendPayments, icon: 'receipt_long', alert: pendPayments > 0 },
+        { label: 'Pending Devotee Payments', val: pendPayments, icon: 'receipt_long', alert: pendPayments > 0 },
+        { label: 'Pending Pandit Payouts', val: pendPanditPayouts, icon: 'account_balance_wallet', alert: pendPanditPayouts > 0 },
         { label: 'Total Ceremonies', val: s.bookings || 0, icon: 'event' },
         { label: 'Completed Pujas', val: s.completed || 0, icon: 'task_alt' },
         { label: 'Booked Dakshina', val: inr(s.revenue || 0), icon: 'payments' },
@@ -513,6 +522,7 @@
       else if (CURRENT_TAB === 'pujas') renderPujaCatalog(root);
       else if (CURRENT_TAB === 'longs') renderLongRequests(root);
       else if (CURRENT_TAB === 'payments') renderPaymentsVerification(root);
+      else if (CURRENT_TAB === 'pandit-payouts') renderPanditPaymentsSection(root);
       else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(root);
       else if (CURRENT_TAB === 'users') renderDevoteesDirectory(root);
     }
@@ -1525,6 +1535,302 @@
           })()}
         </div>
       `;
+    }
+
+    // 7. Pandit Payments Section
+    let PANDIT_PAYOUT_FILTER = 'pending';
+    let PANDIT_PAYOUT_SEARCH = '';
+
+    function setPanditPayoutFilter(f) {
+      PANDIT_PAYOUT_FILTER = f;
+      renderPanditPaymentsSection(document.getElementById('admin-view-root'));
+    }
+
+    function renderPanditPaymentsSection(root) {
+      const allBookings = S.bookings || [];
+      // Eligible bookings: must have an assigned pandit and devotee paid or ceremony in progress/confirmed/completed
+      const eligible = allBookings.filter(b => b.panditEmail && (b.paymentStatus === 'Paid' || ['Completed', 'Confirmed', 'In Progress'].includes(b.status)));
+      const pending = eligible.filter(b => b.panditPayoutStatus !== 'Paid');
+      const paid = eligible.filter(b => b.panditPayoutStatus === 'Paid');
+
+      let list = PANDIT_PAYOUT_FILTER === 'pending' ? pending :
+                 PANDIT_PAYOUT_FILTER === 'paid' ? paid : eligible;
+
+      if (PANDIT_PAYOUT_SEARCH) {
+        const q = PANDIT_PAYOUT_SEARCH.toLowerCase();
+        list = list.filter(b => 
+          (b.bookingId || '').toLowerCase().includes(q) ||
+          (b.userName || '').toLowerCase().includes(q) ||
+          (b.userEmail || '').toLowerCase().includes(q) ||
+          (b.phone || '').toLowerCase().includes(q) ||
+          (b.panditName || '').toLowerCase().includes(q) ||
+          (b.panditEmail || '').toLowerCase().includes(q) ||
+          (b.service || '').toLowerCase().includes(q)
+        );
+      }
+
+      root.innerHTML = `
+        <div class="admin-panel">
+          <div class="admin-panel-head">
+            <div>
+              <h3 style="margin:0"><span class="material-icons" style="color:var(--admin-gold)">account_balance_wallet</span> Pandit Payment Management</h3>
+              <p class="muted" style="margin:4px 0 0;font-size:12.5px">Direct Dakshina payouts to Pandits who performed rituals for devotees</p>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              ${pending.length ? `<span class="badge red">${pending.length} pending payout</span>` : '<span class="badge green">All payouts settled</span>'}
+              <span class="badge">${eligible.length} eligible ceremonies</span>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-sm ${PANDIT_PAYOUT_FILTER === 'pending' ? 'btn-gold' : 'btn-outline'}" onclick="setPanditPayoutFilter('pending')">
+                Pending Payout (${pending.length})
+              </button>
+              <button class="btn btn-sm ${PANDIT_PAYOUT_FILTER === 'paid' ? 'btn-gold' : 'btn-outline'}" onclick="setPanditPayoutFilter('paid')">
+                Paid &amp; Settled (${paid.length})
+              </button>
+              <button class="btn btn-sm ${PANDIT_PAYOUT_FILTER === 'all' ? 'btn-gold' : 'btn-outline'}" onclick="setPanditPayoutFilter('all')">
+                All Eligible Pujas (${eligible.length})
+              </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <input type="text" id="pandit-payout-search-input" value="${esc(PANDIT_PAYOUT_SEARCH)}" placeholder="Search booking, devotee, pandit..." style="font-size:12.5px;padding:6px 10px;border-radius:6px;border:1px solid #ebd9c2;min-width:220px">
+              ${PANDIT_PAYOUT_SEARCH ? `<button class="btn btn-outline dark btn-sm" onclick="PANDIT_PAYOUT_SEARCH='';renderPanditPaymentsSection(document.getElementById('admin-view-root'))">Clear</button>` : ''}
+            </div>
+          </div>
+
+          ${(() => {
+            if (!list.length) {
+              return `<div class="empty" style="padding:48px 20px">
+                <span class="material-icons" style="font-size:44px;color:var(--admin-gold)">account_balance_wallet</span>
+                <p style="margin:8px 0 0">No eligible ceremonies found in this category.</p>
+              </div>`;
+            }
+
+            return `
+              <div class="table-responsive">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th style="min-width:180px">Ceremony &amp; Devotee (Customer) All Details</th>
+                      <th style="min-width:160px">Assigned Pandit Details</th>
+                      <th style="min-width:180px">Pandit Bank Account</th>
+                      <th style="min-width:110px">Dakshina / Payout</th>
+                      <th style="min-width:130px">Payout Status</th>
+                      <th style="min-width:120px;text-align:right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${list.map(b => {
+                      const p = (S.adminPandits || []).find(x => (x.email || '').toLowerCase() === (b.panditEmail || '').toLowerCase());
+                      const isPaid = b.panditPayoutStatus === 'Paid';
+                      const hasBank = p && p.bankAccount;
+                      const devoteePaid = b.paymentStatus === 'Paid';
+
+                      return `
+                        <tr>
+                          <td>
+                            <b style="color:var(--admin-dark)">${esc(b.bookingId)}</b> · <span class="badge ${devoteePaid ? 'green' : 'amber'}" style="font-size:11px">${devoteePaid ? 'Devotee Paid ✅' : esc(b.paymentStatus || 'Pending')}</span><br>
+                            <span style="font-weight:600;color:var(--admin-gold)">${esc(b.service)}</span><br>
+                            <div style="font-size:12.5px;margin-top:4px;line-height:1.4">
+                              <strong>Devotee:</strong> ${esc(b.userName)}<br>
+                              <strong>Phone:</strong> 📞 ${esc(b.phone || b.userPhone || 'N/A')}<br>
+                              <strong>Email:</strong> ${esc(b.userEmail)}<br>
+                              <strong>Date &amp; Time:</strong> ${esc(b.date)} (${esc(b.time || '10:00 AM')})<br>
+                              <strong>Venue:</strong> ${esc(b.address || b.district)}
+                            </div>
+                          </td>
+                          <td>
+                            <b>${esc(b.panditName)}</b><br>
+                            <small class="muted">${esc(b.panditEmail)}</small><br>
+                            <small class="muted">📞 ${esc(p ? p.phone : 'N/A')}</small><br>
+                            ${p && p.verified ? '<span class="badge green" style="font-size:10.5px">Verified Pandit</span>' : '<span class="badge" style="font-size:10.5px">Pending Review</span>'}
+                          </td>
+                          <td>
+                            ${hasBank ? `
+                              <div style="font-size:12px;line-height:1.5">
+                                <div><span class="muted">Bank:</span> <b>${esc(p.bankName || 'Registered Bank')}</b></div>
+                                <div><span class="muted">A/C Holder:</span> <b>${esc(p.accountHolder || p.name)}</b></div>
+                                <div style="margin:2px 0">
+                                  <span class="muted">A/C No:</span>
+                                  <span style="font-family:monospace;font-weight:700;font-size:13px;background:#fff8ed;padding:2px 6px;border-radius:4px;border:1px solid #ebd9c2;color:#1b5e20">${esc(p.bankAccount)}</span>
+                                </div>
+                                <div><span class="muted">IFSC:</span> <b style="font-family:monospace">${esc(p.ifscCode || 'N/A')}</b></div>
+                                ${p.upiId ? `<div><span class="muted">UPI:</span> ${esc(p.upiId)}</div>` : ''}
+                              </div>
+                            ` : `
+                              <div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;padding:8px;font-size:11.5px;color:#e65100">
+                                <strong>⚠️ No Bank Details</strong><br>
+                                Pandit has not submitted bank details yet.
+                              </div>
+                            `}
+                          </td>
+                          <td>
+                            <b style="color:#2e7d32;font-size:15px">${inr(b.panditPayoutAmount || b.fee || 1500)}</b><br>
+                            <small class="muted">Total Dakshina: ${inr(b.fee || 1500)}</small>
+                          </td>
+                          <td>
+                            ${isPaid ? `
+                              <span class="badge green">Paid &amp; Transferred ✅</span><br>
+                              <div style="font-size:11px;margin-top:3px;color:#2e7d32;line-height:1.3">
+                                <code>Ref: ${esc(b.panditPayoutTxnId || 'Direct')}</code><br>
+                                <span class="muted">${b.panditPayoutDate ? new Date(b.panditPayoutDate).toLocaleDateString() : ''}</span>
+                              </div>
+                            ` : `
+                              <span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100">Pending Payout</span>
+                            `}
+                          </td>
+                          <td style="text-align:right">
+                            ${!isPaid ? `
+                              <button class="btn btn-green btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}')">
+                                <span class="material-icons" style="font-size:14px">payments</span> Pay
+                              </button>
+                            ` : `
+                              <button class="btn btn-outline dark btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}', true)">
+                                <span class="material-icons" style="font-size:14px">receipt</span> View / Re-send
+                              </button>
+                            `}
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `;
+          })()}
+        </div>
+      `;
+
+      const searchInp = document.getElementById('pandit-payout-search-input');
+      if (searchInp) {
+        searchInp.onkeydown = (e) => {
+          if (e.key === 'Enter') {
+            PANDIT_PAYOUT_SEARCH = searchInp.value.trim();
+            renderPanditPaymentsSection(document.getElementById('admin-view-root'));
+          }
+        };
+      }
+    }
+
+    async function openPanditPayModal(bookingId, isResend = false) {
+      const b = (S.bookings || []).find(x => x.bookingId === bookingId);
+      if (!b) return toast('Booking not found', true);
+
+      const p = (S.adminPandits || []).find(x => (x.email || '').toLowerCase() === (b.panditEmail || '').toLowerCase());
+      const hasBank = p && p.bankAccount;
+      const defaultAmount = b.panditPayoutAmount || b.fee || 1500;
+      const defaultTxn = b.panditPayoutTxnId || ('PAYOUT-' + b.bookingId.replace(/[^0-9]/g, '') + '-' + Date.now().toString().slice(-4));
+      const defaultMethod = b.panditPayoutMethod || 'Direct Bank Transfer (IMPS/NEFT)';
+
+      openModal(isResend ? `Pandit Payout Receipt – ${b.bookingId}` : `Pay Pandit Dakshina – ${b.bookingId}`, `
+        <div style="font-size:13.5px;color:#3b2115">
+          <!-- Ceremony & Devotee All Details (Uncompacted) -->
+          <div style="background:#fff8ed;border:1.5px solid #ebd9c2;border-radius:10px;padding:14px;margin-bottom:14px">
+            <h4 style="margin:0 0 10px;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="color:var(--admin-gold);font-size:18px">event</span>
+              Ceremony &amp; Devotee (Customer) All Details
+            </h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+              <div><span class="muted">Booking ID:</span> <b>${esc(b.bookingId)}</b></div>
+              <div><span class="muted">Sacred Ritual:</span> <b style="color:var(--admin-gold)">${esc(b.service)}</b></div>
+              <div><span class="muted">Devotee Name:</span> <b>${esc(b.userName)}</b></div>
+              <div><span class="muted">Devotee Phone:</span> <b>📞 ${esc(b.phone || b.userPhone || 'N/A')}</b></div>
+              <div><span class="muted">Devotee Email:</span> <b>${esc(b.userEmail)}</b></div>
+              <div><span class="muted">Date &amp; Time:</span> <b>${esc(b.date)} at ${esc(b.time || '10:00 AM')}</b></div>
+              <div style="grid-column:1 / -1"><span class="muted">Ceremony Venue:</span> <b>${esc(b.address || b.district)}</b></div>
+              <div><span class="muted">Customer Dakshina:</span> <b>${inr(b.fee)}</b></div>
+              <div><span class="muted">Customer Payment:</span> <b style="color:#2e7d32">${b.paymentStatus === 'Paid' ? 'Paid & Verified ✅' : esc(b.paymentStatus)}</b></div>
+            </div>
+          </div>
+
+          <!-- Pandit Bank Account Details -->
+          <div style="background:#ffffff;border:1.5px solid #c8e6c9;border-left:4px solid #2e7d32;border-radius:10px;padding:14px;margin-bottom:16px">
+            <h4 style="margin:0 0 10px;color:#1b5e20;display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:18px">account_balance</span>
+              Pandit &amp; Bank Account Details
+            </h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+              <div><span class="muted">Pandit Name:</span> <b>${esc(b.panditName)}</b></div>
+              <div><span class="muted">Pandit Contact:</span> <b>📞 ${esc(p ? p.phone : 'N/A')}</b></div>
+              <div><span class="muted">Pandit Email:</span> <b>${esc(b.panditEmail)}</b></div>
+              <div><span class="muted">Account Holder:</span> <b>${esc(p ? (p.accountHolder || p.name) : b.panditName)}</b></div>
+              <div><span class="muted">Bank Name:</span> <b>${esc(p ? (p.bankName || 'Registered Bank') : 'N/A')}</b></div>
+              <div><span class="muted">Bank Account No:</span> <b style="font-family:monospace;letter-spacing:1px;font-size:14px;color:#1b5e20">${esc(p ? p.bankAccount : 'Not Provided')}</b></div>
+              <div><span class="muted">IFSC Code:</span> <b style="font-family:monospace">${esc(p ? p.ifscCode : 'N/A')}</b></div>
+              <div><span class="muted">UPI ID:</span> <b>${esc(p ? p.upiId : 'N/A')}</b></div>
+            </div>
+            ${!hasBank ? `
+              <div style="margin-top:10px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;padding:8px 10px;font-size:12px;color:#e65100">
+                ⚠️ Notice: The assigned pandit has not saved their bank details in the dashboard. The email will still notify them, but please ensure bank transfer details are confirmed.
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Payout Form / Transfer Parameters -->
+          <div style="background:#f9f9f9;border:1px solid #e0e0e0;border-radius:10px;padding:14px;margin-bottom:16px">
+            <h4 style="margin:0 0 10px;color:var(--admin-dark)">Payout Transfer Parameters</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label style="font-weight:600;font-size:12.5px">Dakshina Payout Amount (₹) *</label>
+                <input id="modal-pay-amount" type="number" value="${defaultAmount}" style="margin-top:4px">
+              </div>
+              <div>
+                <label style="font-weight:600;font-size:12.5px">Transfer Method</label>
+                <select id="modal-pay-method" style="margin-top:4px">
+                  <option value="Direct Bank Transfer (IMPS/NEFT)" ${defaultMethod.includes('IMPS') ? 'selected' : ''}>Direct Bank Transfer (IMPS / NEFT)</option>
+                  <option value="UPI Transfer" ${defaultMethod.includes('UPI') ? 'selected' : ''}>UPI Transfer</option>
+                  <option value="RTGS" ${defaultMethod.includes('RTGS') ? 'selected' : ''}>RTGS Transfer</option>
+                  <option value="Cash / Handover" ${defaultMethod.includes('Cash') ? 'selected' : ''}>Cash / Handover</option>
+                </select>
+              </div>
+              <div style="grid-column:1 / -1">
+                <label style="font-weight:600;font-size:12.5px">Bank UTR / Payout Transaction Reference *</label>
+                <input id="modal-pay-txnid" type="text" value="${esc(defaultTxn)}" placeholder="e.g. UTR / IMPS Reference Number" style="margin-top:4px;font-family:monospace">
+              </div>
+            </div>
+          </div>
+
+          <div style="background:#e8f5e9;border:1px solid #c8e6c9;padding:12px;border-radius:8px;margin-bottom:16px;font-size:12.5px;color:#1b5e20;line-height:1.5">
+            <strong>📧 Email Notification to Pandit:</strong><br>
+            Pressing <em>Confirm Payout &amp; Send Email</em> will immediately send an official email to <strong>${esc(b.panditEmail)}</strong> stating:<br>
+            <em>"Your money amount [amount] is credited to your account number [account_number]."</em> with all ceremony and customer details included without compacting.
+          </div>
+
+          <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button class="btn btn-outline dark" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-green btn-lg" id="btn-confirm-payout-go">
+              <span class="material-icons">send</span> ${isResend ? 'Re-send Payout Email to Pandit' : 'Confirm Payout & Send Email to Pandit'}
+            </button>
+          </div>
+        </div>
+      `, (m) => {
+        const goBtn = document.getElementById('btn-confirm-payout-go');
+        if (!goBtn) return;
+        goBtn.onclick = async () => {
+          const amt = Number(document.getElementById('modal-pay-amount').value) || defaultAmount;
+          const method = document.getElementById('modal-pay-method').value;
+          const txnId = document.getElementById('modal-pay-txnid').value.trim() || defaultTxn;
+
+          goBtn.disabled = true;
+          goBtn.textContent = 'Processing Payout & Sending Email...';
+
+          try {
+            await api('/bookings/' + encodeURIComponent(b.bookingId) + '/pay-pandit', {
+              method: 'POST',
+              body: { amount: amt, txnId, method }
+            });
+            closeModal();
+            toast(`Dakshina of ₹${amt} paid to Pandit ${b.panditName}! Confirmation email sent. 🙏`);
+            loadData();
+          } catch (e) {
+            toast(e.message || 'Failed to process payout', true);
+            goBtn.disabled = false;
+            goBtn.innerHTML = '<span class="material-icons">send</span> Confirm Payout & Send Email to Pandit';
+          }
+        };
+      });
     }
 
     (async function init() {
