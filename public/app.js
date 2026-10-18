@@ -1138,7 +1138,10 @@ const statusBadge = (s) => {
 async function renderDashboard() {
   const root = $('#dashboard-root');
   if (!S.user) return;
-  root.innerHTML = '<div class="empty">Loading your dashboard…</div>';
+  const isAlreadyLoaded = root && root.querySelector('.dash-banner');
+  if (!isAlreadyLoaded) {
+    root.innerHTML = '<div class="empty">Loading your dashboard…</div>';
+  }
   try {
     if (S.user.role === 'admin') await adminDash(root);
     else if (S.user.role === 'pandit') await panditDash(root);
@@ -2077,6 +2080,8 @@ async function panditDash(root) {
     me.upiId = S.me.upiId;
   }
   S.me = me;
+  S._panditBookings = bookings;
+  S._panditLongs = longs;
   const tab = S.dashTab || 'ceremonies';
   const paidOut = bookings.filter((b) => b.panditPayoutStatus === 'Paid').reduce((s, b) => s + (b.panditPayoutAmount || b.fee || 0), 0);
   const pendingPayout = bookings.filter((b) => (b.paymentStatus === 'Paid' || b.status === 'Completed') && b.panditPayoutStatus !== 'Paid').reduce((s, b) => s + (b.fee || 0), 0);
@@ -2135,6 +2140,31 @@ async function panditDash(root) {
   `;
   if (tab === 'avail') {
     setupAvailTabListeners(me);
+  }
+}
+
+function switchPanditSubtab(tab) {
+  S.dashTab = tab;
+  const subtabs = document.querySelectorAll('.dash-subtabs .subtab');
+  subtabs.forEach((st) => {
+    st.classList.toggle('active', st.dataset.tab === tab);
+  });
+  const container = document.getElementById('dash-tab-content');
+  if (container) {
+    const bookings = S._panditBookings || [];
+    const longs = S._panditLongs || [];
+    const me = S.me || {};
+    const email = (S.user && S.user.email) || '';
+    if (tab === 'ceremonies') container.innerHTML = renderPanditCeremoniesTab(bookings);
+    else if (tab === 'long') container.innerHTML = renderPanditLongTab(longs, email);
+    else if (tab === 'avail') {
+      container.innerHTML = renderPanditAvailTab(me);
+      setupAvailTabListeners(me);
+    } else if (tab === 'bank') {
+      container.innerHTML = renderPanditBankTab(me);
+    } else if (tab === 'profile') {
+      container.innerHTML = renderPanditProfileTab(me);
+    }
   }
 }
 
@@ -3080,26 +3110,42 @@ const ACTIONS = {
       const accountHolder = $('#p-bank-holder') ? $('#p-bank-holder').value.trim() : (S.me.accountHolder || S.me.name);
       const qrCode = $('#p-qr-val') ? $('#p-qr-val').value.trim() : (S.me.qrCode || '');
 
-      const updated = await api('/pandits/' + (S.me._id || S.me.email), {
-        method: 'PUT',
-        body: {
-          availableDays: finalDays,
-          timeSlots: slots,
-          fee,
-          workingState,
-          workingDistricts,
-          districtPrices,
-          bankAccount,
-          ifscCode,
-          upiId,
-          bankName,
-          accountHolder,
-          qrCode
-        }
-      });
-      S.me = updated;
+      const payload = {
+        availableDays: finalDays,
+        timeSlots: slots,
+        fee,
+        workingState,
+        workingDistricts,
+        districtPrices,
+        bankAccount,
+        ifscCode,
+        upiId,
+        bankName,
+        accountHolder,
+        qrCode
+      };
+
+      // Optimistically update local Pandit state in memory immediately
+      S.me = { ...S.me, ...payload };
       toast('Working districts & availability saved successfully! 🙏');
-      renderDashboard();
+
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<span class="material-icons">check_circle</span> Saved Successfully';
+        setTimeout(() => {
+          if (saveBtn) saveBtn.innerHTML = '<span class="material-icons">save</span> Save Working Districts &amp; Availability';
+        }, 2200);
+      }
+
+      // Persist to server in background without UI freeze
+      api('/pandits/' + (S.me._id || S.me.email), {
+        method: 'PUT',
+        body: payload
+      }).then(updated => {
+        if (updated) S.me = { ...S.me, ...updated };
+      }).catch(e => {
+        toast(e.message || 'Error updating server', true);
+      });
     } catch (e) {
       toast(e.message || 'Failed to save availability', true);
       if (saveBtn) {
@@ -3166,6 +3212,10 @@ const ACTIONS = {
       return;
     }
     S.dashTab = d.tab;
+    if (S.user && S.user.role === 'pandit' && document.getElementById('dash-tab-content')) {
+      switchPanditSubtab(d.tab);
+      return;
+    }
     renderDashboard();
   },
   openProfile: () => {
@@ -3330,28 +3380,36 @@ const ACTIONS = {
         qrCode: qr
       };
 
-      const res = await api('/pandits/' + encodeURIComponent(pId) + '/bank-details', {
-        method: 'PUT',
-        body
-      });
-      const savedPandit = (res && res.pandit) ? res.pandit : { ...me, ...body };
-      S.me = savedPandit;
+      // Optimistically update in memory and localStorage immediately
+      S.me = { ...(S.me || {}), ...body };
       if (S.user) {
         S.user = {
           ...S.user,
-          bankAccount: cleanAcc,
-          ifscCode: cleanIfsc,
-          bankName,
-          accountHolder: name,
-          upiId: upi,
-          qrCode: qr,
-          panditId: savedPandit._id || S.user.panditId
+          ...body,
+          panditId: (S.me && S.me._id) || S.user.panditId
         };
         localStorage.setItem('pc_user', JSON.stringify(S.user));
       }
       toast('Bank details & UPI QR saved successfully! Dakshina will be credited to this account. 🙏');
-      S.dashTab = 'bank';
-      renderDashboard();
+
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-icons">check_circle</span> Saved Successfully';
+        setTimeout(() => {
+          if (btn) btn.innerHTML = '<span class="material-icons">save</span> Save Bank &amp; Payout Details';
+        }, 2200);
+      }
+
+      // Persist to server in background without UI freeze
+      api('/pandits/' + encodeURIComponent(pId) + '/bank-details', {
+        method: 'PUT',
+        body
+      }).then(res => {
+        const savedPandit = (res && res.pandit) ? res.pandit : { ...me, ...body };
+        S.me = savedPandit;
+      }).catch(e => {
+        toast(e.message || 'Failed to sync bank details', true);
+      });
     } catch (e) {
       toast(e.message || 'Failed to save bank details', true);
       if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-icons">save</span> Save Bank &amp; Payout Details'; }

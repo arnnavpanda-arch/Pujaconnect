@@ -426,15 +426,21 @@ app.post('/api/region-notifications/subscribe-404', wrap(async (req, res) => {
   if (!email || !target) return res.status(400).json({ error: 'Email and district/location required' });
   const e = lc(email);
   const distKey = String(target).trim().toLowerCase();
+  const stateKey = state ? String(state).trim().toLowerCase() : '';
 
-  await User.updateOne(
-    { email: e },
+  const distsToAdd = [distKey, String(target).trim()];
+  if (stateKey) distsToAdd.push(stateKey);
+
+  const updated = await User.findOneAndUpdate(
+    { email: new RegExp('^' + e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
     {
-      $addToSet: { waiting404Districts: distKey },
+      $addToSet: { waiting404Districts: { $each: distsToAdd } },
       $set: { is404Waiting: true }
-    }
+    },
+    { new: true }
   );
 
+  console.log(`[subscribe-404] Subscribed user ${e} for 404 alerts in ${distKey}:`, updated ? 'Success' : 'User not found in DB');
   res.json({ ok: true, subscribed: true, district: distKey, email: e });
 }));
 
@@ -496,23 +502,25 @@ async function notify404DevoteesForDistricts(districts = [], state = '', specifi
       // Query ONLY devotees who encountered the 404 error page (subscribed in waiting404Districts or is404Waiting)
       // NOT every registered user!
       const distRegex = new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+      const stateRegex = state ? new RegExp('^' + state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') : null;
       const waitingDevotees = await User.find({
         role: { $ne: 'pandit' },
         $or: [
           { waiting404Districts: distKey },
           { waiting404Districts: dist },
           { waiting404Districts: distRegex },
+          ...(stateRegex ? [{ waiting404Districts: (state || '').toLowerCase() }] : []),
           { is404Waiting: true, district: distRegex },
           { is404Waiting: true, city: distRegex }
         ]
       });
 
-      console.log(`[notify404] Found ${waitingDevotees.length} 404-waiting devotee(s) for district "${dist}" (Fee: ₹${districtFee})`);
+      console.log(`[notify404] Found ${waitingDevotees.length} 404-waiting devotee(s) for district "${dist}" (Dakshina: ₹${districtFee})`);
 
       for (const devotee of waitingDevotees) {
         if (!devotee.email) continue;
         console.log(`[notify404] Sending REGION_SERVICE_AVAILABLE email to 404 user: ${devotee.email} for district ${dist}`);
-        await sendSafe('REGION_SERVICE_AVAILABLE', devotee.email, {
+        const mailRes = await sendSafe('REGION_SERVICE_AVAILABLE', devotee.email, {
           userName: devotee.name,
           email: devotee.email,
           district: dist,
@@ -520,6 +528,7 @@ async function notify404DevoteesForDistricts(districts = [], state = '', specifi
           panditName: panditWithPrice.name ? `Pandit ${panditWithPrice.name}` : 'Verified Vedic Purohits',
           fee: districtFee
         });
+        console.log(`[notify404] Email result for ${devotee.email}:`, mailRes);
 
         // Pull district from 404 waiting list and mark as notified
         const updatedUser = await User.findOneAndUpdate(
@@ -836,19 +845,16 @@ app.put('/api/pandits/:id/district-prices', adminOnly, wrap(async (req, res) => 
   // When admin sets district prices, notify ONLY 404-error devotees waiting for those districts
   const pricedDistricts = Object.keys(districtPrices || {}).filter(d => Number(districtPrices[d]) > 0);
 
-  // Return immediately so the admin panel NEVER hangs or freezes
-  res.json(p);
-
-  // Send email notifications to 404 devotees in the background
+  // Await notification dispatch so serverless environments (e.g. Vercel) never terminate before emails are sent
   if (pricedDistricts.length > 0) {
-    setImmediate(async () => {
-      try {
-        await notify404DevoteesForDistricts(pricedDistricts, p.workingState || p.state, p);
-      } catch (err) {
-        console.error('[notify404 background error]:', err.message);
-      }
-    });
+    try {
+      await notify404DevoteesForDistricts(pricedDistricts, p.workingState || p.state, p);
+    } catch (err) {
+      console.error('[notify404 error in district-prices]:', err.message);
+    }
   }
+
+  res.json(p);
 }));
 
 // Centralized Platform Bank Details (Managed exclusively by Admin)
