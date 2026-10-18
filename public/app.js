@@ -1175,19 +1175,29 @@ async function userDash(root) {
   const devoteeState = (S.user.state || '').trim();
 
   const panditsInDistrict = verifiedList.filter((p) => {
-    if (!p.verified) return false;
+    if (!p.verified && p.status !== 'Verified') return false;
     const dLower = devoteeDistrict.toLowerCase();
     const isHome = p.district && p.district.toLowerCase() === dLower;
     const isWorking = Array.isArray(p.workingDistricts) && p.workingDistricts.some((d) => String(d).toLowerCase() === dLower);
-    return isHome || isWorking;
+    if (!isHome && !isWorking) return false;
+
+    // Service is available ONLY after admin sets/updates the district price rate (> 0)
+    const prices = p.districtPrices;
+    if (!prices || typeof prices !== 'object') return false;
+    const priceKey = Object.keys(prices).find((k) => k.trim().toLowerCase() === dLower);
+    return Boolean(priceKey && Number(prices[priceKey]) > 0);
   });
 
   const panditsInState = verifiedList.filter((p) => {
-    if (!p.verified) return false;
+    if (!p.verified && p.status !== 'Verified') return false;
     const sLower = devoteeState.toLowerCase();
     const isHomeState = p.state && p.state.toLowerCase() === sLower;
     const isWorkingState = p.workingState && p.workingState.toLowerCase() === sLower;
-    return isHomeState || isWorkingState;
+    if (!isHomeState && !isWorkingState) return false;
+
+    const prices = p.districtPrices;
+    if (!prices || typeof prices !== 'object') return false;
+    return Object.values(prices).some((v) => Number(v) > 0);
   });
 
   const isRegionUnavailable = Boolean(
@@ -2497,12 +2507,27 @@ function setupAvailTabListeners(me) {
 
   function renderDistrictCheckboxes() {
     const list = LOCATIONS[curState] || [];
-    checkboxesWrap.innerHTML = list.map((d) => `
-      <label class="district-check">
-        <input type="checkbox" value="${esc(d)}" ${curDistricts.has(d) ? 'checked' : ''}>
-        <span>${esc(d)}</span>
-      </label>
-    `).join('') || '<span class="muted">No districts available for this state.</span>';
+    const curPrices = me.districtPrices || {};
+    checkboxesWrap.innerHTML = list.map((d) => {
+      const isChecked = curDistricts.has(d);
+      const price = curPrices[d];
+      const hasPrice = price !== undefined && price !== null && Number(price) > 0;
+      let badgeHtml = '';
+      if (isChecked) {
+        if (hasPrice) {
+          badgeHtml = `<span class="badge green" style="font-size:11px;margin-left:6px;padding:2px 6px">Rate: ${inr(price)}</span>`;
+        } else {
+          badgeHtml = `<span class="badge" style="background:#d32f2f;color:#fff;font-weight:800;font-size:9.5px;padding:2px 6px;margin-left:6px;border-radius:4px;letter-spacing:0.5px">NEW (Rate: ₹0 · Pending Admin)</span>`;
+        }
+      }
+      return `
+        <label class="district-check" style="display:flex;align-items:center;flex-wrap:wrap">
+          <input type="checkbox" value="${esc(d)}" ${isChecked ? 'checked' : ''}>
+          <span>${esc(d)}</span>
+          ${badgeHtml}
+        </label>
+      `;
+    }).join('') || '<span class="muted">No districts available for this state.</span>';
 
     checkboxesWrap.querySelectorAll('input[type="checkbox"]').forEach((chk) => {
       chk.onchange = () => {
