@@ -448,9 +448,11 @@ app.post('/api/region-notifications/subscribe-404', wrap(async (req, res) => {
 async function notify404DevoteesForDistricts(districts = [], state = '', specificPandit = null) {
   if (!Array.isArray(districts) || !districts.length) return;
   const uniqueDistricts = [...new Set(districts.map(d => String(d).trim()).filter(Boolean))];
+  // Track notified devotees in this pricing save so that each 404 user receives ONLY ONE email for their district
+  const alreadyNotifiedInBatch = new Set();
 
   for (const dist of uniqueDistricts) {
-    const distKey = dist.toLowerCase();
+    const distKey = dist.toLowerCase().trim();
 
     // First check specificPandit if passed
     let panditWithPrice = null;
@@ -466,7 +468,7 @@ async function notify404DevoteesForDistricts(districts = [], state = '', specifi
 
     // Check if there is at least one active, verified pandit for this district who has admin-set district dakshina rates
     if (!panditWithPrice) {
-      const distRegex = new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+      const distRegex = new RegExp('^' + distKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
       const verifiedPanditsInDist = await Pandit.find({
         $and: [
           {
@@ -494,32 +496,39 @@ async function notify404DevoteesForDistricts(districts = [], state = '', specifi
       });
     }
 
-    // Send emails ONLY after the admin has set the district-wise amount!
+    // Send email ONLY after the admin has set the district-wise amount!
     if (panditWithPrice) {
       const priceKey = Object.keys(panditWithPrice.districtPrices || {}).find(k => k.trim().toLowerCase() === distKey);
       const districtFee = priceKey ? Number(panditWithPrice.districtPrices[priceKey]) : (panditWithPrice.fee || 1500);
 
-      // Query ONLY devotees who encountered the 404 error page (subscribed in waiting404Districts or is404Waiting)
-      // NOT every registered user!
-      const distRegex = new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
-      const stateRegex = state ? new RegExp('^' + state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') : null;
+      // Query ONLY devotees who encountered the 404 error page specifically for THIS district!
+      // No other district is matched or shown!
+      const distRegex = new RegExp('^' + distKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
       const waitingDevotees = await User.find({
         role: { $ne: 'pandit' },
+        serviceNotifiedDistricts: { $ne: distKey }, // Devotee has not already been notified for this district
         $or: [
           { waiting404Districts: distKey },
-          { waiting404Districts: dist },
+          { waiting404Districts: dist.trim() },
           { waiting404Districts: distRegex },
-          ...(stateRegex ? [{ waiting404Districts: (state || '').toLowerCase() }] : []),
           { is404Waiting: true, district: distRegex },
           { is404Waiting: true, city: distRegex }
         ]
       });
 
-      console.log(`[notify404] Found ${waitingDevotees.length} 404-waiting devotee(s) for district "${dist}" (Dakshina: ₹${districtFee})`);
+      console.log(`[notify404] Found ${waitingDevotees.length} 404-waiting devotee(s) strictly for district "${dist}" (Dakshina: ₹${districtFee})`);
 
       for (const devotee of waitingDevotees) {
         if (!devotee.email) continue;
-        console.log(`[notify404] Sending REGION_SERVICE_AVAILABLE email to 404 user: ${devotee.email} for district ${dist}`);
+        const devoteeEmail = devotee.email.trim().toLowerCase();
+
+        // Enforce: ONLY ONE single email per devotee for their specific district
+        if (alreadyNotifiedInBatch.has(devoteeEmail)) {
+          continue;
+        }
+        alreadyNotifiedInBatch.add(devoteeEmail);
+
+        console.log(`[notify404] Sending strictly one notification email to 404 user: ${devotee.email} for district ${dist}`);
         const mailRes = await sendSafe('REGION_SERVICE_AVAILABLE', devotee.email, {
           userName: devotee.name,
           email: devotee.email,
@@ -530,24 +539,19 @@ async function notify404DevoteesForDistricts(districts = [], state = '', specifi
         });
         console.log(`[notify404] Email result for ${devotee.email}:`, mailRes);
 
-        // Pull district from 404 waiting list and mark as notified
-        const updatedUser = await User.findOneAndUpdate(
+        // Mark user as notified for this district so they never receive duplicate emails
+        await User.updateOne(
           { _id: devotee._id },
           {
+            $addToSet: { serviceNotifiedDistricts: distKey },
             $pull: {
               waiting404Districts: {
                 $in: [distKey, dist, dist.toLowerCase(), dist.trim()]
               }
             },
-            $addToSet: { serviceNotifiedDistricts: distKey }
-          },
-          { new: true }
+            $set: { is404Waiting: false }
+          }
         );
-
-        if (updatedUser && (!updatedUser.waiting404Districts || updatedUser.waiting404Districts.length === 0)) {
-          updatedUser.is404Waiting = false;
-          await updatedUser.save();
-        }
       }
     }
   }
