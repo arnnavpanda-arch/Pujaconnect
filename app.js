@@ -54,7 +54,7 @@ app.use('/api', wrap(async (req, res, next) => {
 }));
 
 // ---- Auth helpers ----
-const publicUser = (u) => ({ name: u.name, email: u.email, phone: u.phone, state: u.state, district: u.district, city: u.city, role: u.role });
+const publicUser = (u) => ({ _id: u._id, name: u.name, email: u.email, phone: u.phone, state: u.state, district: u.district, city: u.city, role: u.role, status: u.status || 'Active', createdAt: u.createdAt });
 const sign = (payload) => jwt.sign(payload, JWT_SECRET(), { expiresIn: '7d' });
 function auth(req, res, next) {
   const h = req.headers.authorization || '';
@@ -264,6 +264,38 @@ app.put('/api/users/profile', auth, wrap(async (req, res) => {
   res.json(publicUser(user));
 }));
 
+app.delete('/api/users/:id', adminOnly, wrap(async (req, res) => {
+  const raw = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const query = /^[0-9a-fA-F]{24}$/.test(raw) ? { _id: raw } : { email: lc(raw) };
+  const user = await User.findOneAndDelete(query);
+  if (!user) return res.status(404).json({ error: 'Devotee not found' });
+  res.json({ ok: true, deletedId: user._id });
+}));
+
+app.post('/api/users/bulk-delete', adminOnly, wrap(async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'IDs array required' });
+  const objectIds = ids.filter(i => /^[0-9a-fA-F]{24}$/.test(i));
+  const emails = ids.map(lc);
+  const result = await User.deleteMany({
+    $or: [
+      { _id: { $in: objectIds } },
+      { email: { $in: emails } }
+    ],
+    role: { $ne: 'admin' }
+  });
+  res.json({ ok: true, count: result.deletedCount });
+}));
+
+app.put('/api/users/:id/status', adminOnly, wrap(async (req, res) => {
+  const raw = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const query = /^[0-9a-fA-F]{24}$/.test(raw) ? { _id: raw } : { email: lc(raw) };
+  const { status } = req.body;
+  const user = await User.findOneAndUpdate(query, { status: status || 'Active' }, { new: true });
+  if (!user) return res.status(404).json({ error: 'Devotee not found' });
+  res.json({ ok: true, user: publicUser(user) });
+}));
+
 // ---- Pujas catalog ----
 app.get('/api/pujas', wrap(async (req, res) => {
   const q = req.query.type ? { type: req.query.type } : {};
@@ -353,6 +385,28 @@ app.put('/api/pandits/:id', wrap(async (req, res) => {
   const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
   res.json(p);
+}));
+
+app.delete('/api/pandits/:id', adminOnly, wrap(async (req, res) => {
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const query = /^[0-9a-fA-F]{24}$/.test(rawId) ? { _id: rawId } : { email: new RegExp('^' + rawId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
+  const p = await Pandit.findOneAndDelete(query);
+  if (!p) return res.status(404).json({ error: 'Pandit not found' });
+  res.json({ ok: true, deletedId: p._id });
+}));
+
+app.post('/api/pandits/bulk-delete', adminOnly, wrap(async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'IDs array required' });
+  const objectIds = ids.filter(i => /^[0-9a-fA-F]{24}$/.test(i));
+  const emails = ids.map(lc);
+  const result = await Pandit.deleteMany({
+    $or: [
+      { _id: { $in: objectIds } },
+      { email: { $in: emails } }
+    ]
+  });
+  res.json({ ok: true, count: result.deletedCount });
 }));
 
 // Pandit or Admin submits/updates bank details
@@ -599,6 +653,25 @@ app.get('/api/bookings/:id', wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
   res.json(b);
+}));
+
+app.delete('/api/bookings/:id', adminOnly, wrap(async (req, res) => {
+  const b = await Booking.findOneAndDelete(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  res.json({ ok: true, deletedId: b.bookingId || b._id });
+}));
+
+app.post('/api/bookings/bulk-delete', adminOnly, wrap(async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'IDs array required' });
+  const objectIds = ids.filter(i => /^[0-9a-fA-F]{24}$/.test(i));
+  const result = await Booking.deleteMany({
+    $or: [
+      { bookingId: { $in: ids } },
+      { _id: { $in: objectIds } }
+    ]
+  });
+  res.json({ ok: true, count: result.deletedCount });
 }));
 
 // Devotee books a puja: selecting a specific pandit is OPTIONAL.

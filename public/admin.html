@@ -228,9 +228,66 @@
     .search-box input { border: none; padding: 4px; outline: none; width: 100%; font-size: 13px; }
     .search-box .material-icons { color: var(--muted); font-size: 18px; }
 
-    @media (max-width: 768px) {
-      .admin-header { flex-direction: column; align-items: flex-start; }
-      .admin-controls { width: 100%; justify-content: space-between; }
+    .th-cb, .td-cb {
+      width: 42px !important;
+      text-align: center !important;
+      padding-left: 8px !important;
+      padding-right: 8px !important;
+    }
+    .admin-table input[type="checkbox"] {
+      width: 17px;
+      height: 17px;
+      cursor: pointer;
+      accent-color: var(--admin-gold);
+      vertical-align: middle;
+    }
+    .bulk-bar {
+      background: #fff8ed;
+      border: 1.5px solid #d99a19;
+      border-radius: 10px;
+      padding: 10px 16px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    @media print {
+      body { background: #fff !important; color: #000 !important; font-size: 10pt !important; margin: 0 !important; padding: 0 !important; }
+      .admin-header, .admin-tabs, #admin-kpi-root, .admin-controls, .search-box, .btn, .no-print, .bulk-bar, .modal-backdrop, .toast {
+        display: none !important;
+      }
+      .main-admin, .admin-panel {
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        background: transparent !important;
+      }
+      .table-responsive {
+        overflow: visible !important;
+        border: none !important;
+      }
+      .admin-table {
+        width: 100% !important;
+        min-width: 100% !important;
+        border-collapse: collapse !important;
+      }
+      .admin-table th, .admin-table td {
+        border: 1px solid #777 !important;
+        padding: 6px 8px !important;
+        color: #000 !important;
+        background: #fff !important;
+        font-size: 10.5px !important;
+        word-break: break-word !important;
+      }
+      .admin-table th { background: #eee !important; }
+      .th-cb, .td-cb, .admin-table th:last-child, .admin-table td:last-child {
+        display: none !important;
+      }
     }
   </style>
 </head>
@@ -303,6 +360,59 @@
     let SEARCH_QUERY = '';
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
+
+    const SELECTED = {
+      bookings: new Set(),
+      pandits: new Set(),
+      payments: new Set(),
+      users: new Set()
+    };
+
+    function toggleSelectRow(type, id, checked) {
+      if (!SELECTED[type]) SELECTED[type] = new Set();
+      if (checked) {
+        SELECTED[type].add(id);
+      } else {
+        SELECTED[type].delete(id);
+      }
+      renderActiveTab();
+    }
+
+    function toggleSelectAll(type, checked, allIds) {
+      if (!SELECTED[type]) SELECTED[type] = new Set();
+      if (checked) {
+        allIds.forEach(id => SELECTED[type].add(id));
+      } else {
+        allIds.forEach(id => SELECTED[type].delete(id));
+      }
+      renderActiveTab();
+    }
+
+    function clearSelection(type) {
+      if (SELECTED[type]) SELECTED[type].clear();
+      renderActiveTab();
+    }
+
+    function getBulkBarHtml(type, singularLabel, deleteFnName) {
+      const count = (SELECTED[type] && SELECTED[type].size) || 0;
+      if (!count) return '';
+      return `
+        <div class="bulk-bar">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="material-icons" style="color:var(--admin-gold);font-size:20px">check_box</span>
+            <b style="color:var(--admin-dark);font-size:13.5px">${count} ${singularLabel}${count > 1 ? 's' : ''} selected</b>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-red btn-sm" onclick="${deleteFnName}()">
+              <span class="material-icons" style="font-size:14px;vertical-align:middle">delete</span> Delete Selected (${count})
+            </button>
+            <button class="btn btn-outline dark btn-sm" onclick="clearSelection('${type}')">
+              Deselect All
+            </button>
+          </div>
+        </div>
+      `;
+    }
 
     function toast(msg, isErr) {
       const t = document.getElementById('toast');
@@ -557,6 +667,9 @@
       const awaitingCount = (S.bookings || []).filter(b => b.status === 'Pending Pandit Confirmation').length;
       const rejectedCount = (S.bookings || []).filter(b => (b.rejectedPandits && b.rejectedPandits.length > 0) || b.panditApproval === 'Rejected').length;
 
+      const visibleBookingIds = list.map(b => b.bookingId);
+      const allBookingsSelected = visibleBookingIds.length > 0 && visibleBookingIds.every(id => SELECTED.bookings.has(id));
+
       root.innerHTML = `
         <div class="admin-panel">
           <div class="admin-panel-head">
@@ -590,11 +703,14 @@
             </button>
           </div>
 
+          ${getBulkBarHtml('bookings', 'booking', 'deleteSelectedBookings')}
+
           ${list.length ? `
             <div class="table-responsive">
               <table class="admin-table">
                 <thead>
                   <tr>
+                    <th class="th-cb"><input type="checkbox" ${allBookingsSelected ? 'checked' : ''} onchange="toggleSelectAll('bookings', this.checked, [${visibleBookingIds.map(id => `'${esc(id)}'`).join(',')}])" title="Select All Bookings"></th>
                     <th>Booking ID</th>
                     <th>Devotee Details</th>
                     <th>Puja / Ritual</th>
@@ -657,8 +773,16 @@
                       `;
                     }
 
+                    // 3. Delete button
+                    const deleteBtnHtml = `
+                      <button class="btn btn-red btn-sm" onclick="deleteBooking('${esc(b.bookingId)}')" title="Delete booking">
+                        <span class="material-icons" style="font-size:13px;vertical-align:middle">delete</span> Delete
+                      </button>
+                    `;
+
                     return `
                       <tr>
+                        <td class="td-cb"><input type="checkbox" ${SELECTED.bookings.has(b.bookingId) ? 'checked' : ''} onchange="toggleSelectRow('bookings', '${esc(b.bookingId)}', this.checked)"></td>
                         <td><b>${esc(b.bookingId)}</b><br><small class="muted">${inr(b.fee)}</small></td>
                         <td><b>${esc(b.userName)}</b><br><small class="muted">${esc(b.userEmail)}<br>📞 ${esc(b.phone || 'N/A')}</small></td>
                         <td><b>${esc(b.service)}</b></td>
@@ -669,6 +793,7 @@
                           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                             ${assignBtnHtml}
                             ${rejectSlotBtnHtml}
+                            ${deleteBtnHtml}
                           </div>
                         </td>
                       </tr>
@@ -807,6 +932,39 @@
       }
     }
 
+    async function deleteBooking(bookingId) {
+      if (!confirm(`Are you sure you want to permanently delete Booking ${bookingId}? This cannot be undone.`)) return;
+      try {
+        await api('/bookings/' + encodeURIComponent(bookingId), { method: 'DELETE' });
+        S.bookings = (S.bookings || []).filter(b => b.bookingId !== bookingId && b._id !== bookingId);
+        SELECTED.bookings.delete(bookingId);
+        SELECTED.payments.delete(bookingId);
+        toast(`Booking ${bookingId} deleted successfully`);
+        renderKpis();
+        renderActiveTab();
+      } catch (e) {
+        toast('Error deleting booking: ' + e.message, true);
+      }
+    }
+
+    async function deleteSelectedBookings() {
+      const ids = Array.from(SELECTED.bookings);
+      if (!ids.length) return;
+      if (!confirm(`Are you sure you want to delete ${ids.length} selected booking(s)? This cannot be undone.`)) return;
+      try {
+        const res = await api('/bookings/bulk-delete', { method: 'POST', body: { ids } });
+        const idSet = new Set(ids);
+        S.bookings = (S.bookings || []).filter(b => !idSet.has(b.bookingId) && !idSet.has(b._id));
+        SELECTED.bookings.clear();
+        ids.forEach(id => SELECTED.payments.delete(id));
+        toast(`${res.count || ids.length} bookings deleted successfully`);
+        renderKpis();
+        renderActiveTab();
+      } catch (e) {
+        toast('Error in bulk delete: ' + e.message, true);
+      }
+    }
+
     // 1. KYC Queue
     function renderKycQueue(root) {
       const pend = S.adminPandits.filter(p => p.status === 'Pending Review');
@@ -858,6 +1016,9 @@
         const q = SEARCH_QUERY.toLowerCase();
         list = list.filter(p => p.name.toLowerCase().includes(q) || (p.district || '').toLowerCase().includes(q) || p.email.toLowerCase().includes(q) || (p.phone || '').includes(q));
       }
+      const visiblePanditIds = list.map(p => p._id);
+      const allPanditsSelected = visiblePanditIds.length > 0 && visiblePanditIds.every(id => SELECTED.pandits.has(id));
+
       root.innerHTML = `
         <div class="admin-panel">
           <div class="admin-panel-head">
@@ -867,24 +1028,38 @@
               <input type="text" placeholder="Search by name, district, phone..." value="${esc(SEARCH_QUERY)}" oninput="SEARCH_QUERY=this.value; renderActiveTab();">
             </div>
           </div>
+          ${getBulkBarHtml('pandits', 'Pandit', 'deleteSelectedPandits')}
           <div class="table-responsive">
             <table class="admin-table">
               <thead>
-                <tr><th>Photo</th><th>Pandit Name</th><th>Home District</th><th>Experience</th><th>Base Dakshina</th><th>Status</th><th>Actions</th></tr>
+                <tr>
+                  <th class="th-cb"><input type="checkbox" ${allPanditsSelected ? 'checked' : ''} onchange="toggleSelectAll('pandits', this.checked, [${visiblePanditIds.map(id => `'${esc(id)}'`).join(',')}])" title="Select All Pandits"></th>
+                  <th>Photo</th>
+                  <th>Pandit Name</th>
+                  <th>Home District &amp; State</th>
+                  <th>Experience</th>
+                  <th>Base Dakshina</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
               </thead>
               <tbody>
                 ${list.map(p => `
                   <tr>
+                    <td class="td-cb"><input type="checkbox" ${SELECTED.pandits.has(p._id) ? 'checked' : ''} onchange="toggleSelectRow('pandits', '${esc(p._id)}', this.checked)"></td>
                     <td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="admin-avatar" alt="Avatar"></td>
                     <td><b>${esc(p.name)}</b><br><small class="muted">${esc(p.email)} · 📞 ${esc(p.phone)}</small></td>
-                    <td>${esc(p.district || p.location)}</td>
+                    <td><b>${esc(p.district || p.location)}</b>${p.state ? ', ' + esc(p.state) : ''}</td>
                     <td>${esc(p.exp || p.experience + ' Years')}</td>
                     <td><b>${inr(p.fee)}</b></td>
                     <td>${statusBadge(p.status)}</td>
                     <td>
-                      <button class="btn btn-outline dark btn-sm" onclick="viewPanditModal('${esc(p._id)}')">Details</button>
-                      <button class="btn btn-gold btn-sm" onclick="openPanditDistrictPricingModal('${esc(p._id)}')">Fix District Rates</button>
-                      ${p.status !== 'Verified' ? `<button class="btn btn-green btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Verified')">Approve</button>` : `<button class="btn btn-red btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Rejected')">Revoke</button>`}
+                      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                        <button class="btn btn-outline dark btn-sm" onclick="viewPanditModal('${esc(p._id)}')">Details</button>
+                        <button class="btn btn-gold btn-sm" onclick="openPanditDistrictPricingModal('${esc(p._id)}')">Fix District Rates</button>
+                        ${p.status !== 'Verified' ? `<button class="btn btn-green btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Verified')">Approve</button>` : `<button class="btn btn-red btn-sm" onclick="setPanditStatus('${esc(p._id)}', 'Rejected')">Revoke</button>`}
+                        <button class="btn btn-red btn-sm" onclick="deletePandit('${esc(p._id)}')" title="Delete Pandit"><span class="material-icons" style="font-size:13px;vertical-align:middle">delete</span> Delete</button>
+                      </div>
                     </td>
                   </tr>
                 `).join('')}
@@ -893,6 +1068,39 @@
           </div>
         </div>
       `;
+    }
+
+    async function deletePandit(id) {
+      const p = (S.adminPandits || []).find(x => x._id === id || x.email === id);
+      const name = p ? p.name : 'this Pandit';
+      if (!confirm(`Are you sure you want to permanently delete Pandit ${name}? This cannot be undone.`)) return;
+      try {
+        await api('/pandits/' + encodeURIComponent(id), { method: 'DELETE' });
+        S.adminPandits = (S.adminPandits || []).filter(x => x._id !== id && x.email !== id);
+        SELECTED.pandits.delete(id);
+        toast(`Pandit ${name} deleted successfully`);
+        renderKpis();
+        renderActiveTab();
+      } catch (e) {
+        toast('Error deleting Pandit: ' + e.message, true);
+      }
+    }
+
+    async function deleteSelectedPandits() {
+      const ids = Array.from(SELECTED.pandits);
+      if (!ids.length) return;
+      if (!confirm(`Are you sure you want to delete ${ids.length} selected Pandit(s)? This cannot be undone.`)) return;
+      try {
+        const res = await api('/pandits/bulk-delete', { method: 'POST', body: { ids } });
+        const idSet = new Set(ids);
+        S.adminPandits = (S.adminPandits || []).filter(x => !idSet.has(x._id) && !idSet.has(x.email));
+        SELECTED.pandits.clear();
+        toast(`${res.count || ids.length} Pandit(s) deleted successfully`);
+        renderKpis();
+        renderActiveTab();
+      } catch (e) {
+        toast('Error in bulk delete: ' + e.message, true);
+      }
     }
 
     // 3. Puja Catalog
@@ -968,34 +1176,220 @@
 
     // 5. Devotees
     function renderDevoteesDirectory(root) {
-      const users = S.users;
+      let users = S.users || [];
+      if (SEARCH_QUERY) {
+        const q = SEARCH_QUERY.toLowerCase();
+        users = users.filter(u => (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.phone || '').includes(q) || (u.district || '').toLowerCase().includes(q) || (u.state || '').toLowerCase().includes(q));
+      }
+      const visibleUserIds = users.map(u => u._id || u.email);
+      const allUsersSelected = visibleUserIds.length > 0 && visibleUserIds.every(id => SELECTED.users.has(id));
+
       root.innerHTML = `
         <div class="admin-panel">
           <div class="admin-panel-head">
-            <h3><span class="material-icons" style="color:var(--admin-gold)">group</span> Registered Devotees (${users.length})</h3>
+            <div>
+              <h3><span class="material-icons" style="color:var(--admin-gold)">group</span> Registered Devotees (${users.length})</h3>
+              <p class="muted" style="font-size:12.5px;margin:4px 0 0">Devotee customer accounts with Rebook ceremony, access status, and deletion management</p>
+            </div>
+            <div class="search-box">
+              <span class="material-icons">search</span>
+              <input type="text" placeholder="Search devotees..." value="${esc(SEARCH_QUERY)}" oninput="SEARCH_QUERY=this.value; renderActiveTab();">
+            </div>
           </div>
+          ${getBulkBarHtml('users', 'Devotee', 'deleteSelectedDevotees')}
           ${users.length ? `
             <div class="table-responsive">
               <table class="admin-table">
                 <thead>
-                  <tr><th>Devotee Name</th><th>Email</th><th>Phone</th><th>State / District</th><th>Joined Date</th></tr>
+                  <tr>
+                    <th class="th-cb"><input type="checkbox" ${allUsersSelected ? 'checked' : ''} onchange="toggleSelectAll('users', this.checked, [${visibleUserIds.map(id => `'${esc(id)}'`).join(',')}])" title="Select All Devotees"></th>
+                    <th>Devotee Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>State / District</th>
+                    <th>Status</th>
+                    <th>Joined Date</th>
+                    <th>Actions</th>
+                  </tr>
                 </thead>
                 <tbody>
-                  ${users.map(u => `
-                    <tr>
-                      <td><b>${esc(u.name)}</b></td>
-                      <td>${esc(u.email)}</td>
-                      <td>📞 ${esc(u.phone || 'N/A')}</td>
-                      <td>${esc(u.district || u.city || '')}${u.state ? ', ' + esc(u.state) : ''}</td>
-                      <td>${new Date(u.createdAt).toLocaleDateString()}</td>
-                    </tr>
-                  `).join('')}
+                  ${users.map(u => {
+                    const id = u._id || u.email;
+                    const isRevoked = u.status === 'Revoked';
+                    return `
+                      <tr>
+                        <td class="td-cb"><input type="checkbox" ${SELECTED.users.has(id) ? 'checked' : ''} onchange="toggleSelectRow('users', '${esc(id)}', this.checked)"></td>
+                        <td><b>${esc(u.name)}</b></td>
+                        <td>${esc(u.email)}</td>
+                        <td>📞 ${esc(u.phone || 'N/A')}</td>
+                        <td>${esc(u.district || u.city || '')}${u.state ? ', ' + esc(u.state) : ''}</td>
+                        <td>
+                          ${isRevoked ?
+                            '<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a">Revoked</span>' :
+                            '<span class="badge green">Active Devotee</span>'}
+                        </td>
+                        <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'N/A'}</td>
+                        <td>
+                          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                            <button class="btn btn-gold btn-sm" onclick="openDevoteeRebookModal('${esc(u.email)}', '${esc(u.name)}', '${esc(u.phone || '')}', '${esc(u.district || '')}', '${esc(u.state || '')}')" title="Book/Rebook Puja Ceremony for Devotee">
+                              <span class="material-icons" style="font-size:13px;vertical-align:middle">event_repeat</span> Rebook
+                            </button>
+                            ${isRevoked ? `
+                              <button class="btn btn-green btn-sm" onclick="setDevoteeStatus('${esc(id)}', 'Active')" title="Restore Devotee Access">
+                                <span class="material-icons" style="font-size:13px;vertical-align:middle">check_circle</span> Active
+                              </button>
+                            ` : `
+                              <button class="btn btn-outline dark btn-sm" onclick="setDevoteeStatus('${esc(id)}', 'Revoked')" title="Revoke Devotee Access">
+                                <span class="material-icons" style="font-size:13px;vertical-align:middle">block</span> Revoke
+                              </button>
+                            `}
+                            <button class="btn btn-red btn-sm" onclick="deleteDevotee('${esc(id)}', '${esc(u.name)}')" title="Delete Devotee Account">
+                              <span class="material-icons" style="font-size:13px;vertical-align:middle">delete</span> Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
                 </tbody>
               </table>
             </div>
           ` : '<div class="empty">No devotees registered yet.</div>'}
         </div>
       `;
+    }
+
+    async function deleteDevotee(id, name) {
+      if (!confirm(`Are you sure you want to permanently delete Devotee account for ${name || 'this user'}? This cannot be undone.`)) return;
+      try {
+        await api('/users/' + encodeURIComponent(id), { method: 'DELETE' });
+        S.users = (S.users || []).filter(u => u._id !== id && u.email !== id);
+        SELECTED.users.delete(id);
+        toast(`Devotee ${name || id} deleted successfully`);
+        renderKpis();
+        renderActiveTab();
+      } catch (e) {
+        toast('Error deleting devotee: ' + e.message, true);
+      }
+    }
+
+    async function deleteSelectedDevotees() {
+      const ids = Array.from(SELECTED.users);
+      if (!ids.length) return;
+      if (!confirm(`Are you sure you want to delete ${ids.length} selected devotee account(s)? This cannot be undone.`)) return;
+      try {
+        const res = await api('/users/bulk-delete', { method: 'POST', body: { ids } });
+        const idSet = new Set(ids);
+        S.users = (S.users || []).filter(u => !idSet.has(u._id) && !idSet.has(u.email));
+        SELECTED.users.clear();
+        toast(`${res.count || ids.length} Devotee(s) deleted successfully`);
+        renderKpis();
+        renderActiveTab();
+      } catch (e) {
+        toast('Error in bulk delete: ' + e.message, true);
+      }
+    }
+
+    async function setDevoteeStatus(id, status) {
+      try {
+        await api('/users/' + encodeURIComponent(id) + '/status', { method: 'PUT', body: { status } });
+        const u = (S.users || []).find(x => x._id === id || x.email === id);
+        if (u) u.status = status;
+        toast(`Devotee status updated to ${status}`);
+        renderActiveTab();
+      } catch (e) {
+        toast('Error updating devotee status: ' + e.message, true);
+      }
+    }
+
+    function openDevoteeRebookModal(email, name, phone, district, state) {
+      const allShortPujas = (S.pujas || []).filter(p => p.type === 'Short').map(p => p.name);
+      const eligiblePandits = (S.adminPandits || []).filter(p => p.verified && (!district || (p.workingDistricts || []).includes(district) || p.district === district));
+
+      openModal(`Book / Rebook Ceremony for ${name}`, `
+        <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:10px;padding:14px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="material-icons" style="color:var(--admin-gold);font-size:26px">event_repeat</span>
+            <div>
+              <h4 style="margin:0;color:var(--admin-dark)">Devotee Rebook &amp; Ceremony Scheduling</h4>
+              <span class="muted" style="font-size:12.5px">${esc(name)} · ${esc(email)} · 📞 ${esc(phone || 'N/A')} · ${esc(district || '')}${state ? ', ' + esc(state) : ''}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-grid" style="padding:0">
+          <div>
+            <label>Puja / Sacred Ritual *</label>
+            <select id="rb-service">
+              ${(allShortPujas.length ? allShortPujas : ['Satyanarayan Puja', 'Griha Pravesh', 'Ganesh Puja', 'Rudrabhishek']).map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label>Ceremony District *</label>
+            <input id="rb-district" value="${esc(district || 'Khordha')}" placeholder="District">
+          </div>
+          <div>
+            <label>Ceremony Date *</label>
+            <input type="date" id="rb-date" value="${new Date().toISOString().split('T')[0]}">
+          </div>
+          <div>
+            <label>Ceremony Time Slot *</label>
+            <select id="rb-time">
+              <option value="08:00 AM - 11:00 AM">08:00 AM - 11:00 AM (Morning)</option>
+              <option value="11:30 AM - 02:30 PM">11:30 AM - 02:30 PM (Midday)</option>
+              <option value="04:00 PM - 07:00 PM">04:00 PM - 07:00 PM (Evening)</option>
+            </select>
+          </div>
+          <div class="full">
+            <label>Assign Pandit (Optional)</label>
+            <select id="rb-pandit">
+              <option value="">✨ Any Available Verified Pandit (Auto-assigned)</option>
+              ${eligiblePandits.map(p => `<option value="${esc(p.email)}">Pt. ${esc(p.name)} (${esc(p.district)}) — Dakshina: ${inr(p.fee)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="full">
+            <label>Ceremony Venue / Address *</label>
+            <textarea id="rb-address" rows="2" placeholder="Full address / house number">${esc(district || '')}${state ? ', ' + esc(state) : ''}</textarea>
+          </div>
+        </div>
+        <button class="btn btn-gold" id="btn-submit-rebook" style="margin-top:16px;width:100%">
+          <span class="material-icons">send</span> Confirm &amp; Schedule Ceremony
+        </button>
+      `, (m) => {
+        document.getElementById('btn-submit-rebook').onclick = async () => {
+          const service = document.getElementById('rb-service').value;
+          const dist = document.getElementById('rb-district').value.trim();
+          const date = document.getElementById('rb-date').value;
+          const time = document.getElementById('rb-time').value;
+          const pEmail = document.getElementById('rb-pandit').value;
+          const address = document.getElementById('rb-address').value.trim();
+
+          if (!service || !dist || !date) return toast('Please fill required fields (Puja, District, Date)', true);
+
+          try {
+            const newBooking = await api('/bookings', {
+              method: 'POST',
+              body: {
+                userEmail: email,
+                userName: name,
+                phone: phone,
+                service,
+                district: dist,
+                date,
+                time,
+                address,
+                panditEmail: pEmail
+              }
+            });
+            closeModal();
+            toast(`Ceremony booked successfully! Booking ID: ${newBooking.bookingId || newBooking._id}`);
+            await loadData();
+            switchAdminTab('bookings');
+          } catch (err) {
+            toast('Booking failed: ' + err.message, true);
+          }
+        };
+      });
     }
 
     function viewPanditModal(id) {
@@ -1543,11 +1937,16 @@
             if (!list.length) {
               return `<div class="empty" style="padding:40px 20px">No payments found in this category.</div>`;
             }
+            const visiblePaymentIds = list.map(b => b.bookingId);
+            const allPaymentsSelected = visiblePaymentIds.length > 0 && visiblePaymentIds.every(id => SELECTED.payments.has(id));
+
             return `
+              ${getBulkBarHtml('payments', 'Payment Record', 'deleteSelectedPayments')}
               <div class="table-responsive">
                 <table class="admin-table">
                   <thead>
                     <tr>
+                      <th class="th-cb"><input type="checkbox" ${allPaymentsSelected ? 'checked' : ''} onchange="toggleSelectAll('payments', this.checked, [${visiblePaymentIds.map(id => `'${esc(id)}'`).join(',')}])" title="Select All Payments"></th>
                       <th>Booking ID / Date</th>
                       <th>Devotee Details</th>
                       <th>Assigned Pandit</th>
@@ -1564,6 +1963,7 @@
                       const isRejected = b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected';
                       return `
                         <tr>
+                          <td class="td-cb"><input type="checkbox" ${SELECTED.payments.has(b.bookingId) ? 'checked' : ''} onchange="toggleSelectRow('payments', '${esc(b.bookingId)}', this.checked)"></td>
                           <td>
                             <b>${esc(b.bookingId)}</b><br>
                             <small class="muted">${esc(b.date)} (${esc(b.time || '10:00 AM')})</small><br>
@@ -1614,6 +2014,9 @@
                                   <span class="material-icons" style="font-size:14px">refresh</span> Re-verify / Approve
                                 </button>
                               ` : ''}
+                              <button class="btn btn-red btn-sm" onclick="deleteBookingPayment('${esc(b.bookingId)}')" title="Delete Payment Record">
+                                <span class="material-icons" style="font-size:14px">delete</span> Delete
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1626,6 +2029,39 @@
           })()}
         </div>
       `;
+    }
+
+    async function deleteBookingPayment(bookingId) {
+      if (!confirm(`Are you sure you want to delete payment record for booking ${bookingId}? This will remove the booking and its payment verification record.`)) return;
+      try {
+        await api('/bookings/' + encodeURIComponent(bookingId), { method: 'DELETE' });
+        S.bookings = (S.bookings || []).filter(x => x.bookingId !== bookingId && x._id !== bookingId);
+        SELECTED.payments.delete(bookingId);
+        SELECTED.bookings.delete(bookingId);
+        toast(`Payment record for booking ${bookingId} deleted successfully`);
+        renderKpis();
+        renderActiveTab();
+      } catch (e) {
+        toast('Error deleting payment record: ' + e.message, true);
+      }
+    }
+
+    async function deleteSelectedPayments() {
+      const ids = Array.from(SELECTED.payments);
+      if (!ids.length) return;
+      if (!confirm(`Are you sure you want to delete ${ids.length} selected payment record(s)? This will also remove the corresponding bookings.`)) return;
+      try {
+        const res = await api('/bookings/bulk-delete', { method: 'POST', body: { ids } });
+        const idSet = new Set(ids);
+        S.bookings = (S.bookings || []).filter(b => !idSet.has(b.bookingId) && !idSet.has(b._id));
+        SELECTED.payments.clear();
+        ids.forEach(id => SELECTED.bookings.delete(id));
+        toast(`${res.count || ids.length} payment record(s) deleted successfully`);
+        renderKpis();
+        renderActiveTab();
+      } catch (e) {
+        toast('Error in bulk delete: ' + e.message, true);
+      }
     }
 
     // 7. Pandit Payments Section
@@ -1670,6 +2106,9 @@
               <p class="muted" style="margin:4px 0 0;font-size:12.5px">Platform commission split &amp; direct Dakshina payouts to Pandits who performed rituals for devotees</p>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-gold btn-sm" onclick="printPanditPayoutsReport()" title="Print full payout statement without cutoff">
+                <span class="material-icons" style="font-size:15px">print</span> Print Payout Statement
+              </button>
               ${pending.length ? `<span class="badge red">${pending.length} pending payout</span>` : '<span class="badge green">All payouts settled</span>'}
               <span class="badge">${eligible.length} eligible ceremonies</span>
             </div>
@@ -1743,7 +2182,10 @@
                 All Eligible Pujas (${eligible.length})
               </button>
             </div>
-            <div style="display:flex;align-items:center;gap:6px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-gold btn-sm" onclick="printPanditPayoutsReport()" title="Print full statement without cutoff">
+                <span class="material-icons" style="font-size:15px">print</span> Print Statement
+              </button>
               <input type="text" id="pandit-payout-search-input" value="${esc(PANDIT_PAYOUT_SEARCH)}" placeholder="Search booking, devotee, pandit..." style="font-size:12.5px;padding:6px 10px;border-radius:6px;border:1px solid #ebd9c2;min-width:220px">
               ${PANDIT_PAYOUT_SEARCH ? `<button class="btn btn-outline dark btn-sm" onclick="PANDIT_PAYOUT_SEARCH='';renderPanditPaymentsSection(document.getElementById('admin-view-root'))">Clear</button>` : ''}
             </div>
@@ -1767,7 +2209,7 @@
                       <th style="min-width:210px">Pandit Bank &amp; UPI QR Account</th>
                       <th style="min-width:160px">Dakshina &amp; Platform Split</th>
                       <th style="min-width:130px">Payout Status</th>
-                      <th style="min-width:120px;text-align:right">Action</th>
+                      <th style="min-width:140px;text-align:right">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1873,15 +2315,20 @@
                             `}
                           </td>
                           <td style="text-align:right">
-                            ${!isPaid ? `
-                              <button class="btn btn-green btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}')">
-                                <span class="material-icons" style="font-size:14px">payments</span> Pay Dakshina
+                            <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
+                              ${!isPaid ? `
+                                <button class="btn btn-green btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}')">
+                                  <span class="material-icons" style="font-size:14px">payments</span> Pay Dakshina
+                                </button>
+                              ` : `
+                                <button class="btn btn-outline dark btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}', true)">
+                                  <span class="material-icons" style="font-size:14px">receipt</span> View / Re-send
+                                </button>
+                              `}
+                              <button class="btn btn-outline dark btn-sm" onclick="printSinglePanditPayout('${esc(b.bookingId)}')" title="Print Payout Voucher for this Ceremony">
+                                <span class="material-icons" style="font-size:14px">print</span>
                               </button>
-                            ` : `
-                              <button class="btn btn-outline dark btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}', true)">
-                                <span class="material-icons" style="font-size:14px">receipt</span> View / Re-send
-                              </button>
-                            `}
+                            </div>
                           </td>
                         </tr>
                       `;
@@ -1960,6 +2407,517 @@
           btn.innerHTML = '<span class="material-icons" style="font-size:16px">check_circle</span> Save &amp; Apply % to All Payments';
         }
       }
+    };
+
+    // Print all Pandit Payout records full-width in landscape with zero cut-off
+    window.printPanditPayoutsReport = function() {
+      const allBookings = S.bookings || [];
+      const eligible = allBookings.filter(b => b.panditEmail && (b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' || ['Completed', 'Confirmed', 'In Progress'].includes(b.status)));
+      const pending = eligible.filter(b => b.panditPayoutStatus !== 'Paid');
+      const paid = eligible.filter(b => b.panditPayoutStatus === 'Paid');
+
+      let list = PANDIT_PAYOUT_FILTER === 'pending' ? pending :
+                 PANDIT_PAYOUT_FILTER === 'paid' ? paid : eligible;
+
+      if (PANDIT_PAYOUT_SEARCH) {
+        const q = PANDIT_PAYOUT_SEARCH.toLowerCase();
+        list = list.filter(b => 
+          (b.bookingId || '').toLowerCase().includes(q) ||
+          (b.userName || '').toLowerCase().includes(q) ||
+          (b.userEmail || '').toLowerCase().includes(q) ||
+          (b.phone || '').toLowerCase().includes(q) ||
+          (b.panditName || '').toLowerCase().includes(q) ||
+          (b.panditEmail || '').toLowerCase().includes(q) ||
+          (b.service || '').toLowerCase().includes(q)
+        );
+      }
+
+      if (!list.length) {
+        return toast('No records to print in the current view', true);
+      }
+
+      let totalDakshina = 0;
+      let totalAdminFee = 0;
+      let totalPanditPayout = 0;
+      let paidCount = 0;
+      let pendingCount = 0;
+
+      const rowsHtml = list.map((b, idx) => {
+        const p = (S.adminPandits || []).find(x => (x.email || '').toLowerCase() === (b.panditEmail || '').toLowerCase());
+        const isPaid = b.panditPayoutStatus === 'Paid';
+        if (isPaid) paidCount++; else pendingCount++;
+
+        const mainFee = Number(b.fee) || 1500;
+        const feePct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : (S.commissionPercent ?? 10));
+        const adminFeeAmount = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((mainFee * feePct) / 100));
+        const netDakshina = Number(b.panditNetPayout !== undefined && b.panditNetPayout > 0 ? b.panditNetPayout : (b.panditPayoutAmount || Math.max(0, mainFee - adminFeeAmount)));
+
+        totalDakshina += mainFee;
+        totalAdminFee += adminFeeAmount;
+        totalPanditPayout += netDakshina;
+
+        const bankDetails = p && p.bankAccount ? `
+          <strong>${esc(p.bankName || 'Registered Bank')}</strong><br>
+          A/C: <span style="font-family:monospace;font-weight:700">${esc(p.bankAccount)}</span><br>
+          IFSC: <span style="font-family:monospace">${esc(p.ifscCode || 'N/A')}</span><br>
+          Holder: ${esc(p.accountHolder || p.name)}
+          ${p.upiId ? `<br>UPI: <span style="font-family:monospace">${esc(p.upiId)}</span>` : ''}
+        ` : '<span style="color:#c62828;font-weight:bold">⚠️ No Bank Info Provided</span>';
+
+        return `
+          <tr>
+            <td style="text-align:center;font-weight:600">${idx + 1}</td>
+            <td>
+              <strong>${esc(b.bookingId)}</strong><br>
+              <small>${esc(b.date)} (${esc(b.time || '10:00 AM')})</small><br>
+              <span style="font-size:10px;color:#8a5d3b">Venue: ${esc(b.address || b.district || 'N/A')}</span>
+            </td>
+            <td>
+              <strong style="color:#6d2c08">${esc(b.service)}</strong><br>
+              <small>District: ${esc(b.district || 'N/A')}</small>
+            </td>
+            <td>
+              <strong>${esc(b.userName)}</strong><br>
+              <small>📞 ${esc(b.phone || b.userPhone || 'N/A')}</small><br>
+              <small>${esc(b.userEmail)}</small>
+            </td>
+            <td>
+              <strong>${esc(b.panditName)}</strong><br>
+              <small>📞 ${esc(p ? p.phone : 'N/A')}</small><br>
+              <small>${esc(b.panditEmail)}</small><br>
+              <small style="color:${p && p.verified ? '#2e7d32' : '#c62828'}">${p && p.verified ? 'Verified Purohit' : 'Pending Verification'}</small>
+            </td>
+            <td style="font-size:11px;line-height:1.4">
+              ${bankDetails}
+            </td>
+            <td style="text-align:right;white-space:nowrap">
+              <strong>₹${mainFee.toLocaleString('en-IN')}</strong><br>
+              <small style="color:${b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' ? '#2e7d32' : '#c62828'}">${esc(b.paymentStatus || 'Pending')}</small>
+            </td>
+            <td style="text-align:right;color:#8a1f11;white-space:nowrap">
+              -₹${adminFeeAmount.toLocaleString('en-IN')}<br>
+              <small>(${feePct}%)</small>
+            </td>
+            <td style="text-align:right;color:#1b5e20;font-weight:bold;font-size:12.5px;white-space:nowrap">
+              ₹${netDakshina.toLocaleString('en-IN')}
+            </td>
+            <td style="text-align:center;font-size:10.5px">
+              ${isPaid ?
+                `<span style="color:#1b5e20;font-weight:bold">PAID &amp; TRANSFERRED</span><br><code style="font-size:10px">${esc(b.panditPayoutTxnId || 'Direct')}</code>${b.panditPayoutDate ? `<br><small>${new Date(b.panditPayoutDate).toLocaleDateString('en-IN')}</small>` : ''}` :
+                `<span style="color:#c62828;font-weight:bold">PENDING PAYOUT</span><br><small>Due: ₹${netDakshina.toLocaleString('en-IN')}</small>`}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      const printWin = window.open('', '_blank', 'width=1280,height=850');
+      if (!printWin) {
+        return alert('Please allow popups to open the Pandit Payout Statement for printing.');
+      }
+
+      printWin.document.open();
+      printWin.document.write(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <title>PujaConnect - Pandit Payment &amp; Dakshina Payout Statement</title>
+          <style>
+            @page {
+              size: landscape;
+              margin: 8mm 6mm 8mm 6mm;
+            }
+            * {
+              box-sizing: border-box;
+            }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+              color: #1a1a1a;
+              background: #fff;
+              margin: 0;
+              padding: 16px;
+              font-size: 11px;
+              line-height: 1.35;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              border-bottom: 2.5px solid #8a5d3b;
+              padding-bottom: 12px;
+              margin-bottom: 14px;
+            }
+            .brand {
+              display: flex;
+              align-items: center;
+              gap: 10px;
+            }
+            .brand-om {
+              font-size: 30px;
+              color: #d99a19;
+              font-weight: bold;
+              line-height: 1;
+            }
+            .brand-title {
+              font-size: 20px;
+              font-weight: 800;
+              color: #3b1c09;
+              letter-spacing: -0.3px;
+            }
+            .brand-sub {
+              font-size: 11px;
+              color: #7a5840;
+              margin-top: 3px;
+            }
+            .meta {
+              text-align: right;
+              font-size: 11px;
+              color: #555;
+            }
+            .meta strong {
+              color: #111;
+            }
+            .summary-cards {
+              display: grid;
+              grid-template-columns: repeat(5, 1fr);
+              gap: 10px;
+              margin-bottom: 14px;
+            }
+            .summary-card {
+              border: 1px solid #d4c2b0;
+              border-radius: 6px;
+              padding: 8px 10px;
+              background: #faf6f0;
+            }
+            .summary-card .title {
+              font-size: 10px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              color: #7a5840;
+              font-weight: 600;
+            }
+            .summary-card .value {
+              font-size: 15px;
+              font-weight: 800;
+              color: #2c1608;
+              margin-top: 3px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 6px;
+              page-break-inside: auto;
+            }
+            tr {
+              page-break-inside: avoid;
+              page-break-after: auto;
+            }
+            th, td {
+              border: 1px solid #c9b49f;
+              padding: 6px 7px;
+              text-align: left;
+              vertical-align: top;
+              word-break: break-word;
+            }
+            th {
+              background: #f0e6d6 !important;
+              color: #331705;
+              font-size: 10px;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 0.3px;
+            }
+            tbody tr:nth-child(even) {
+              background: #faf7f2;
+            }
+            .footer-notes {
+              margin-top: 18px;
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+              border-top: 1px solid #d4c2b0;
+              padding-top: 14px;
+              page-break-inside: avoid;
+            }
+            .stamp-box {
+              border: 1.5px dashed #8a5d3b;
+              padding: 8px 16px;
+              border-radius: 6px;
+              font-size: 11px;
+              color: #664326;
+            }
+            .sig-line {
+              width: 220px;
+              border-top: 1px solid #333;
+              margin-top: 40px;
+              text-align: center;
+              font-size: 11px;
+              color: #444;
+            }
+            .print-btn-bar {
+              margin-bottom: 14px;
+              display: flex;
+              gap: 10px;
+            }
+            .print-btn {
+              background: #d99a19;
+              color: #fff;
+              border: none;
+              padding: 8px 16px;
+              border-radius: 6px;
+              font-weight: 700;
+              cursor: pointer;
+              font-size: 13px;
+            }
+            .close-btn {
+              background: #555;
+              color: #fff;
+              border: none;
+              padding: 8px 16px;
+              border-radius: 6px;
+              font-weight: 600;
+              cursor: pointer;
+              font-size: 13px;
+            }
+            @media print {
+              .print-btn-bar {
+                display: none !important;
+              }
+              body {
+                padding: 0 !important;
+              }
+              table {
+                width: 100% !important;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="print-btn-bar">
+            <button class="print-btn" onclick="window.print()">🖨️ Print Payout Statement (Landscape)</button>
+            <button class="close-btn" onclick="window.close()">Close Window</button>
+          </div>
+
+          <div class="header">
+            <div class="brand">
+              <span class="brand-om">ॐ</span>
+              <div>
+                <div class="brand-title">PujaConnect — Pandit Payment Management &amp; Payout Statement</div>
+                <div class="brand-sub">Centralized Vedic Purohit Dakshina Disbursements &amp; Platform Fee Ledger</div>
+              </div>
+            </div>
+            <div class="meta">
+              <div>Generated: <strong>${new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</strong></div>
+              <div>Report Filter: <strong>${PANDIT_PAYOUT_FILTER.toUpperCase()} (${list.length} Records)</strong></div>
+              <div>Active Platform Fee: <strong>${S.commissionPercent ?? 10}%</strong></div>
+            </div>
+          </div>
+
+          <div class="summary-cards">
+            <div class="summary-card">
+              <div class="title">Total Ceremonies</div>
+              <div class="value">${list.length}</div>
+            </div>
+            <div class="summary-card">
+              <div class="title">Gross Devotee Dakshina</div>
+              <div class="value">₹${totalDakshina.toLocaleString('en-IN')}</div>
+            </div>
+            <div class="summary-card">
+              <div class="title">Admin Platform Charges</div>
+              <div class="value" style="color:#8a1f11">₹${totalAdminFee.toLocaleString('en-IN')}</div>
+            </div>
+            <div class="summary-card">
+              <div class="title">Total Pandit Net Payouts</div>
+              <div class="value" style="color:#1b5e20">₹${totalPanditPayout.toLocaleString('en-IN')}</div>
+            </div>
+            <div class="summary-card">
+              <div class="title">Settlement Breakdown</div>
+              <div class="value" style="font-size:12.5px;margin-top:5px">
+                <span style="color:#1b5e20">Paid: ${paidCount}</span> · <span style="color:#c62828">Pending: ${pendingCount}</span>
+              </div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width:28px;text-align:center">#</th>
+                <th style="width:120px">Booking ID &amp; Schedule</th>
+                <th style="width:120px">Ceremony / Ritual</th>
+                <th style="width:140px">Devotee (Customer)</th>
+                <th style="width:130px">Assigned Pandit</th>
+                <th>Pandit Bank &amp; UPI Account</th>
+                <th style="width:90px;text-align:right">Total Dakshina</th>
+                <th style="width:80px;text-align:right">Admin Cut</th>
+                <th style="width:95px;text-align:right">Pay to Pandit</th>
+                <th style="width:115px;text-align:center">Payout Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+            <tfoot>
+              <tr style="background:#f0e6d6;font-weight:bold">
+                <td colspan="6" style="text-align:right;font-size:11.5px">TOTALS:</td>
+                <td style="text-align:right;font-size:11.5px">₹${totalDakshina.toLocaleString('en-IN')}</td>
+                <td style="text-align:right;font-size:11.5px;color:#8a1f11">-₹${totalAdminFee.toLocaleString('en-IN')}</td>
+                <td style="text-align:right;font-size:12px;color:#1b5e20">₹${totalPanditPayout.toLocaleString('en-IN')}</td>
+                <td style="text-align:center;font-size:10.5px">${paidCount} Settled / ${pendingCount} Due</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div class="footer-notes">
+            <div class="stamp-box">
+              <strong>Official Audit Note:</strong><br>
+              Verified against central platform records.<br>
+              All Dakshina payouts disbursed via NEFT/RTGS/IMPS/UPI.
+            </div>
+            <div class="sig-line">
+              Authorized Signatory / Accounts Desk<br>
+              PujaConnect Administration
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
+      printWin.document.close();
+      setTimeout(() => {
+        try {
+          printWin.focus();
+        } catch (_) {}
+      }, 300);
+    };
+
+    // Print individual ceremony payout voucher
+    window.printSinglePanditPayout = function(bookingId) {
+      const b = (S.bookings || []).find(x => x.bookingId === bookingId);
+      if (!b) return toast('Booking not found', true);
+
+      const p = (S.adminPandits || []).find(x => (x.email || '').toLowerCase() === (b.panditEmail || '').toLowerCase());
+      const isPaid = b.panditPayoutStatus === 'Paid';
+
+      const mainFee = Number(b.fee) || 1500;
+      const feePct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : (S.commissionPercent ?? 10));
+      const adminFeeAmount = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((mainFee * feePct) / 100));
+      const netDakshina = Number(b.panditNetPayout !== undefined && b.panditNetPayout > 0 ? b.panditNetPayout : (b.panditPayoutAmount || Math.max(0, mainFee - adminFeeAmount)));
+
+      const printWin = window.open('', '_blank', 'width=900,height=800');
+      if (!printWin) return alert('Please allow popups to print payout voucher.');
+
+      printWin.document.open();
+      printWin.document.write(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <title>Pandit Payout Voucher – ${esc(b.bookingId)}</title>
+          <style>
+            @page { size: portrait; margin: 12mm; }
+            * { box-sizing: border-box; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 20px; color: #222; font-size: 13px; line-height: 1.5; }
+            .head { display: flex; justify-content: space-between; border-bottom: 2px solid #8a5d3b; padding-bottom: 12px; margin-bottom: 18px; }
+            .brand-title { font-size: 22px; font-weight: 800; color: #3b1c09; }
+            .box { border: 1px solid #ebd9c2; border-radius: 8px; padding: 14px; background: #fffcf7; margin-bottom: 16px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; }
+            th { background: #f5ede1; }
+            .print-btn-bar { margin-bottom: 16px; display: flex; gap: 10px; }
+            .print-btn { background: #d99a19; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; }
+            @media print { .print-btn-bar { display: none !important; } body { padding: 0 !important; } }
+          </style>
+        </head>
+        <body>
+          <div class="print-btn-bar">
+            <button class="print-btn" onclick="window.print()">🖨️ Print Voucher</button>
+            <button onclick="window.close()" style="padding:8px 16px;border-radius:6px;cursor:pointer">Close</button>
+          </div>
+
+          <div class="head">
+            <div>
+              <div class="brand-title">ॐ PujaConnect</div>
+              <div style="font-size:12px;color:#7a5840">Pandit Dakshina Disbursement Voucher &amp; Settlement Receipt</div>
+            </div>
+            <div style="text-align:right">
+              <div>Voucher ID: <strong>VOUCH-${esc(b.bookingId.replace(/[^0-9]/g, ''))}</strong></div>
+              <div>Date: <strong>${new Date().toLocaleDateString('en-IN')}</strong></div>
+            </div>
+          </div>
+
+          <div class="box">
+            <h4 style="margin:0 0 10px;color:#3b1c09">Ceremony &amp; Devotee Information</h4>
+            <div class="grid">
+              <div>Booking ID: <strong>${esc(b.bookingId)}</strong></div>
+              <div>Puja Service: <strong>${esc(b.service)}</strong></div>
+              <div>Devotee Name: <strong>${esc(b.userName)}</strong></div>
+              <div>Devotee Phone: <strong>${esc(b.phone || b.userPhone || 'N/A')}</strong></div>
+              <div>Ceremony Date &amp; Time: <strong>${esc(b.date)} (${esc(b.time || '10:00 AM')})</strong></div>
+              <div>Venue / District: <strong>${esc(b.address || b.district || 'N/A')}</strong></div>
+            </div>
+          </div>
+
+          <div class="box">
+            <h4 style="margin:0 0 10px;color:#3b1c09">Assigned Pandit &amp; Bank Account Details</h4>
+            <div class="grid">
+              <div>Pandit Name: <strong>${esc(b.panditName)}</strong></div>
+              <div>Pandit Phone: <strong>${esc(p ? p.phone : 'N/A')}</strong></div>
+              <div>Bank Name: <strong>${esc(p && p.bankName ? p.bankName : 'Registered Bank')}</strong></div>
+              <div>Account Holder: <strong>${esc(p && p.accountHolder ? p.accountHolder : b.panditName)}</strong></div>
+              <div>Account Number: <strong style="font-family:monospace">${esc(p && p.bankAccount ? p.bankAccount : 'N/A')}</strong></div>
+              <div>IFSC Code: <strong style="font-family:monospace">${esc(p && p.ifscCode ? p.ifscCode : 'N/A')}</strong></div>
+              ${p && p.upiId ? `<div>UPI ID: <strong>${esc(p.upiId)}</strong></div>` : ''}
+            </div>
+          </div>
+
+          <div class="box">
+            <h4 style="margin:0 0 10px;color:#3b1c09">Financial Breakdown</h4>
+            <table>
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th style="text-align:right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Total Ceremony Dakshina (Paid by Devotee)</td>
+                  <td style="text-align:right">₹${mainFee.toLocaleString('en-IN')}</td>
+                </tr>
+                <tr>
+                  <td>Admin Platform Coordination Fee (${feePct}%)</td>
+                  <td style="text-align:right;color:#8a1f11">-₹${adminFeeAmount.toLocaleString('en-IN')}</td>
+                </tr>
+                <tr style="background:#f0fff4;font-weight:bold;font-size:14px">
+                  <td>Net Dakshina Payable to Pandit</td>
+                  <td style="text-align:right;color:#1b5e20">₹${netDakshina.toLocaleString('en-IN')}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div style="margin-top:12px;font-size:12px">
+              Payout Status: <strong>${isPaid ? 'PAID &amp; TRANSFERRED ✅' : 'PENDING DISBURSEMENT'}</strong><br>
+              ${b.panditPayoutTxnId ? `Transaction Ref / UTR: <code>${esc(b.panditPayoutTxnId)}</code><br>` : ''}
+              ${b.panditPayoutDate ? `Settlement Date: <strong>${new Date(b.panditPayoutDate).toLocaleDateString('en-IN')}</strong>` : ''}
+            </div>
+          </div>
+
+          <div style="margin-top:40px;display:flex;justify-content:space-between">
+            <div style="width:200px;border-top:1px solid #333;text-align:center;padding-top:4px">
+              Pandit Signature
+            </div>
+            <div style="width:200px;border-top:1px solid #333;text-align:center;padding-top:4px">
+              Authorized Signatory
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
+      printWin.document.close();
+      setTimeout(() => {
+        try {
+          printWin.focus();
+        } catch (_) {}
+      }, 300);
     };
 
     // Lightbox modal to view Pandit QR code in high definition for scanning
