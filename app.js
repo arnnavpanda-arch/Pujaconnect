@@ -359,45 +359,86 @@ app.post('/api/pandits/register', wrap(async (req, res) => {
   res.status(201).json(pandit);
 }));
 
-// Automatically notify devotees who were waiting for pandits in a newly covered district
-async function notifyDevoteesForDistricts(districts = [], state = '') {
+// Devotee dashboard records that this user is currently viewing the 404 error page and subscribed for updates
+app.post('/api/region-notifications/subscribe-404', wrap(async (req, res) => {
+  const { email, district, state } = req.body || {};
+  const target = district || state;
+  if (!email || !target) return res.status(400).json({ error: 'Email and district/location required' });
+  const e = lc(email);
+  const distKey = String(target).trim().toLowerCase();
+
+  await User.updateOne(
+    { email: e },
+    {
+      $addToSet: { waiting404Districts: distKey },
+      $set: { is404Waiting: true }
+    }
+  );
+
+  res.json({ ok: true, subscribed: true, district: distKey, email: e });
+}));
+
+// Automatically notify ONLY devotees who hit the 404 error page when admin sets the district-wise amount
+async function notify404DevoteesForDistricts(districts = [], state = '') {
   if (!Array.isArray(districts) || !districts.length) return;
   const uniqueDistricts = [...new Set(districts.map(d => String(d).trim()).filter(Boolean))];
 
   for (const dist of uniqueDistricts) {
-    // Check if there is at least one active, verified pandit for this district
-    const count = await Pandit.countDocuments({
+    const distKey = dist.toLowerCase();
+
+    // Check if there is at least one active, verified pandit for this district who has admin-set district dakshina rates
+    const verifiedPanditsInDist = await Pandit.find({
       status: 'Verified',
       $or: [
         { district: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
         { workingDistricts: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }
       ]
+    }).lean();
+
+    // Ensure the admin has actually fixed/set the district-wise amount for this district
+    const panditWithPrice = verifiedPanditsInDist.find(p => {
+      if (p.districtPrices && typeof p.districtPrices === 'object') {
+        const priceKey = Object.keys(p.districtPrices).find(k => k.trim().toLowerCase() === distKey);
+        if (priceKey && Number(p.districtPrices[priceKey]) > 0) return true;
+      }
+      return false;
     });
 
-    if (count > 0) {
-      // Find all devotees registered in this district who haven't received notification for this district yet
-      const devotees = await User.find({
+    // Send emails ONLY after the admin has set the district-wise amount!
+    if (panditWithPrice) {
+      const priceKey = Object.keys(panditWithPrice.districtPrices || {}).find(k => k.trim().toLowerCase() === distKey);
+      const districtFee = priceKey ? Number(panditWithPrice.districtPrices[priceKey]) : (panditWithPrice.fee || 1500);
+
+      // Query ONLY devotees who encountered the 404 error page (subscribed in waiting404Districts)
+      // NOT every registered user!
+      const waitingDevotees = await User.find({
         role: { $ne: 'pandit' },
-        district: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')
+        waiting404Districts: distKey
       });
 
-      for (const devotee of devotees) {
-        const notifiedList = Array.isArray(devotee.serviceNotifiedDistricts) ? devotee.serviceNotifiedDistricts : [];
-        const distKey = dist.toLowerCase();
-        if (!notifiedList.includes(distKey)) {
-          // Send automatic notification email
-          await sendSafe('REGION_SERVICE_AVAILABLE', devotee.email, {
-            userName: devotee.name,
-            email: devotee.email,
-            district: dist,
-            state: devotee.state || state || 'India'
-          });
+      for (const devotee of waitingDevotees) {
+        // Send automatic notification email only to this 404 error page user
+        await sendSafe('REGION_SERVICE_AVAILABLE', devotee.email, {
+          userName: devotee.name,
+          email: devotee.email,
+          district: dist,
+          state: devotee.state || state || 'India',
+          fee: districtFee
+        });
 
-          // Mark as notified so they don't get duplicate emails
-          await User.updateOne(
-            { _id: devotee._id },
-            { $addToSet: { serviceNotifiedDistricts: distKey } }
-          );
+        // Pull district from 404 waiting list and mark as notified
+        const updatedUser = await User.findOneAndUpdate(
+          { _id: devotee._id },
+          {
+            $pull: { waiting404Districts: distKey },
+            $addToSet: { serviceNotifiedDistricts: distKey }
+          },
+          { new: true }
+        );
+
+        if (updatedUser && (!updatedUser.waiting404Districts || updatedUser.waiting404Districts.length === 0)) {
+          updatedUser.is404Waiting = false;
+          await updatedUser.save();
         }
       }
     }
@@ -410,6 +451,7 @@ async function cleanupDistrictsWithoutPandits(districts = []) {
   const uniqueDistricts = [...new Set(districts.map(d => String(d).trim()).filter(Boolean))];
 
   for (const dist of uniqueDistricts) {
+    const distKey = dist.toLowerCase();
     const count = await Pandit.countDocuments({
       status: 'Verified',
       $or: [
@@ -419,10 +461,10 @@ async function cleanupDistrictsWithoutPandits(districts = []) {
     });
 
     if (count === 0) {
-      // Clear notification flag for users in this district so if service returns later, they get notified again
+      // Clear notification flag for users who had been notified for this district
       await User.updateMany(
-        { district: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
-        { $pull: { serviceNotifiedDistricts: dist.toLowerCase() } }
+        { serviceNotifiedDistricts: distKey },
+        { $pull: { serviceNotifiedDistricts: distKey } }
       );
     }
   }
@@ -439,7 +481,7 @@ app.put('/api/pandits/:id/status', adminOnly, wrap(async (req, res) => {
 
   const covered = [p.district, ...(p.workingDistricts || [])].filter(Boolean);
   if (status === 'Verified') {
-    await notifyDevoteesForDistricts(covered, p.workingState || p.state);
+    await notify404DevoteesForDistricts(covered, p.workingState || p.state);
   } else {
     await cleanupDistrictsWithoutPandits(covered);
   }
@@ -470,7 +512,7 @@ app.put('/api/pandits/:id', wrap(async (req, res) => {
     const removedDistricts = oldDistricts.filter(d => !newDistricts.includes(d));
 
     if (p.status === 'Verified' || p.verified) {
-      await notifyDevoteesForDistricts(newDistricts, p.workingState || p.state);
+      await notify404DevoteesForDistricts(newDistricts, p.workingState || p.state);
     }
     if (removedDistricts.length) {
       await cleanupDistrictsWithoutPandits(removedDistricts);
@@ -692,11 +734,11 @@ app.put('/api/pandits/:id/district-prices', adminOnly, wrap(async (req, res) => 
   const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
 
-  // When admin sets district prices, notify devotees in those districts if pandit is verified
+  // When admin sets district prices, notify ONLY 404-error devotees waiting for those districts
   const pricedDistricts = Object.keys(districtPrices || {});
   const covered = [p.district, ...(p.workingDistricts || []), ...pricedDistricts].filter(Boolean);
   if (p.status === 'Verified' || p.verified) {
-    await notifyDevoteesForDistricts(covered, p.workingState || p.state);
+    await notify404DevoteesForDistricts(covered, p.workingState || p.state);
   }
 
   res.json(p);

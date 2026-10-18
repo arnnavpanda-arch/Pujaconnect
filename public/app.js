@@ -1196,6 +1196,19 @@ async function userDash(root) {
   );
   S._isRegionUnavailable = isRegionUnavailable;
 
+  // Auto-subscribe ONLY 404 error page users so that they receive the notification email when admin sets district-wise amounts
+  const targetLoc = devoteeDistrict || devoteeState;
+  if (isRegionUnavailable && targetLoc && S.user && S.user.email) {
+    api('/region-notifications/subscribe-404', {
+      method: 'POST',
+      body: {
+        email: S.user.email,
+        district: targetLoc,
+        state: devoteeState
+      }
+    }).catch(() => {});
+  }
+
   const tab = S.dashTab || 'bookings';
   const upcoming = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').length;
   const pendingPayments = bookings.filter((b) => b.paymentStatus !== 'Paid' && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')).length;
@@ -1245,7 +1258,7 @@ async function userDash(root) {
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px dashed #ffccbc">
               <div style="display:inline-flex;align-items:center;gap:8px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:7px 14px;font-size:13px;color:#1b5e20;font-weight:600">
                 <span class="material-icons" style="font-size:18px;color:#2e7d32">notifications_active</span>
-                <span>✓ Auto-Notification Subscribed: We will notify <b>${esc(S.user.email)}</b> as soon as Pandits become available in ${esc(devoteeDistrict || devoteeState)}.</span>
+                <span>✓ Auto-Notification Subscribed: We will notify <b>${esc(S.user.email)}</b> as soon as Pandits become available in ${esc(devoteeDistrict || devoteeState || 'Location')}.</span>
               </div>
               <button class="btn btn-outline dark btn-sm" data-action="changeDevoteeLocation" style="background:#fff;border-color:#d32f2f;color:#b71c1c;font-weight:700;padding:7px 14px">
                 <span class="material-icons" style="font-size:16px;vertical-align:middle;margin-right:4px">edit_location</span> Change Selected Location
@@ -1362,7 +1375,7 @@ async function userDash(root) {
 
           <div style="display:inline-flex;align-items:center;gap:10px;background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:10px;padding:10px 18px;font-size:13.5px;color:#1b5e20;font-weight:600;margin-bottom:20px;text-align:left;box-shadow:0 2px 8px rgba(46,125,50,0.08)">
             <span class="material-icons" style="font-size:22px;color:#2e7d32">notifications_active</span>
-            <span>✓ Auto-Notification Subscribed: We will notify <b>${esc(S.user.email)}</b> as soon as Pandits become available in ${esc(devoteeDistrict || devoteeState || 'your location')}.</span>
+            <span>✓ Auto-Notification Subscribed: We will notify <b>${esc(S.user.email)}</b> as soon as Pandits become available in ${esc(devoteeDistrict || devoteeState || 'Location')}.</span>
           </div>
 
           <div>
