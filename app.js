@@ -512,9 +512,7 @@ app.put('/api/pandits/:id/status', adminOnly, wrap(async (req, res) => {
   if (status !== 'Pending Review') await sendSafe('PANDIT_VERIFIED', p.email, { panditName: p.name, status });
 
   const covered = [p.district, ...(p.workingDistricts || [])].filter(Boolean);
-  if (status === 'Verified') {
-    await notify404DevoteesForDistricts(covered, p.workingState || p.state);
-  } else {
+  if (status !== 'Verified') {
     await cleanupDistrictsWithoutPandits(covered);
   }
 
@@ -537,15 +535,14 @@ app.put('/api/pandits/:id', wrap(async (req, res) => {
   const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
 
-  // If districts were modified (e.g. pandit removed or added districts)
+  // If districts were modified (e.g. pandit removed districts)
   if (req.body.workingDistricts !== undefined || req.body.district !== undefined) {
     const oldDistricts = oldPandit ? [oldPandit.district, ...(oldPandit.workingDistricts || [])].filter(Boolean) : [];
     const newDistricts = [p.district, ...(p.workingDistricts || [])].filter(Boolean);
     const removedDistricts = oldDistricts.filter(d => !newDistricts.includes(d));
 
-    if (p.status === 'Verified' || p.verified) {
-      await notify404DevoteesForDistricts(newDistricts, p.workingState || p.state);
-    }
+    // Do NOT send notification emails when the pandit saves!
+    // Notification emails must strictly send ONLY when the ADMIN fixes the district rate and saves.
     if (removedDistricts.length) {
       await cleanupDistrictsWithoutPandits(removedDistricts);
     }

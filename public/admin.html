@@ -1567,13 +1567,13 @@
               <div style="background:${hasPrice ? '#fff' : '#fffbfb'};border:1.5px solid ${hasPrice ? '#e0d0bc' : '#ffcdd2'};border-radius:8px;padding:8px 10px;${hasPrice ? '' : 'border-left:4px solid #d32f2f'}">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
                   <label style="font-size:12.5px;font-weight:700;margin:0;color:var(--admin-dark)">${esc(d)}</label>
-                  ${!hasPrice ? `<span class="badge" style="background:#d32f2f;color:#fff;font-weight:800;font-size:9.5px;padding:2px 6px;border-radius:4px;letter-spacing:0.5px">NEW</span>` : `<span class="badge green" style="font-size:9.5px;padding:2px 6px">Saved</span>`}
+                  ${!hasPrice ? `<span class="badge" style="background:#d32f2f;color:#fff;font-weight:800;font-size:9.5px;padding:2px 6px;border-radius:4px;letter-spacing:0.5px">NEW</span>` : `<span class="badge green" style="font-size:9.5px;padding:2px 6px">Saved: ₹${currentVal}</span>`}
                 </div>
                 <div style="display:flex;align-items:center;gap:4px">
                   <span style="font-size:13px;font-weight:700">₹</span>
-                  <input type="number" class="adm-dist-fee-input" data-district="${esc(d)}" value="${currentVal}" placeholder="0" min="0" style="font-size:13px;padding:5px 8px;font-weight:600;${hasPrice ? '' : 'border-color:#ef9a9a'}">
+                  <input type="number" class="adm-dist-fee-input" data-district="${esc(d)}" value="${hasPrice ? currentVal : ''}" placeholder="00" min="0" style="font-size:13px;padding:5px 8px;font-weight:600;${hasPrice ? '' : 'border-color:#ef9a9a;background:#fff'}">
                 </div>
-                ${!hasPrice ? `<div style="font-size:10.5px;color:#c62828;margin-top:4px;font-weight:600">Rate is ₹0 (New district). Type amount to unlock.</div>` : ''}
+                ${!hasPrice ? `<div style="font-size:10.5px;color:#c62828;margin-top:4px;font-weight:700">Rate: ₹00 (New District) · Please type amount to unlock region &amp; notify 404 devotees.</div>` : ''}
               </div>
             `;
           }).join('')}
