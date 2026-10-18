@@ -933,7 +933,16 @@
     }
 
     async function deleteBooking(bookingId) {
-      if (!confirm(`Are you sure you want to permanently delete Booking ${bookingId}? This cannot be undone.`)) return;
+      const ok = await adminConfirm({
+        title: 'Delete Ceremony Booking',
+        message: `Delete Booking ${bookingId}?`,
+        detail: 'This will permanently remove the ceremony booking, its assignment, and linked payment records from the system. This action cannot be undone.',
+        confirmText: 'Delete Booking',
+        confirmClass: 'btn-red',
+        icon: 'delete_forever'
+      });
+      if (!ok) return;
+
       try {
         await api('/bookings/' + encodeURIComponent(bookingId), { method: 'DELETE' });
         S.bookings = (S.bookings || []).filter(b => b.bookingId !== bookingId && b._id !== bookingId);
@@ -950,7 +959,16 @@
     async function deleteSelectedBookings() {
       const ids = Array.from(SELECTED.bookings);
       if (!ids.length) return;
-      if (!confirm(`Are you sure you want to delete ${ids.length} selected booking(s)? This cannot be undone.`)) return;
+      const ok = await adminConfirm({
+        title: 'Bulk Delete Bookings',
+        message: `Permanently delete ${ids.length} selected booking(s)?`,
+        detail: 'All selected ceremony bookings, schedules, and linked payment records will be permanently removed from the platform. This action cannot be undone.',
+        confirmText: `Delete ${ids.length} Bookings`,
+        confirmClass: 'btn-red',
+        icon: 'delete_sweep'
+      });
+      if (!ok) return;
+
       try {
         const res = await api('/bookings/bulk-delete', { method: 'POST', body: { ids } });
         const idSet = new Set(ids);
@@ -1073,7 +1091,16 @@
     async function deletePandit(id) {
       const p = (S.adminPandits || []).find(x => x._id === id || x.email === id);
       const name = p ? p.name : 'this Pandit';
-      if (!confirm(`Are you sure you want to permanently delete Pandit ${name}? This cannot be undone.`)) return;
+      const ok = await adminConfirm({
+        title: 'Delete Registered Pandit',
+        message: `Permanently delete Pandit ${name}?`,
+        detail: 'This will remove the Pandit profile, credentials, and verification status from the directory. This action cannot be undone.',
+        confirmText: 'Delete Pandit',
+        confirmClass: 'btn-red',
+        icon: 'person_remove'
+      });
+      if (!ok) return;
+
       try {
         await api('/pandits/' + encodeURIComponent(id), { method: 'DELETE' });
         S.adminPandits = (S.adminPandits || []).filter(x => x._id !== id && x.email !== id);
@@ -1089,7 +1116,16 @@
     async function deleteSelectedPandits() {
       const ids = Array.from(SELECTED.pandits);
       if (!ids.length) return;
-      if (!confirm(`Are you sure you want to delete ${ids.length} selected Pandit(s)? This cannot be undone.`)) return;
+      const ok = await adminConfirm({
+        title: 'Bulk Delete Pandits',
+        message: `Permanently delete ${ids.length} selected Pandit account(s)?`,
+        detail: 'All selected Pandit directory profiles, documents, and credentials will be removed. This action cannot be undone.',
+        confirmText: `Delete ${ids.length} Pandits`,
+        confirmClass: 'btn-red',
+        icon: 'delete_sweep'
+      });
+      if (!ok) return;
+
       try {
         const res = await api('/pandits/bulk-delete', { method: 'POST', body: { ids } });
         const idSet = new Set(ids);
@@ -1260,7 +1296,16 @@
     }
 
     async function deleteDevotee(id, name) {
-      if (!confirm(`Are you sure you want to permanently delete Devotee account for ${name || 'this user'}? This cannot be undone.`)) return;
+      const ok = await adminConfirm({
+        title: 'Delete Devotee Account',
+        message: `Permanently delete Devotee account for ${name || 'this user'}?`,
+        detail: 'This will remove the devotee user account and access credentials from the platform. This action cannot be undone.',
+        confirmText: 'Delete Devotee',
+        confirmClass: 'btn-red',
+        icon: 'person_remove'
+      });
+      if (!ok) return;
+
       try {
         await api('/users/' + encodeURIComponent(id), { method: 'DELETE' });
         S.users = (S.users || []).filter(u => u._id !== id && u.email !== id);
@@ -1276,7 +1321,16 @@
     async function deleteSelectedDevotees() {
       const ids = Array.from(SELECTED.users);
       if (!ids.length) return;
-      if (!confirm(`Are you sure you want to delete ${ids.length} selected devotee account(s)? This cannot be undone.`)) return;
+      const ok = await adminConfirm({
+        title: 'Bulk Delete Devotees',
+        message: `Permanently delete ${ids.length} selected Devotee account(s)?`,
+        detail: 'All selected customer accounts and login profiles will be permanently removed. This action cannot be undone.',
+        confirmText: `Delete ${ids.length} Devotees`,
+        confirmClass: 'btn-red',
+        icon: 'delete_sweep'
+      });
+      if (!ok) return;
+
       try {
         const res = await api('/users/bulk-delete', { method: 'POST', body: { ids } });
         const idSet = new Set(ids);
@@ -2032,7 +2086,16 @@
     }
 
     async function deleteBookingPayment(bookingId) {
-      if (!confirm(`Are you sure you want to delete payment record for booking ${bookingId}? This will remove the booking and its payment verification record.`)) return;
+      const ok = await adminConfirm({
+        title: 'Delete Payment Record',
+        message: `Delete payment record for booking ${bookingId}?`,
+        detail: 'This will permanently remove the booking and its corresponding payment verification record from the ledger. This action cannot be undone.',
+        confirmText: 'Delete Payment Record',
+        confirmClass: 'btn-red',
+        icon: 'delete_forever'
+      });
+      if (!ok) return;
+
       try {
         await api('/bookings/' + encodeURIComponent(bookingId), { method: 'DELETE' });
         S.bookings = (S.bookings || []).filter(x => x.bookingId !== bookingId && x._id !== bookingId);
@@ -2049,7 +2112,16 @@
     async function deleteSelectedPayments() {
       const ids = Array.from(SELECTED.payments);
       if (!ids.length) return;
-      if (!confirm(`Are you sure you want to delete ${ids.length} selected payment record(s)? This will also remove the corresponding bookings.`)) return;
+      const ok = await adminConfirm({
+        title: 'Bulk Delete Payment Records',
+        message: `Permanently delete ${ids.length} selected payment record(s)?`,
+        detail: 'All selected payment verification entries and their linked ceremony bookings will be permanently removed. This action cannot be undone.',
+        confirmText: `Delete ${ids.length} Records`,
+        confirmClass: 'btn-red',
+        icon: 'delete_sweep'
+      });
+      if (!ok) return;
+
       try {
         const res = await api('/bookings/bulk-delete', { method: 'POST', body: { ids } });
         const idSet = new Set(ids);
@@ -2512,7 +2584,7 @@
 
       const printWin = window.open('', '_blank', 'width=1280,height=850');
       if (!printWin) {
-        return alert('Please allow popups to open the Pandit Payout Statement for printing.');
+        return toast('Please allow popups to open the Pandit Payout Statement for printing.', true);
       }
 
       printWin.document.open();
@@ -2803,7 +2875,7 @@
       const netDakshina = Number(b.panditNetPayout !== undefined && b.panditNetPayout > 0 ? b.panditNetPayout : (b.panditPayoutAmount || Math.max(0, mainFee - adminFeeAmount)));
 
       const printWin = window.open('', '_blank', 'width=900,height=800');
-      if (!printWin) return alert('Please allow popups to print payout voucher.');
+      if (!printWin) return toast('Please allow popups to print payout voucher.', true);
 
       printWin.document.open();
       printWin.document.write(`
@@ -3156,7 +3228,7 @@
       if (!input.files || !input.files[0]) return;
       const file = input.files[0];
       if (file.size > 3 * 1024 * 1024) {
-        alert('Please upload an image smaller than 3MB.');
+        toast('Please upload an image smaller than 3MB.', true);
         return;
       }
       const reader = new FileReader();

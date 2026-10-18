@@ -359,6 +359,75 @@ app.post('/api/pandits/register', wrap(async (req, res) => {
   res.status(201).json(pandit);
 }));
 
+// Automatically notify devotees who were waiting for pandits in a newly covered district
+async function notifyDevoteesForDistricts(districts = [], state = '') {
+  if (!Array.isArray(districts) || !districts.length) return;
+  const uniqueDistricts = [...new Set(districts.map(d => String(d).trim()).filter(Boolean))];
+
+  for (const dist of uniqueDistricts) {
+    // Check if there is at least one active, verified pandit for this district
+    const count = await Pandit.countDocuments({
+      status: 'Verified',
+      $or: [
+        { district: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
+        { workingDistricts: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }
+      ]
+    });
+
+    if (count > 0) {
+      // Find all devotees registered in this district who haven't received notification for this district yet
+      const devotees = await User.find({
+        role: { $ne: 'pandit' },
+        district: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')
+      });
+
+      for (const devotee of devotees) {
+        const notifiedList = Array.isArray(devotee.serviceNotifiedDistricts) ? devotee.serviceNotifiedDistricts : [];
+        const distKey = dist.toLowerCase();
+        if (!notifiedList.includes(distKey)) {
+          // Send automatic notification email
+          await sendSafe('REGION_SERVICE_AVAILABLE', devotee.email, {
+            userName: devotee.name,
+            email: devotee.email,
+            district: dist,
+            state: devotee.state || state || 'India'
+          });
+
+          // Mark as notified so they don't get duplicate emails
+          await User.updateOne(
+            { _id: devotee._id },
+            { $addToSet: { serviceNotifiedDistricts: distKey } }
+          );
+        }
+      }
+    }
+  }
+}
+
+// Reset notification status for districts that no longer have verified pandits
+async function cleanupDistrictsWithoutPandits(districts = []) {
+  if (!Array.isArray(districts) || !districts.length) return;
+  const uniqueDistricts = [...new Set(districts.map(d => String(d).trim()).filter(Boolean))];
+
+  for (const dist of uniqueDistricts) {
+    const count = await Pandit.countDocuments({
+      status: 'Verified',
+      $or: [
+        { district: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
+        { workingDistricts: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }
+      ]
+    });
+
+    if (count === 0) {
+      // Clear notification flag for users in this district so if service returns later, they get notified again
+      await User.updateMany(
+        { district: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
+        { $pull: { serviceNotifiedDistricts: dist.toLowerCase() } }
+      );
+    }
+  }
+}
+
 app.put('/api/pandits/:id/status', adminOnly, wrap(async (req, res) => {
   const { status } = req.body;
   if (!['Verified', 'Rejected', 'Pending Review'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
@@ -367,6 +436,14 @@ app.put('/api/pandits/:id/status', adminOnly, wrap(async (req, res) => {
   const p = await Pandit.findOneAndUpdate(query, { status, verified: status === 'Verified' }, { new: true });
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
   if (status !== 'Pending Review') await sendSafe('PANDIT_VERIFIED', p.email, { panditName: p.name, status });
+
+  const covered = [p.district, ...(p.workingDistricts || [])].filter(Boolean);
+  if (status === 'Verified') {
+    await notifyDevoteesForDistricts(covered, p.workingState || p.state);
+  } else {
+    await cleanupDistrictsWithoutPandits(covered);
+  }
+
   res.json(p);
 }));
 
@@ -382,8 +459,24 @@ app.put('/api/pandits/:id', wrap(async (req, res) => {
   allowed.forEach((k) => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
   const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
   const query = /^[0-9a-fA-F]{24}$/.test(rawId) ? { _id: rawId } : { email: new RegExp('^' + rawId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
+  const oldPandit = await Pandit.findOne(query).lean();
   const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
+
+  // If districts were modified (e.g. pandit removed or added districts)
+  if (req.body.workingDistricts !== undefined || req.body.district !== undefined) {
+    const oldDistricts = oldPandit ? [oldPandit.district, ...(oldPandit.workingDistricts || [])].filter(Boolean) : [];
+    const newDistricts = [p.district, ...(p.workingDistricts || [])].filter(Boolean);
+    const removedDistricts = oldDistricts.filter(d => !newDistricts.includes(d));
+
+    if (p.status === 'Verified' || p.verified) {
+      await notifyDevoteesForDistricts(newDistricts, p.workingState || p.state);
+    }
+    if (removedDistricts.length) {
+      await cleanupDistrictsWithoutPandits(removedDistricts);
+    }
+  }
+
   res.json(p);
 }));
 
@@ -392,6 +485,8 @@ app.delete('/api/pandits/:id', adminOnly, wrap(async (req, res) => {
   const query = /^[0-9a-fA-F]{24}$/.test(rawId) ? { _id: rawId } : { email: new RegExp('^' + rawId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
   const p = await Pandit.findOneAndDelete(query);
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
+  const covered = [p.district, ...(p.workingDistricts || [])].filter(Boolean);
+  await cleanupDistrictsWithoutPandits(covered);
   res.json({ ok: true, deletedId: p._id });
 }));
 
@@ -400,12 +495,24 @@ app.post('/api/pandits/bulk-delete', adminOnly, wrap(async (req, res) => {
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'IDs array required' });
   const objectIds = ids.filter(i => /^[0-9a-fA-F]{24}$/.test(i));
   const emails = ids.map(lc);
+  const targets = await Pandit.find({
+    $or: [
+      { _id: { $in: objectIds } },
+      { email: { $in: emails } }
+    ]
+  }).lean();
+  const allDistricts = [];
+  targets.forEach(p => {
+    allDistricts.push(p.district, ...(p.workingDistricts || []));
+  });
+
   const result = await Pandit.deleteMany({
     $or: [
       { _id: { $in: objectIds } },
       { email: { $in: emails } }
     ]
   });
+  await cleanupDistrictsWithoutPandits(allDistricts);
   res.json({ ok: true, count: result.deletedCount });
 }));
 
@@ -584,6 +691,14 @@ app.put('/api/pandits/:id/district-prices', adminOnly, wrap(async (req, res) => 
   if (districtPrices !== undefined) update.districtPrices = districtPrices;
   const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
+
+  // When admin sets district prices, notify devotees in those districts if pandit is verified
+  const pricedDistricts = Object.keys(districtPrices || {});
+  const covered = [p.district, ...(p.workingDistricts || []), ...pricedDistricts].filter(Boolean);
+  if (p.status === 'Verified' || p.verified) {
+    await notifyDevoteesForDistricts(covered, p.workingState || p.state);
+  }
+
   res.json(p);
 }));
 

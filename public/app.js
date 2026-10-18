@@ -1194,6 +1194,7 @@ async function userDash(root) {
     (devoteeDistrict && panditsInDistrict.length === 0) ||
     (!devoteeDistrict && devoteeState && panditsInState.length === 0)
   );
+  S._isRegionUnavailable = isRegionUnavailable;
 
   const tab = S.dashTab || 'bookings';
   const upcoming = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').length;
@@ -1211,7 +1212,13 @@ async function userDash(root) {
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn btn-gold btn-sm" data-action="dashTab" data-tab="explore"><span class="material-icons">spa</span> Explore All Pujas</button>
+        ${isRegionUnavailable ? `
+          <button class="btn btn-outline btn-sm" disabled style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region">
+            <span class="material-icons" style="font-size:15px">lock</span> Explore All Pujas (Locked)
+          </button>
+        ` : `
+          <button class="btn btn-gold btn-sm" data-action="dashTab" data-tab="explore"><span class="material-icons">spa</span> Explore All Pujas</button>
+        `}
         <button class="btn btn-outline btn-sm" data-action="nav" data-view="home"><span class="material-icons">home</span> Home</button>
         <button class="btn btn-outline btn-sm" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>
       </div>
@@ -1233,7 +1240,7 @@ async function userDash(root) {
               404 – No Service Available at Your Region
             </h3>
             <p style="margin:0 0 12px;color:#5d2800;font-size:14.5px;line-height:1.6">
-              No service available at your region (<strong>${esc(devoteeDistrict || 'your district')}${devoteeState ? ', ' + esc(devoteeState) : ''}</strong>). Currently, no verified Vedic Pandits are available for this district or state. <strong>If any service is available, then our team will notify you.</strong>
+              No service available at your region (<strong>${esc(devoteeDistrict || 'your district')}${devoteeState ? ', ' + esc(devoteeState) : ''}</strong>). Currently, no verified Vedic Pandits are available for this district or state. <strong>If any service is available, then our team will notify you.</strong> All dashboard features are currently locked.
             </p>
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px dashed #ffccbc">
               <div style="display:inline-flex;align-items:center;gap:8px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:7px 14px;font-size:13px;color:#1b5e20;font-weight:600">
@@ -1249,7 +1256,7 @@ async function userDash(root) {
       </div>
     ` : ''}
 
-    ${rebookNeeded > 0 ? `
+    ${rebookNeeded > 0 && !isRegionUnavailable ? `
       <div style="background:#fff3e0;border:1.5px solid #ffcc80;border-left:5px solid #e65100;border-radius:12px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:12px">
           <span class="material-icons" style="font-size:32px;color:#e65100">event_busy</span>
@@ -1268,72 +1275,109 @@ async function userDash(root) {
 
     <!-- Quick Stat Cards (Tappable on both Mobile & Desktop) -->
     <div class="stats">
-      <div class="stat" data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view all bookings">
+      <div class="stat" ${isRegionUnavailable ? 'style="cursor:not-allowed;opacity:0.75" title="Locked: Service unavailable in your region"' : 'data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view all bookings"'}>
         <b>${bookings.length}</b>
-        <span>Total Bookings</span>
+        <span>Total Bookings ${isRegionUnavailable ? '🔒' : ''}</span>
       </div>
-      <div class="stat" data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view upcoming rituals">
+      <div class="stat" ${isRegionUnavailable ? 'style="cursor:not-allowed;opacity:0.75" title="Locked: Service unavailable in your region"' : 'data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view upcoming rituals"'}>
         <b style="color:var(--ochre)">${upcoming}</b>
-        <span>Upcoming Rituals</span>
+        <span>Upcoming Rituals ${isRegionUnavailable ? '🔒' : ''}</span>
       </div>
-      <div class="stat" data-action="dashTab" data-tab="long" style="cursor:pointer" title="Click to view multi-day requests">
+      <div class="stat" ${isRegionUnavailable ? 'style="cursor:not-allowed;opacity:0.75" title="Locked: Service unavailable in your region"' : 'data-action="dashTab" data-tab="long" style="cursor:pointer" title="Click to view multi-day requests"'}>
         <b>${longs.length}</b>
-        <span>Multi-Day Requests</span>
+        <span>Multi-Day Requests ${isRegionUnavailable ? '🔒' : ''}</span>
       </div>
     </div>
 
     <!-- Devotee Navigation: Button Cards Grid on Mobile & Clean Bar on Desktop -->
     <div class="dash-subtabs">
-      <button class="subtab ${tab === 'bookings' ? 'active' : ''}" data-action="dashTab" data-tab="bookings">
+      <button class="subtab ${tab === 'bookings' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="bookings" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
         <span class="subtab-icon-wrap"><span class="material-icons">event</span></span>
         <div class="subtab-info">
           <span class="subtab-title">My Bookings</span>
-          <span class="subtab-sub">${rebookNeeded > 0 ? `${rebookNeeded} To Rebook` : `${bookings.length} Registered`}</span>
+          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : (rebookNeeded > 0 ? `${rebookNeeded} To Rebook` : `${bookings.length} Registered`)}</span>
         </div>
-        ${rebookNeeded > 0 ? `<span class="subtab-badge alert" style="background:#e65100;color:#fff">${rebookNeeded}</span>` : `<span class="subtab-badge">${bookings.length}</span>`}
+        ${isRegionUnavailable ? `
+          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
+        ` : (rebookNeeded > 0 ? `<span class="subtab-badge alert" style="background:#e65100;color:#fff">${rebookNeeded}</span>` : `<span class="subtab-badge">${bookings.length}</span>`)}
       </button>
 
-      <button class="subtab ${tab === 'payments' ? 'active' : ''}" data-action="dashTab" data-tab="payments">
+      <button class="subtab ${tab === 'payments' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="payments" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
         <span class="subtab-icon-wrap"><span class="material-icons">payments</span></span>
         <div class="subtab-info">
           <span class="subtab-title">Payment Tracking</span>
-          <span class="subtab-sub">${pendingPayments > 0 ? `${pendingPayments} To Pay` : 'All Clear'}</span>
+          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : (pendingPayments > 0 ? `${pendingPayments} To Pay` : 'All Clear')}</span>
         </div>
-        ${pendingPayments > 0 ? `<span class="subtab-badge alert">${pendingPayments}</span>` : ''}
+        ${isRegionUnavailable ? `
+          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
+        ` : (pendingPayments > 0 ? `<span class="subtab-badge alert">${pendingPayments}</span>` : '')}
       </button>
 
-      <button class="subtab ${tab === 'explore' ? 'active' : ''}" data-action="dashTab" data-tab="explore">
+      <button class="subtab ${tab === 'explore' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="explore" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
         <span class="subtab-icon-wrap"><span class="material-icons">spa</span></span>
         <div class="subtab-info">
           <span class="subtab-title">Explore All Pujas</span>
-          <span class="subtab-sub">Browse Rituals</span>
+          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : 'Browse Rituals'}</span>
         </div>
+        ${isRegionUnavailable ? `
+          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
+        ` : ''}
       </button>
 
-      <button class="subtab ${tab === 'long' ? 'active' : ''}" data-action="dashTab" data-tab="long">
+      <button class="subtab ${tab === 'long' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="long" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
         <span class="subtab-icon-wrap"><span class="material-icons">local_fire_department</span></span>
         <div class="subtab-info">
           <span class="subtab-title">Multi-Day Yajnas</span>
-          <span class="subtab-sub">${longs.length} Requests</span>
+          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : `${longs.length} Requests`}</span>
         </div>
-        <span class="subtab-badge">${longs.length}</span>
+        ${isRegionUnavailable ? `
+          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
+        ` : `<span class="subtab-badge">${longs.length}</span>`}
       </button>
 
-      <button class="subtab ${tab === 'profile' ? 'active' : ''}" data-action="dashTab" data-tab="profile">
+      <button class="subtab ${tab === 'profile' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="profile" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
         <span class="subtab-icon-wrap"><span class="material-icons">account_circle</span></span>
         <div class="subtab-info">
           <span class="subtab-title">My Profile</span>
-          <span class="subtab-sub">Account Details</span>
+          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : 'Account Details'}</span>
         </div>
+        ${isRegionUnavailable ? `
+          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
+        ` : ''}
       </button>
     </div>
 
     <div id="dash-tab-content">
-      ${tab === 'bookings' ? renderDevoteeBookingsTab(bookings) : ''}
-      ${tab === 'payments' ? renderDevoteePaymentTrackingTab(bookings) : ''}
-      ${tab === 'explore' ? renderDevoteeExploreTab() : ''}
-      ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
-      ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
+      ${isRegionUnavailable ? `
+        <div class="panel" style="padding:44px 24px;text-align:center;background:#fffcf7;border:2px dashed #ffab91;border-radius:14px;box-shadow:0 4px 18px rgba(0,0,0,0.03);margin-top:14px">
+          <div style="background:#ffebee;width:72px;height:72px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px;border:2px solid #ef5350">
+            <span class="material-icons" style="font-size:38px;color:#c62828">lock</span>
+          </div>
+          <h3 style="margin:0 0 10px;font-size:22px;color:#b71c1c;font-weight:800">
+            Dashboard Features Locked – Region Unavailable
+          </h3>
+          <p style="max-width:580px;margin:0 auto 18px;color:#5d2800;font-size:14.5px;line-height:1.6">
+            <strong>My Bookings</strong>, <strong>Payment Tracking</strong>, <strong>Explore All Pujas</strong>, <strong>Multi-Day Yajnas</strong>, and <strong>My Profile</strong> are locked until authentic Vedic Pandits are available in your selected location (<strong>${esc(devoteeDistrict || 'your district')}${devoteeState ? ', ' + esc(devoteeState) : ''}</strong>).
+          </p>
+
+          <div style="display:inline-flex;align-items:center;gap:10px;background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:10px;padding:10px 18px;font-size:13.5px;color:#1b5e20;font-weight:600;margin-bottom:20px;text-align:left;box-shadow:0 2px 8px rgba(46,125,50,0.08)">
+            <span class="material-icons" style="font-size:22px;color:#2e7d32">notifications_active</span>
+            <span>✓ Auto-Notification Subscribed: We will notify <b>${esc(S.user.email)}</b> as soon as Pandits become available in ${esc(devoteeDistrict || devoteeState || 'your location')}.</span>
+          </div>
+
+          <div>
+            <button class="btn btn-gold btn-md" data-action="changeDevoteeLocation" style="padding:10px 24px;font-weight:700">
+              <span class="material-icons" style="font-size:18px;vertical-align:middle;margin-right:6px">edit_location</span> Change Selected Location
+            </button>
+          </div>
+        </div>
+      ` : `
+        ${tab === 'bookings' ? renderDevoteeBookingsTab(bookings) : ''}
+        ${tab === 'payments' ? renderDevoteePaymentTrackingTab(bookings) : ''}
+        ${tab === 'explore' ? renderDevoteeExploreTab() : ''}
+        ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
+        ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
+      `}
     </div>
   `;
 }
@@ -3079,6 +3123,10 @@ const ACTIONS = {
     }
   },
   dashTab: (d) => {
+    if (S.user && S.user.role !== 'pandit' && S._isRegionUnavailable) {
+      toast(`🔒 Dashboard features (My Bookings, Payment Tracking, Explore All Pujas, Multi-Day Yajnas, My Profile) are locked because no verified Pandits are currently available in ${S.user.district || S.user.state || 'your region'}. We will automatically notify you at ${S.user.email} as soon as service is launched.`, true);
+      return;
+    }
     S.dashTab = d.tab;
     renderDashboard();
   },
@@ -3086,6 +3134,11 @@ const ACTIONS = {
     if (!S.user) {
       openAuth('login');
       toast('Please log in to view your profile 🙏');
+      return;
+    }
+    if (S.user.role !== 'pandit' && S._isRegionUnavailable) {
+      toast(`🔒 Profile and dashboard features are locked because no verified Pandits are currently available in your region (${S.user.district || S.user.state}).`, true);
+      showView('dashboard');
       return;
     }
     S.dashTab = 'profile';
@@ -3599,7 +3652,7 @@ window.handlePanditQrUpload = function(input) {
   if (!input.files || !input.files[0]) return;
   const file = input.files[0];
   if (file.size > 3 * 1024 * 1024) {
-    alert('Please upload an image smaller than 3MB.');
+    toast('Please upload an image smaller than 3MB.', true);
     return;
   }
   const reader = new FileReader();
