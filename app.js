@@ -68,6 +68,40 @@ function adminOnly(req, res, next) {
 // ---- Authentication & Users ----
 const PANDIT_OTPS = new Map();
 
+// Check whether verified pandits with admin-fixed Dakshina rates exist for district/state
+async function hasPricedPanditsInDistrict(district = '', state = '') {
+  const dRegex = district ? new RegExp('^' + district.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') : null;
+  const sRegex = state ? new RegExp('^' + state.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') : null;
+  const distKey = district ? district.trim().toLowerCase() : '';
+
+  const pandits = await Pandit.find({
+    $and: [
+      {
+        $or: [
+          { status: 'Verified' },
+          { status: new RegExp('^verified$', 'i') },
+          { verified: true }
+        ]
+      },
+      {
+        $or: [
+          ...(dRegex ? [{ district: dRegex }, { workingDistricts: dRegex }] : []),
+          ...(sRegex ? [{ state: sRegex }, { workingState: sRegex }] : [])
+        ]
+      }
+    ]
+  }).lean();
+
+  return pandits.some(p => {
+    if (!p.districtPrices || typeof p.districtPrices !== 'object') return false;
+    if (distKey) {
+      const pk = Object.keys(p.districtPrices).find(k => k.trim().toLowerCase() === distKey);
+      return Boolean(pk && Number(p.districtPrices[pk]) > 0);
+    }
+    return Object.values(p.districtPrices).some(v => Number(v) > 0);
+  });
+}
+
 app.post('/api/auth/register', wrap(async (req, res) => {
   const { name, email, phone, state, district, city } = req.body;
   if (!email || !name || !phone) return res.status(400).json({ error: 'Name, email and phone are required' });
@@ -88,6 +122,20 @@ app.post('/api/auth/register', wrap(async (req, res) => {
     if (city) user.city = city;
     await user.save();
   }
+
+  // If the devotee's district currently has no priced pandits, tag them for 404 waiting
+  const targetDist = (user.district || user.city || user.state || '').trim();
+  if (targetDist) {
+    const isPriced = await hasPricedPanditsInDistrict(user.district || user.city, user.state);
+    if (!isPriced) {
+      const dKey = targetDist.toLowerCase();
+      user.is404Waiting = true;
+      if (!Array.isArray(user.waiting404Districts)) user.waiting404Districts = [];
+      if (!user.waiting404Districts.includes(dKey)) user.waiting404Districts.push(dKey);
+      await user.save();
+    }
+  }
+
   res.json({ user: publicUser(user), token: sign({ email: user.email, role: user.role }), existing });
 }));
 
@@ -241,12 +289,12 @@ app.get('/api/db-status', wrap(async (req, res) => {
 }));
 
 app.get('/api/users', adminOnly, wrap(async (req, res) => {
-  const users = await User.find({ role: 'user' }).select('-password').sort({ createdAt: -1 });
+  const users = await User.find({ role: 'user' }).select('-password').sort({ createdAt: -1 }).lean();
   res.json(users);
 }));
 
 app.get('/api/users/profile', auth, wrap(async (req, res) => {
-  const user = await User.findOne({ email: lc(req.auth.email) });
+  const user = await User.findOne({ email: lc(req.auth.email) }).lean();
   if (!user) return res.status(404).json({ error: 'Devotee profile not found' });
   res.json(publicUser(user));
 }));
@@ -260,6 +308,18 @@ app.put('/api/users/profile', auth, wrap(async (req, res) => {
   if (state !== undefined) user.state = state;
   if (district !== undefined) user.district = district;
   if (city !== undefined) user.city = city;
+
+  const targetDist = (user.district || user.city || user.state || '').trim();
+  if (targetDist) {
+    const isPriced = await hasPricedPanditsInDistrict(user.district || user.city, user.state);
+    if (!isPriced) {
+      const dKey = targetDist.toLowerCase();
+      user.is404Waiting = true;
+      if (!Array.isArray(user.waiting404Districts)) user.waiting404Districts = [];
+      if (!user.waiting404Districts.includes(dKey)) user.waiting404Districts.push(dKey);
+    }
+  }
+
   await user.save();
   res.json(publicUser(user));
 }));
@@ -388,7 +448,7 @@ async function notify404DevoteesForDistricts(districts = [], state = '', specifi
 
     // First check specificPandit if passed
     let panditWithPrice = null;
-    if (specificPandit && (specificPandit.status === 'Verified' || specificPandit.verified)) {
+    if (specificPandit) {
       const prices = specificPandit.districtPrices;
       if (prices && typeof prices === 'object') {
         const priceKey = Object.keys(prices).find(k => k.trim().toLowerCase() === distKey);
@@ -400,6 +460,7 @@ async function notify404DevoteesForDistricts(districts = [], state = '', specifi
 
     // Check if there is at least one active, verified pandit for this district who has admin-set district dakshina rates
     if (!panditWithPrice) {
+      const distRegex = new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
       const verifiedPanditsInDist = await Pandit.find({
         $and: [
           {
@@ -411,8 +472,8 @@ async function notify404DevoteesForDistricts(districts = [], state = '', specifi
           },
           {
             $or: [
-              { district: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
-              { workingDistricts: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }
+              { district: distRegex },
+              { workingDistricts: distRegex }
             ]
           }
         ]
@@ -432,19 +493,25 @@ async function notify404DevoteesForDistricts(districts = [], state = '', specifi
       const priceKey = Object.keys(panditWithPrice.districtPrices || {}).find(k => k.trim().toLowerCase() === distKey);
       const districtFee = priceKey ? Number(panditWithPrice.districtPrices[priceKey]) : (panditWithPrice.fee || 1500);
 
-      // Query ONLY devotees who encountered the 404 error page (subscribed in waiting404Districts)
+      // Query ONLY devotees who encountered the 404 error page (subscribed in waiting404Districts or is404Waiting)
       // NOT every registered user!
+      const distRegex = new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
       const waitingDevotees = await User.find({
         role: { $ne: 'pandit' },
         $or: [
           { waiting404Districts: distKey },
           { waiting404Districts: dist },
-          { waiting404Districts: new RegExp('^' + dist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }
+          { waiting404Districts: distRegex },
+          { is404Waiting: true, district: distRegex },
+          { is404Waiting: true, city: distRegex }
         ]
       });
 
+      console.log(`[notify404] Found ${waitingDevotees.length} 404-waiting devotee(s) for district "${dist}" (Fee: ₹${districtFee})`);
+
       for (const devotee of waitingDevotees) {
-        // Send automatic notification email only to this 404 error page user
+        if (!devotee.email) continue;
+        console.log(`[notify404] Sending REGION_SERVICE_AVAILABLE email to 404 user: ${devotee.email} for district ${dist}`);
         await sendSafe('REGION_SERVICE_AVAILABLE', devotee.email, {
           userName: devotee.name,
           email: devotee.email,
@@ -760,16 +827,28 @@ app.put('/api/pandits/:id/district-prices', adminOnly, wrap(async (req, res) => 
   const update = {};
   if (fee !== undefined) update.fee = Number(fee) || 1500;
   if (districtPrices !== undefined) update.districtPrices = districtPrices;
+  // Ensure the pandit is verified and active when admin sets official district rates
+  update.status = 'Verified';
+  update.verified = true;
   const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
 
   // When admin sets district prices, notify ONLY 404-error devotees waiting for those districts
   const pricedDistricts = Object.keys(districtPrices || {}).filter(d => Number(districtPrices[d]) > 0);
-  if (p.status === 'Verified' || p.verified) {
-    await notify404DevoteesForDistricts(pricedDistricts, p.workingState || p.state, p);
-  }
 
+  // Return immediately so the admin panel NEVER hangs or freezes
   res.json(p);
+
+  // Send email notifications to 404 devotees in the background
+  if (pricedDistricts.length > 0) {
+    setImmediate(async () => {
+      try {
+        await notify404DevoteesForDistricts(pricedDistricts, p.workingState || p.state, p);
+      } catch (err) {
+        console.error('[notify404 background error]:', err.message);
+      }
+    });
+  }
 }));
 
 // Centralized Platform Bank Details (Managed exclusively by Admin)
@@ -831,11 +910,11 @@ app.get('/api/bookings', wrap(async (req, res) => {
   if (req.query.status) q.status = req.query.status;
   if (req.query.paymentStatus) q.paymentStatus = req.query.paymentStatus;
   if (req.query.bookingId) q.bookingId = req.query.bookingId;
-  res.json(await Booking.find(q).sort({ transactionDate: -1 }));
+  res.json(await Booking.find(q).sort({ transactionDate: -1 }).lean());
 }));
 
 app.get('/api/bookings/:id', wrap(async (req, res) => {
-  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  const b = await Booking.findOne(bookingFindQuery(req.params.id)).lean();
   if (!b) return res.status(404).json({ error: 'Booking not found' });
   res.json(b);
 }));
@@ -1386,7 +1465,7 @@ app.get('/api/long-puja-requests', wrap(async (req, res) => {
   const q = {};
   if (req.query.userEmail) q.userEmail = lc(req.query.userEmail);
   if (req.query.panditEmail) q.assignedPandits = lc(req.query.panditEmail);
-  res.json(await LongPujaRequest.find(q).sort({ submittedAt: -1 }));
+  res.json(await LongPujaRequest.find(q).sort({ submittedAt: -1 }).lean());
 }));
 
 app.post('/api/long-puja-requests', wrap(async (req, res) => {
@@ -1469,7 +1548,7 @@ app.post('/api/send-email', wrap(async (req, res) => {
 app.get('/api/admin/stats', adminOnly, wrap(async (req, res) => {
   const [users, pandits, verified, pending, bookings, longReqs, pendingLong] = await Promise.all([
     User.countDocuments({ role: 'user' }), Pandit.countDocuments(), Pandit.countDocuments({ verified: true }),
-    Pandit.countDocuments({ status: 'Pending Review' }), Booking.find(), LongPujaRequest.countDocuments(),
+    Pandit.countDocuments({ status: 'Pending Review' }), Booking.find({}, { fee: 1, status: 1 }).lean(), LongPujaRequest.countDocuments(),
     LongPujaRequest.countDocuments({ status: 'Pending Admin' })
   ]);
   const active = bookings.filter((b) => b.status !== 'Cancelled');

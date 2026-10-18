@@ -549,7 +549,8 @@
     let S = { adminPandits: [], adminLongs: [], pujas: [], users: [], bookings: [], stats: {}, commissionPercent: 10 };
 
     async function loadData() {
-      await checkDb();
+      // Run DB status check concurrently in parallel so it never delays data fetching
+      checkDb().catch(() => {});
       try {
         const [stats, pandits, longs, users, pujas, bookings, commissionData] = await Promise.all([
           api('/admin/stats').catch(() => ({ users: 0, pandits: 0, verifiedPandits: 0, pendingPandits: 0, bookings: 0, completed: 0, revenue: 0, longRequests: 0, pendingLong: 0 })),
@@ -1564,16 +1565,18 @@
             const hasPrice = curPrices[d] !== undefined && curPrices[d] !== null && Number(curPrices[d]) > 0;
             const currentVal = hasPrice ? Number(curPrices[d]) : 0;
             return `
-              <div style="background:${hasPrice ? '#fff' : '#fffbfb'};border:1.5px solid ${hasPrice ? '#e0d0bc' : '#ffcdd2'};border-radius:8px;padding:8px 10px;${hasPrice ? '' : 'border-left:4px solid #d32f2f'}">
+              <div class="district-pricing-card" data-district="${esc(d)}" style="background:${hasPrice ? '#fff' : '#fffbfb'};border:1.5px solid ${hasPrice ? '#e0d0bc' : '#ffcdd2'};border-radius:8px;padding:8px 10px;${hasPrice ? '' : 'border-left:4px solid #d32f2f'}">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
                   <label style="font-size:12.5px;font-weight:700;margin:0;color:var(--admin-dark)">${esc(d)}</label>
-                  ${!hasPrice ? `<span class="badge" style="background:#d32f2f;color:#fff;font-weight:800;font-size:9.5px;padding:2px 6px;border-radius:4px;letter-spacing:0.5px">NEW</span>` : `<span class="badge green" style="font-size:9.5px;padding:2px 6px">Saved: ₹${currentVal}</span>`}
+                  ${!hasPrice ? `<span class="badge dist-status-badge" style="background:#d32f2f;color:#fff;font-weight:800;font-size:9.5px;padding:2px 6px;border-radius:4px;letter-spacing:0.5px">NEW</span>` : `<span class="badge green dist-status-badge" style="font-size:9.5px;padding:2px 6px">Saved: ₹${currentVal}</span>`}
                 </div>
                 <div style="display:flex;align-items:center;gap:4px">
                   <span style="font-size:13px;font-weight:700">₹</span>
                   <input type="number" class="adm-dist-fee-input" data-district="${esc(d)}" value="${hasPrice ? currentVal : ''}" placeholder="00" min="0" style="font-size:13px;padding:5px 8px;font-weight:600;${hasPrice ? '' : 'border-color:#ef9a9a;background:#fff'}">
                 </div>
-                ${!hasPrice ? `<div style="font-size:10.5px;color:#c62828;margin-top:4px;font-weight:700">Rate: ₹00 (New District) · Please type amount to unlock region &amp; notify 404 devotees.</div>` : ''}
+                <div class="dist-status-note" style="font-size:10.5px;color:${hasPrice ? '#2e7d32' : '#c62828'};margin-top:4px;font-weight:700">
+                  ${!hasPrice ? 'Rate: ₹00 (New District) · Please type amount to unlock region &amp; notify 404 devotees.' : `Dakshina fixed at ₹${currentVal}`}
+                </div>
               </div>
             `;
           }).join('')}
@@ -1583,13 +1586,53 @@
           <span class="material-icons">save</span> Save District Pricing
         </button>
       `, (m) => {
+        // Instant visual feedback when admin types in amounts
+        m.querySelectorAll('.adm-dist-fee-input').forEach(inp => {
+          inp.addEventListener('input', () => {
+            const val = Number(inp.value);
+            const card = inp.closest('.district-pricing-card');
+            const badge = card ? card.querySelector('.dist-status-badge') : null;
+            const note = card ? card.querySelector('.dist-status-note') : null;
+            if (val > 0) {
+              inp.style.borderColor = '#81c784';
+              inp.style.background = '#f1f8e9';
+              if (badge) {
+                badge.className = 'badge green dist-status-badge';
+                badge.style.background = '#2e7d32';
+                badge.style.color = '#fff';
+                badge.textContent = `Set: ₹${val}`;
+              }
+              if (note) {
+                note.style.color = '#2e7d32';
+                note.textContent = `Dakshina ₹${val} typed · Ready to save, unlock region & notify 404 users.`;
+              }
+            } else {
+              inp.style.borderColor = '#ef9a9a';
+              inp.style.background = '#fff';
+              if (badge && (!curPrices[inp.dataset.district] || Number(curPrices[inp.dataset.district]) <= 0)) {
+                badge.className = 'badge dist-status-badge';
+                badge.style.background = '#d32f2f';
+                badge.style.color = '#fff';
+                badge.textContent = 'NEW';
+              }
+              if (note && (!curPrices[inp.dataset.district] || Number(curPrices[inp.dataset.district]) <= 0)) {
+                note.style.color = '#c62828';
+                note.textContent = 'Rate: ₹00 (New District) · Please type amount to unlock region & notify 404 devotees.';
+              }
+            }
+          });
+        });
+
         const quickInput = m.querySelector('#quick-adm-dist-fee');
         const quickBtn = m.querySelector('#btn-quick-fill-adm');
         if (quickBtn && quickInput) {
           quickBtn.onclick = () => {
             const val = Number(quickInput.value);
             if (!val || val <= 0) return toast('Please enter a valid amount', true);
-            m.querySelectorAll('.adm-dist-fee-input').forEach(inp => { inp.value = val; });
+            m.querySelectorAll('.adm-dist-fee-input').forEach(inp => {
+              inp.value = val;
+              inp.dispatchEvent(new Event('input'));
+            });
             toast(`Set ₹${val} for all ${districts.length} districts`);
           };
         }
@@ -1605,21 +1648,25 @@
               prices[d] = val;
             });
 
-            saveBtn.disabled = true;
-            saveBtn.innerHTML = '<span class="material-icons spin">sync</span> Saving...';
-            try {
-              await api(`/pandits/${p._id}/district-prices`, {
-                method: 'PUT',
-                body: { fee: baseFee, districtPrices: prices }
-              });
-              closeModal();
-              toast(`District pricing saved for ${p.name}! 404 waiting devotees notified.`);
+            // Optimistically update in memory immediately so UI does not hang or lag
+            p.fee = baseFee;
+            p.districtPrices = { ...(p.districtPrices || {}), ...prices };
+            p.status = 'Verified';
+            p.verified = true;
+            closeModal();
+            toast(`District pricing saved for ${p.name}! 404 waiting devotees notified.`);
+            renderActiveTab();
+
+            // Run backend API update and refresh in background
+            api(`/pandits/${p._id}/district-prices`, {
+              method: 'PUT',
+              body: { fee: baseFee, districtPrices: prices }
+            }).then(() => {
               loadData();
-            } catch (err) {
-              toast(err.message, true);
-              saveBtn.disabled = false;
-              saveBtn.innerHTML = '<span class="material-icons">save</span> Save District Pricing';
-            }
+            }).catch(err => {
+              toast(err.message || 'Failed saving district prices', true);
+              loadData();
+            });
           };
         }
       });
