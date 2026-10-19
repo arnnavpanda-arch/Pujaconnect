@@ -4008,6 +4008,421 @@ document.addEventListener('keydown', (ev) => {
   }
 });
 
+/* ==========================================================================
+   SACRED VIRTUAL HAVAN & AGNIHOTRA ENGINE
+   ========================================================================== */
+function initVirtualHavan() {
+  const havanSec = document.getElementById('havan-section');
+  if (!havanSec) return;
+
+  // 1. Time of Day Sandhya Phase Updater
+  function updateSandhyaPhase() {
+    const el = document.getElementById('havan-live-time');
+    if (!el) return;
+    const hour = new Date().getHours();
+    if (hour >= 4 && hour < 12) {
+      el.textContent = 'Pratah Sandhya & Agnihotra';
+    } else if (hour >= 12 && hour < 16) {
+      el.textContent = 'Madhyahna Vedic Havan';
+    } else if (hour >= 16 && hour < 20) {
+      el.textContent = 'Sayam Sandhya & Mahayajna';
+    } else {
+      el.textContent = 'Ratri Akhanda Agnihotra';
+    }
+  }
+  updateSandhyaPhase();
+  setInterval(updateSandhyaPhase, 60000);
+
+  // 2. Rising Ember Sparks Animation
+  const emberContainer = document.getElementById('ember-particles');
+  if (emberContainer) {
+    function spawnEmber() {
+      if (!document.getElementById('havan-section')) return;
+      const ember = document.createElement('div');
+      ember.className = 'ember-particle';
+      const size = Math.random() * 3 + 2;
+      const left = 38 + Math.random() * 24; // center cluster around fire
+      const drift = (Math.random() - 0.5) * 60;
+      const duration = 2.2 + Math.random() * 2.5;
+      ember.style.width = size + 'px';
+      ember.style.height = size + 'px';
+      ember.style.left = left + '%';
+      ember.style.bottom = '80px';
+      ember.style.setProperty('--drift', drift + 'px');
+      ember.style.animationDuration = duration + 's';
+      emberContainer.appendChild(ember);
+      setTimeout(() => ember.remove(), duration * 1000);
+    }
+    for (let i = 0; i < 8; i++) setTimeout(spawnEmber, i * 250);
+    setInterval(spawnEmber, 450);
+  }
+
+  // 3. Vedic Mantras Data & Rotator
+  const MANTRAS = [
+    {
+      title: 'Gayatri Mahamantra',
+      sanskrit: 'ॐ भूर्भुवः स्वः तत्सवितुर्वरेण्यं भर्गो देवस्य धीमहि धियो यो नः प्रचोदयात् ॥',
+      translit: 'Om Bhur Bhuvah Svah, Tat Savitur Varenyam, Bhargo Devasya Dhimahi, Dhiyo Yo Nah Prachodayat ॥',
+      meaning: '<strong>Sacred Blessing:</strong> We meditate upon the divine brilliant radiance of Savita (the Sun). May that illuminate our intellect and dispel all ignorance and sorrow.'
+    },
+    {
+      title: 'Maha Mrityunjaya Mantra',
+      sanskrit: 'ॐ त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् । उर्वारुकमिव बन्धनान्मृत्य pushyeya मामृतात् ॥',
+      translit: 'Om Tryambakam Yajamahe Sugandhim Pushti-Vardhanam, Urvarukamiva Bandhanan Mrityor Mukshiya Mamritat ॥',
+      meaning: '<strong>Sacred Blessing:</strong> We worship the Three-Eyed Lord Shiva, who nourishes and perfumes all lives. May He liberate us from sickness, fear of mortality, and grant divine longevity.'
+    },
+    {
+      title: 'Rigvedic Agni Suktam',
+      sanskrit: 'ॐ अग्निमीळे पुरोहितं यज्ञस्य देवमृत्विजम् । होतारं रत्नधातमम् ॥ स्वाहा ॥',
+      translit: 'Om Agnimile Purohitam Yajnasya Devamritvijam, Hotaram Ratnadhatamam ॥ Svaha ॥',
+      meaning: '<strong>Sacred Blessing:</strong> We praise Agni, the Divine Priest of the Yajna, the bearer of offerings, who bestows supreme spiritual and worldly treasures.'
+    },
+    {
+      title: 'Surya Gayatri Mantra',
+      sanskrit: 'ॐ आदित्याय विद्महे भास्कराय धीमहि तन्नः सूर्यः प्रचोदयात् ॥ स्वाहा ॥',
+      translit: 'Om Adityaya Vidmahe Bhaskaraya Dhimahi, Tannah Suryah Prachodayat ॥ Svaha ॥',
+      meaning: '<strong>Sacred Blessing:</strong> May the glorious Sun God Aditya inspire our wisdom, grant radiant health (Arogya), vitality, and dispel all shadows.'
+    },
+    {
+      title: 'Sri Suktam Mahalakshmi Mantra',
+      sanskrit: 'ॐ श्रीं ह्रीं श्रीं कमले कमलालये प्रसीद प्रसीद श्रीं ह्रीं श्रीं महालक्ष्म्यै नमः स्वाहा ॥',
+      translit: 'Om Shreem Hreem Shreem Kamale Kamalalaye Praseeda Praseeda Shreem Hreem Shreem Mahalakshmyai Namah Svaha ॥',
+      meaning: '<strong>Sacred Blessing:</strong> Salutations to Supreme Goddess Mahalakshmi, residing upon the lotus. Bestow divine grace, auspicious wealth, and lasting family peace.'
+    },
+    {
+      title: 'Vedic Shanti Patha',
+      sanskrit: 'ॐ द्यौः शान्तिरन्तरिक्षं शान्तिः पृथिवी शान्तिरापः शान्तिरोषधयः शान्तिः ॥ ॐ शान्तिः शान्तिः शान्तिः ॥',
+      translit: 'Om Dyauh Shantir-Antariksham Shantih, Prithivi Shantir-Apah Shantir-Oshadhayah Shantih ॥ Om Shantih Shantih Shantih ॥',
+      meaning: '<strong>Sacred Blessing:</strong> May peace reign in the heavens, in the sky, upon the earth, in the waters, herbs, and trees. Universal peace everywhere.'
+    }
+  ];
+
+  let currentMantraIdx = 0;
+  const mantraDeityEl = document.getElementById('mantra-deity-pill');
+  const mantraSanskritEl = document.getElementById('active-mantra-sanskrit');
+  const mantraTranslitEl = document.getElementById('active-mantra-translit');
+  const mantraMeaningEl = document.getElementById('active-mantra-meaning');
+  const mantraProgressFill = document.getElementById('mantra-progress-fill');
+
+  function renderMantra(idx) {
+    const m = MANTRAS[idx];
+    if (!m || !mantraSanskritEl) return;
+    
+    mantraSanskritEl.style.opacity = '0';
+    mantraTranslitEl.style.opacity = '0';
+    mantraMeaningEl.style.opacity = '0';
+
+    setTimeout(() => {
+      if (mantraDeityEl) mantraDeityEl.textContent = m.title;
+      mantraSanskritEl.textContent = m.sanskrit;
+      mantraTranslitEl.textContent = m.translit;
+      mantraMeaningEl.innerHTML = m.meaning;
+      mantraSanskritEl.style.opacity = '1';
+      mantraTranslitEl.style.opacity = '1';
+      mantraMeaningEl.style.opacity = '1';
+    }, 280);
+  }
+
+  const MANTRA_CYCLE_MS = 14000;
+  let mantraStartTime = Date.now();
+
+  function tickMantraProgress() {
+    const elapsed = Date.now() - mantraStartTime;
+    const pct = Math.min(100, (elapsed / MANTRA_CYCLE_MS) * 100);
+    if (mantraProgressFill) mantraProgressFill.style.width = pct + '%';
+
+    if (elapsed >= MANTRA_CYCLE_MS) {
+      mantraStartTime = Date.now();
+      currentMantraIdx = (currentMantraIdx + 1) % MANTRAS.length;
+      renderMantra(currentMantraIdx);
+    }
+    requestAnimationFrame(tickMantraProgress);
+  }
+  renderMantra(0);
+  requestAnimationFrame(tickMantraProgress);
+
+  // 4. Ahuti Counters & Devotee Stats
+  let ahutiCount = parseInt(localStorage.getItem('pc_ahuti_count') || '1084', 10);
+  let devoteeCount = 362;
+  const ahutiCountEl = document.getElementById('ahuti-count-today');
+  const devoteesCountEl = document.getElementById('active-devotees-count');
+
+  function updateCountersUI() {
+    if (ahutiCountEl) ahutiCountEl.textContent = ahutiCount.toLocaleString('en-IN');
+    if (devoteesCountEl) devoteesCountEl.textContent = devoteeCount.toLocaleString('en-IN');
+    localStorage.setItem('pc_ahuti_count', ahutiCount.toString());
+  }
+  updateCountersUI();
+
+  // 5. Live Devotee Feed ("Recent Blessings")
+  const streamList = document.getElementById('havan-stream-list');
+  const DEVOTEES_SEEDS = [
+    { name: 'Pooja & Ramesh Sharma', city: 'Varanasi, UP', offering: 'Shuddha Ghee', icon: '🪔', time: '1m ago' },
+    { name: 'Dr. Suresh Acharya', city: 'Haridwar, UK', offering: 'Havan Samagri', icon: '🌾', time: '3m ago' },
+    { name: 'Ananya Raghavan', city: 'Bengaluru, KA', offering: 'Pushpa & Bilva', icon: '🌺', time: '5m ago' },
+    { name: 'Mukesh Chandra Joshi', city: 'Ujjain, MP', offering: 'Samidha & Kapur', icon: '🪵', time: '8m ago' },
+    { name: 'Aditi & Alok Deshmukh', city: 'Pune, MH', offering: 'Purna Ahuti', icon: '🥥', time: '12m ago' }
+  ];
+
+  function createStreamItemHTML(item, isUser = false) {
+    return `<div class="stream-item ${isUser ? 'user-offered' : ''}">
+      <div class="stream-item-left">
+        <span class="stream-item-icon">${item.icon}</span>
+        <div class="stream-item-info">
+          <strong>${esc(item.name)} <span style="font-weight:normal;opacity:0.8">(${esc(item.city)})</span></strong>
+          <span>Offered <em>${esc(item.offering)}</em> into Agni</span>
+        </div>
+      </div>
+      <span class="stream-item-time">${item.time}</span>
+    </div>`;
+  }
+
+  if (streamList) {
+    streamList.innerHTML = DEVOTEES_SEEDS.map((s) => createStreamItemHTML(s)).join('');
+  }
+
+  // Periodic simulated live offerings from devotees across sacred cities
+  const RANDOM_NAMES = ['Kavita Sundaram', 'Gopal Krishna Dave', 'Smt. Gayatri Devi', 'Vikramaditya Roy', 'Naveen Bhatt', 'Priya & Rahul Verma', 'Deepak Tiwari', 'Meenakshi Iyer', 'Harish Chandra Patra', 'Sunita & Arvind Saxena'];
+  const RANDOM_CITIES = ['Ayodhya, UP', 'Rishikesh, UK', 'Mathura, UP', 'Prayagraj, UP', 'Nashik, MH', 'Kolkata, WB', 'Jaipur, RJ', 'Hyderabad, TS', 'Ahmedabad, GJ', 'Bhubaneswar, OD'];
+  const RANDOM_OFFERINGS = [
+    { offering: 'Shuddha Ghee', icon: '🪔' },
+    { offering: 'Havan Samagri', icon: '🌾' },
+    { offering: 'Pushpa & Bilva', icon: '🌺' },
+    { offering: 'Samidha & Kapur', icon: '🪵' },
+    { offering: 'Purna Ahuti', icon: '🥥' }
+  ];
+
+  setInterval(() => {
+    if (!document.getElementById('havan-section')) return;
+    const rName = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
+    const rCity = RANDOM_CITIES[Math.floor(Math.random() * RANDOM_CITIES.length)];
+    const rOff = RANDOM_OFFERINGS[Math.floor(Math.random() * RANDOM_OFFERINGS.length)];
+    
+    if (streamList) {
+      const itemEl = document.createElement('div');
+      itemEl.innerHTML = createStreamItemHTML({
+        name: rName,
+        city: rCity,
+        offering: rOff.offering,
+        icon: rOff.icon,
+        time: 'Just now'
+      });
+      const firstChild = itemEl.firstElementChild;
+      streamList.insertBefore(firstChild, streamList.firstChild);
+      while (streamList.children.length > 8) {
+        streamList.removeChild(streamList.lastChild);
+      }
+    }
+
+    ahutiCount += 1;
+    if (Math.random() > 0.6) devoteeCount += (Math.random() > 0.5 ? 1 : -1);
+    updateCountersUI();
+  }, 7500);
+
+  // 6. Web Audio Synthesizer (Vedic Temple Bells & Om Tanpura Drone)
+  let audioCtx = null;
+  let isSoundActive = false;
+  let ambientOsc1 = null;
+  let ambientOsc2 = null;
+  let ambientGain = null;
+
+  function getAudioContext() {
+    if (!audioCtx) {
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtxClass) audioCtx = new AudioCtxClass();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    return audioCtx;
+  }
+
+  function playTempleBellChime() {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      
+      const freqs = [528, 1056, 1584, 2112];
+      const gains = [0.35, 0.18, 0.12, 0.05];
+
+      freqs.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now);
+        
+        gainNode.gain.setValueAtTime(gains[i], now);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 2.8);
+
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 2.9);
+      });
+    } catch (e) {
+      console.warn('Audio chime notice:', e);
+    }
+  }
+
+  function toggleAmbientSound() {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const btn = document.getElementById('havan-sound-toggle');
+      const soundIcon = document.getElementById('sound-icon');
+      const soundText = document.getElementById('sound-text');
+
+      if (isSoundActive) {
+        if (ambientGain) {
+          ambientGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+          setTimeout(() => {
+            if (ambientOsc1) ambientOsc1.stop();
+            if (ambientOsc2) ambientOsc2.stop();
+            ambientOsc1 = null;
+            ambientOsc2 = null;
+            ambientGain = null;
+          }, 600);
+        }
+        isSoundActive = false;
+        if (btn) btn.classList.remove('active');
+        if (soundIcon) soundIcon.textContent = 'volume_off';
+        if (soundText) soundText.textContent = 'Vedic Sound';
+      } else {
+        const now = ctx.currentTime;
+        ambientOsc1 = ctx.createOscillator();
+        ambientOsc2 = ctx.createOscillator();
+        ambientGain = ctx.createGain();
+
+        ambientOsc1.type = 'sine';
+        ambientOsc1.frequency.setValueAtTime(136.1, now);
+        ambientOsc2.type = 'triangle';
+        ambientOsc2.frequency.setValueAtTime(272.2, now);
+
+        ambientGain.gain.setValueAtTime(0.0001, now);
+        ambientGain.gain.exponentialRampToValueAtTime(0.08, now + 1.2);
+
+        ambientOsc1.connect(ambientGain);
+        ambientOsc2.connect(ambientGain);
+        ambientGain.connect(ctx.destination);
+
+        ambientOsc1.start(now);
+        ambientOsc2.start(now);
+
+        isSoundActive = true;
+        if (btn) btn.classList.add('active');
+        if (soundIcon) soundIcon.textContent = 'volume_up';
+        if (soundText) soundText.textContent = 'Vedic Chanting ON';
+        playTempleBellChime();
+        toast('🕉️ Sacred Vedic ambient drone & chanting activated.');
+      }
+    } catch (err) {
+      console.warn('Sound toggle error:', err);
+    }
+  }
+
+  const soundBtn = document.getElementById('havan-sound-toggle');
+  if (soundBtn) {
+    soundBtn.addEventListener('click', toggleAmbientSound);
+  }
+
+  // 7. Ahuti Offering Execution
+  const flameWrapper = document.getElementById('flame-wrapper');
+  const flyLayer = document.getElementById('offering-fly-layer');
+  const burstBanner = document.getElementById('ahuti-burst-banner');
+  const burstText = document.getElementById('burst-text');
+
+  function triggerAhutiOffering(type, name, icon, mantraText, customName, customCity) {
+    ahutiCount += 1;
+    updateCountersUI();
+    playTempleBellChime();
+
+    if (flameWrapper) {
+      flameWrapper.classList.add('flare');
+      setTimeout(() => flameWrapper.classList.remove('flare'), 1300);
+    }
+
+    if (flyLayer) {
+      const p = document.createElement('div');
+      p.className = 'fly-offering-particle';
+      p.textContent = icon;
+      p.style.left = '50%';
+      p.style.bottom = '10px';
+      p.style.transform = 'translate(-50%, 0) scale(1.6)';
+      flyLayer.appendChild(p);
+
+      setTimeout(() => {
+        p.style.bottom = '140px';
+        p.style.transform = 'translate(-50%, 0) scale(0.3)';
+        p.style.opacity = '0';
+      }, 50);
+
+      setTimeout(() => p.remove(), 800);
+    }
+
+    if (burstBanner && burstText) {
+      burstText.textContent = `🔥 स्वाहा! ${name} offered into holy Agni`;
+      burstBanner.style.display = 'block';
+      setTimeout(() => {
+        burstBanner.style.display = 'none';
+      }, 2400);
+    }
+
+    if (streamList) {
+      const devoteeName = customName || (S.user ? S.user.name : 'You (Devotee)');
+      const devoteeCity = customCity || (S.user && S.user.district ? S.user.district : 'Online Devotee');
+      const itemEl = document.createElement('div');
+      itemEl.innerHTML = createStreamItemHTML({
+        name: devoteeName,
+        city: devoteeCity,
+        offering: name,
+        icon: icon,
+        time: 'Just now'
+      }, true);
+      streamList.insertBefore(itemEl.firstElementChild, streamList.firstChild);
+      while (streamList.children.length > 8) {
+        streamList.removeChild(streamList.lastChild);
+      }
+    }
+
+    toast(`स्वाहा! ${name} offered into Agni Dev. "${mantraText.split('।')[0]}" 🙏`, false);
+  }
+
+  // Attach click listeners to Ahuti buttons
+  document.querySelectorAll('.ahuti-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const type = btn.dataset.ahuti;
+      const name = btn.dataset.name || btn.querySelector('.ahuti-title')?.textContent || 'Sacred Ahuti';
+      const icon = btn.querySelector('.ahuti-btn-icon')?.textContent || '🪔';
+      const mantra = btn.dataset.mantra || 'ॐ अग्नये स्वाहा';
+      
+      const customNameInput = document.getElementById('sankalpa-name');
+      const customGotraInput = document.getElementById('sankalpa-gotra');
+      const customName = customNameInput ? customNameInput.value.trim() : '';
+      const customCity = customGotraInput ? customGotraInput.value.trim() : '';
+
+      triggerAhutiOffering(type, name, icon, mantra, customName, customCity);
+    });
+  });
+
+  // Sankalpa dedicated submit button
+  const sankalpaBtn = document.getElementById('sankalpa-submit-btn');
+  if (sankalpaBtn) {
+    sankalpaBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const nameInput = document.getElementById('sankalpa-name');
+      const gotraInput = document.getElementById('sankalpa-gotra');
+      const name = nameInput && nameInput.value.trim() ? nameInput.value.trim() : (S.user ? S.user.name : 'Vedic Devotee');
+      const gotra = gotraInput && gotraInput.value.trim() ? gotraInput.value.trim() : 'Sankalpa Prayer';
+
+      triggerAhutiOffering('purna', 'Purna Ahuti & Sankalpa', '🥥', 'ॐ पूर्णमदः पूर्णमिदम् स्वाहा', name, gotra);
+      toast(`🕉️ Sacred Sankalpa registered for ${name} (${gotra}). Agni Dev bless you with peace and prosperity!`);
+    });
+  }
+}
+
 /* ---------- boot ---------- */
 (async function init() {
   const yrEl = $('#yr');
@@ -4017,6 +4432,7 @@ document.addEventListener('keydown', (ev) => {
   renderHomePujas();
   renderHomePandits();
   setupHeroFilter();
+  initVirtualHavan();
 
   // Check for direct email "Click Here to Rebook" link
   const urlParams = new URLSearchParams(window.location.search);
