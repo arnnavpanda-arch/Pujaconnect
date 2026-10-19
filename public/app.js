@@ -729,113 +729,9 @@ async function renderPujaPriceConfig(forceRefresh = false) {
       </div>
     </div>
 
-    <!-- Interactive Control Toolbar -->
-    <div class="a4-toolbar">
-      <div class="a4-toolbar-filters">
-        <select id="a4-sel-state" aria-label="Select State">
-          <option value="">All States (${allStates.length})</option>
-          ${allStates.map((st) => `<option value="${esc(st.state)}" ${st.state === filters.state ? 'selected' : ''}>${esc(st.state)} (${st.totalVerifiedPandits} Pandits)</option>`).join('')}
-        </select>
-        <select id="a4-sel-district" aria-label="Select District">
-          <option value="">All Available Districts (${activeDistrictsList.length})</option>
-          ${activeDistrictsList.map((d) => `<option value="${esc(d)}" ${d === filters.district ? 'selected' : ''}>${esc(d)}</option>`).join('')}
-        </select>
-        <input type="text" id="a4-txt-search" placeholder="🔍 Search Pandit, District or Ritual…" value="${esc(filters.search)}">
-        ${filters.state || filters.district || filters.search ? `
-          <button class="btn btn-outline dark btn-sm" id="a4-btn-clear" title="Clear all filters">Clear</button>
-        ` : ''}
-      </div>
-      <div class="a4-toolbar-actions">
-        <button class="btn btn-gold btn-sm" id="a4-btn-print" title="Print or save as A4 Document">
-          <span class="material-icons" style="font-size:16px">print</span> Print / Save A4 PDF
-        </button>
-        <button class="btn btn-outline dark btn-sm" id="a4-btn-refresh" title="Synchronize fresh rates from server">
-          <span class="material-icons" style="font-size:16px">sync</span> Live Refresh
-        </button>
-      </div>
-    </div>
-
-    <!-- Two-column Layout: Side Updates Panel + Authentic A4 Paper Sheet -->
+    <!-- Layout Container with Authentic A4 Paper Sheet -->
     <div class="a4-layout-container">
       
-      <!-- Left / Side Update & Live Feed Panel -->
-      <aside class="a4-live-sidebar">
-        <div class="a4-side-card">
-          <h4><span class="material-icons" style="color:var(--ochre)">bolt</span> Live Sync Monitor</h4>
-          <div class="a4-stat-grid">
-            <div class="a4-stat-box">
-              <div class="a4-stat-num">${data.totalVerifiedPandits || 0}</div>
-              <div class="a4-stat-lbl">Verified Pandits</div>
-            </div>
-            <div class="a4-stat-box">
-              <div class="a4-stat-num">${data.totalStates || allStates.length}</div>
-              <div class="a4-stat-lbl">Active States</div>
-            </div>
-            <div class="a4-stat-box">
-              <div class="a4-stat-num">${activeDistrictsList.length}</div>
-              <div class="a4-stat-lbl">Districts Serviced</div>
-            </div>
-            <div class="a4-stat-box">
-              <div class="a4-stat-num">${allPujas.length || 0}</div>
-              <div class="a4-stat-lbl">Pujas Listed</div>
-            </div>
-          </div>
-          <div style="font-size:12px;color:#2e7d32;display:flex;align-items:center;gap:6px;font-weight:600;margin-top:8px">
-            <span class="pulse-dot" style="background:#2e7d32;box-shadow:0 0 6px #2e7d32"></span>
-            Real-time synchronization enabled
-          </div>
-        </div>
-
-        <!-- Live Added Pandits & District Rates Feed (Side Update) -->
-        <div class="a4-side-card">
-          <h4><span class="material-icons" style="color:var(--ochre)">history_edu</span> Added Pandits &amp; Rates</h4>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px">
-            Whenever a Pandit is added or a district location is configured, this live registry updates automatically.
-          </p>
-          <div class="live-updates-feed">
-            ${allVerifiedPanditsList.length ? allVerifiedPanditsList.map((p) => {
-              const curPrices = p.districtPrices || {};
-              const workingDists = p.workingDistricts && p.workingDistricts.length ? p.workingDistricts : [p.district || 'Khordha'];
-              return `
-                <div class="live-feed-item">
-                  <div class="feed-title">
-                    <span>${esc(p.name)}</span>
-                    <span class="badge green" style="font-size:10px;padding:1px 6px">Live</span>
-                  </div>
-                  <div class="feed-loc">
-                    <span class="material-icons" style="font-size:12px;vertical-align:middle;color:var(--ochre)">place</span>
-                    ${esc(p.state || 'Odisha')} (${workingDists.length} Districts)
-                  </div>
-                  <div class="feed-rates">
-                    ${workingDists.map((d) => {
-                      const fee = curPrices[d] && Number(curPrices[d]) > 0 ? Number(curPrices[d]) : (p.fee || 1500);
-                      return `<span class="live-dist-tag">${esc(d)}: <b>${inr(fee)}</b></span>`;
-                    }).join('')}
-                  </div>
-                </div>
-              `;
-            }).join('') : '<div class="muted" style="font-size:12px">No registered pandits yet.</div>'}
-          </div>
-        </div>
-
-        <!-- Vedic Standards Card -->
-        <div class="a4-side-card" style="background:#fffcf7;border-color:#ebd9c2">
-          <h4><span class="material-icons" style="color:var(--ochre)">verified_user</span> Shastric Integrity</h4>
-          <ul style="margin:0;padding-left:18px;font-size:12.5px;color:#4a2b16;display:flex;flex-direction:column;gap:8px">
-            <li><strong>100% Fixed Dakshina:</strong> Zero haggling, transparent rate per district.</li>
-            <li><strong>KYC &amp; Lineage Verified:</strong> Admin approved Vedic credentials.</li>
-            <li><strong>Samagri List Included:</strong> Prescribed Vedic ingredients catalog provided in advance.</li>
-          </ul>
-          ${S.user && S.user.role === 'admin' ? `
-            <div style="margin-top:16px;padding-top:14px;border-top:1px dashed #ebd9c2">
-              <a href="/admin.html" class="btn btn-dark btn-sm" style="width:100%;justify-content:center">
-                <span class="material-icons" style="font-size:15px">settings</span> Super Admin Portal
-              </a>
-            </div>
-          ` : ''}
-        </div>
-      </aside>
-
       <!-- Main A4 Paper Document Wrapper (No Compacting - Full Space) -->
       <main class="a4-paper-wrapper" id="a4-printable-area">
         <article class="a4-paper-sheet" id="a4-sheet-1">
@@ -849,12 +745,13 @@ async function renderPujaPriceConfig(forceRefresh = false) {
               </div>
               <h2 class="a4-doc-title">Official Puja Price &amp; District Dakshina Configuration Chart</h2>
               <p class="a4-doc-subtitle">
-                Authorized Vedic Gazette of Lineage-Verified Pandits, Available District Locations &amp; Transparent Dakshina Schedules
+                Authorized Vedic Gazette of Lineage-Verified Pandits, Available District Locations &amp; Dakshina Rates
               </p>
               <div class="a4-meta-strip">
                 <div><strong>Gazette Ref:</strong> PC-RAT-CFG-2026/A4</div>
                 <div><strong>Verification Authority:</strong> PujaConnect Super Admin Board</div>
-                <div><strong>Standard:</strong> 100% Fixed Transparent Dakshina</div>
+                <div><strong>Total Verified Pandits:</strong> ${data.totalVerifiedPandits || 0}</div>
+                <div><strong>Districts Covered:</strong> ${activeDistrictsList.length}</div>
                 <div><strong>Synchronized:</strong> ${esc(syncDateStr)}</div>
               </div>
             </header>
@@ -900,10 +797,6 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                               </div>
                             </div>
                           </div>
-                          <div class="a4-base-fee-badge">
-                            <div class="a4-base-fee-val">${inr(p.fee || 1500)}</div>
-                            <div class="a4-base-fee-lbl">Standard Base Dakshina</div>
-                          </div>
                         </div>
 
                         <!-- Available District Locations & Set Dakshina Fees (Spacious & Clear) -->
@@ -925,15 +818,10 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                           </div>
                         </div>
 
-                        <!-- Services & Booking Action -->
-                        <div style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding-top:10px;border-top:1px solid #ebd9c2">
-                          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                            <span style="font-size:12px;font-weight:700;color:var(--muted)">Key Pujas:</span>
-                            ${servicesList.slice(0, 5).map((s) => `<span class="badge" style="background:#fdf6ec;border:1px solid #ebd9c2;font-size:11.5px;color:#4a2b16">${esc(s)}</span>`).join('')}
-                          </div>
-                          <button class="btn btn-gold btn-sm" data-action="bookPandit" data-id="${esc(p._id)}">
-                            <span class="material-icons" style="font-size:15px">event_available</span> Book ${esc(p.name)}
-                          </button>
+                        <!-- Services List (Spacious & Uncompacted) -->
+                        <div style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:10px;border-top:1px solid #ebd9c2">
+                          <span style="font-size:12.5px;font-weight:700;color:var(--muted)">Key Sacred Pujas Performed:</span>
+                          ${servicesList.slice(0, 6).map((s) => `<span class="badge" style="background:#fdf6ec;border:1px solid #ebd9c2;font-size:12px;padding:3px 10px;color:#4a2b16">${esc(s)}</span>`).join('')}
                         </div>
                       </div>
                     `;
@@ -944,7 +832,7 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                   `}
                 </div>
 
-                <!-- District-Wise Master Rate Table for this State (Uncompacted) -->
+                <!-- District-Wise Master Rate Table for this State (Uncompacted, No Booking Type) -->
                 <div style="margin-top:28px">
                   <h4 class="a4-section-heading">
                     <span class="material-icons" style="font-size:18px;color:var(--ochre)">table_chart</span>
@@ -954,42 +842,32 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                     <table class="a4-rate-table">
                       <thead>
                         <tr>
-                          <th style="width:22%">District Name</th>
-                          <th style="width:28%">Available Verified Pandits</th>
-                          <th style="width:22%">Fixed Dakshina Range</th>
-                          <th style="width:16%">Ceremony Coverage</th>
-                          <th style="width:12%;text-align:center">Booking</th>
+                          <th style="width:30%">District Name</th>
+                          <th style="width:42%">Available Verified Pandits</th>
+                          <th style="width:28%">Fixed District Dakshina Rate</th>
                         </tr>
                       </thead>
                       <tbody>
                         ${st.districtSummary && st.districtSummary.length ? st.districtSummary.map((ds) => `
                           <tr>
                             <td>
-                              <strong style="font-size:15px;color:var(--mahogany)">${esc(ds.district)}</strong><br>
+                              <strong style="font-size:15.5px;color:var(--mahogany)">📍 ${esc(ds.district)}</strong><br>
                               <small class="muted">${esc(st.state)} Region</small>
                             </td>
                             <td>
-                              <div style="font-weight:600;color:#2b1406;font-size:13.5px">${esc(ds.panditNames.join(', '))}</div>
+                              <div style="font-weight:700;color:#2b1406;font-size:14px">${esc(ds.panditNames.join(', '))}</div>
                               <small style="color:#2e7d32;font-weight:600">${ds.availablePanditsCount} Verified Scholar${ds.availablePanditsCount === 1 ? '' : 's'}</small>
                             </td>
                             <td>
-                              <div style="font-size:16px;font-weight:800;color:#b85d19">
+                              <div style="font-size:17px;font-weight:800;color:#b85d19">
                                 ${ds.minPrice === ds.maxPrice ? inr(ds.minPrice) : `${inr(ds.minPrice)} – ${inr(ds.maxPrice)}`}
                               </div>
-                              <small class="muted">Per Sacred Puja</small>
-                            </td>
-                            <td>
-                              <span class="badge" style="background:#fdf6ec;border:1px solid #ebd9c2;font-size:11.5px">Home &amp; Temple</span>
-                            </td>
-                            <td style="text-align:center">
-                              <button class="btn btn-outline dark btn-sm" data-action="nav" data-view="pandits" onclick="S.filters.state='${esc(st.state)}'; S.filters.district='${esc(ds.district)}';">
-                                View
-                              </button>
+                              <small class="muted">Dakshina Fee</small>
                             </td>
                           </tr>
                         `).join('') : `
                           <tr>
-                            <td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">
+                            <td colspan="3" style="text-align:center;padding:24px;color:var(--muted)">
                               No district records found for this selection.
                             </td>
                           </tr>
@@ -1008,7 +886,7 @@ async function renderPujaPriceConfig(forceRefresh = false) {
               </div>
             `}
 
-            <!-- Sacred Puja Services & Standard Dakshina Catalog (Sheet Section 2) -->
+            <!-- Sacred Puja Ceremonies & Reference Dakshina Catalog (Sheet Section 2) -->
             <section style="margin-top:40px;padding-top:28px;border-top:2px solid #d99a19">
               <h4 class="a4-section-heading">
                 <span class="material-icons" style="font-size:18px;color:var(--ochre)">temple_hindu</span>
@@ -1018,10 +896,10 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                 <table class="a4-rate-table">
                   <thead>
                     <tr>
-                      <th style="width:25%">Ceremony / Puja</th>
-                      <th style="width:15%">Category</th>
-                      <th style="width:35%">Shastric Significance &amp; Inclusions</th>
-                      <th style="width:25%">Transparent Dakshina</th>
+                      <th style="width:28%">Ceremony / Puja</th>
+                      <th style="width:18%">Category</th>
+                      <th style="width:34%">Shastric Significance &amp; Inclusions</th>
+                      <th style="width:20%">Dakshina Fee (₹)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1039,32 +917,12 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                           ${esc(puja.desc || 'Conducted according to authentic Vedic Shastras with complete samagri guidance.')}
                         </td>
                         <td>
-                          <b style="font-size:15px;color:#b85d19">${puja.type === 'Long' ? esc(puja.price) : 'From ' + inr(puja.baseFee)}</b><br>
-                          <small class="muted">${puja.type === 'Long' ? 'Multi-Priest Plan' : 'Standard Dakshina'}</small>
+                          <b style="font-size:15px;color:#b85d19">${puja.type === 'Long' ? esc(puja.price) : 'From ' + inr(puja.baseFee)}</b>
                         </td>
                       </tr>
                     `).join('')}
                   </tbody>
                 </table>
-              </div>
-            </section>
-
-            <!-- Official Vedic Guidelines & Devotee Protection Notice -->
-            <section style="margin-top:36px;background:#fff8ee;border:1.5px solid #ebd9c2;border-radius:10px;padding:22px 24px">
-              <h4 style="margin:0 0 10px;font-size:15px;font-weight:800;color:var(--mahogany);display:flex;align-items:center;gap:8px">
-                <span class="material-icons" style="color:var(--ochre)">gavel</span>
-                PujaConnect Shastric Dakshina Charter &amp; Transparency Guarantee
-              </h4>
-              <div style="font-size:13px;line-height:1.6;color:#4a2b16;display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:14px">
-                <div>
-                  <strong>1. Fixed Dakshina Commitment:</strong> All amounts listed in this configuration chart are official, authorized Dakshina fees. Pandits will never request unannounced surcharges on ceremony day.
-                </div>
-                <div>
-                  <strong>2. Brahmin Verification:</strong> Every listed scholar has submitted verified identity proofs, Vedic lineage certificates, and has been reviewed by the Super Admin Council.
-                </div>
-                <div>
-                  <strong>3. Pure Samagri Provision:</strong> The Pandit supplies the detailed list of pure, prescribed ingredients (dhoop, ghee, wood, prasad items) beforehand, ensuring Shastric authenticity.
-                </div>
               </div>
             </section>
 
@@ -1080,17 +938,44 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                 <span class="material-icons" style="font-size:28px;color:var(--ochre)">verified_user</span>
                 <div class="a4-sign-title">Super Admin Platform Registrar</div>
                 <div class="a4-sign-sub">Official Gazette Document Seal · Ref #PC-2026-A4</div>
-                <div style="font-size:11px;color:#2e7d32;font-weight:700;margin-top:4px">RATIFIED · 100% TRANSPARENCY ASSURED</div>
+                <div style="font-size:11px;color:#2e7d32;font-weight:700;margin-top:4px">RATIFIED · OFFICIAL RATE SCHEDULE</div>
               </div>
             </footer>
 
           </div>
         </article>
       </main>
+
+      <!-- Interactive Control Toolbar (Placed BELOW the A4 Paper Sheet) -->
+      <div class="a4-toolbar a4-toolbar-bottom">
+        <div class="a4-toolbar-filters">
+          <select id="a4-sel-state" aria-label="Select State">
+            <option value="">All States (${allStates.length})</option>
+            ${allStates.map((st) => `<option value="${esc(st.state)}" ${st.state === filters.state ? 'selected' : ''}>${esc(st.state)} (${st.totalVerifiedPandits} Pandits)</option>`).join('')}
+          </select>
+          <select id="a4-sel-district" aria-label="Select District">
+            <option value="">All Available Districts (${activeDistrictsList.length})</option>
+            ${activeDistrictsList.map((d) => `<option value="${esc(d)}" ${d === filters.district ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+          </select>
+          <input type="text" id="a4-txt-search" placeholder="🔍 Search Pandit, District or Ritual…" value="${esc(filters.search)}">
+          ${filters.state || filters.district || filters.search ? `
+            <button class="btn btn-outline dark btn-sm" id="a4-btn-clear" title="Clear all filters">Clear</button>
+          ` : ''}
+        </div>
+        <div class="a4-toolbar-actions">
+          <button class="btn btn-gold" id="a4-btn-print" title="Print or save as A4 Document">
+            <span class="material-icons" style="font-size:16px">print</span> Print / Save A4 PDF
+          </button>
+          <button class="btn btn-outline dark" id="a4-btn-refresh" title="Synchronize fresh rates from server">
+            <span class="material-icons" style="font-size:16px">sync</span> Live Refresh
+          </button>
+        </div>
+      </div>
+
     </div>
   `;
 
-  // Attach interactive listeners for the toolbar
+  // Attach interactive listeners for the toolbar (now located below)
   const stateSel = $('#a4-sel-state');
   if (stateSel) {
     stateSel.onchange = (e) => {
@@ -1136,10 +1021,19 @@ async function renderPujaPriceConfig(forceRefresh = false) {
     };
   }
 
+  // Robust Print / Save A4 PDF Handler
   const printBtn = $('#a4-btn-print');
   if (printBtn) {
     printBtn.onclick = () => {
-      window.print();
+      toast('Opening official A4 print preview (choose "Save as PDF" to save file)… 🖨️');
+      setTimeout(() => {
+        try {
+          window.print();
+        } catch (err) {
+          console.error('[Print error]:', err);
+          toast('Unable to trigger print: ' + err.message, true);
+        }
+      }, 200);
     };
   }
 

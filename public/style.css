@@ -1877,17 +1877,15 @@ td .btn { margin: 0 4px 4px 0; }
   flex-wrap: wrap;
 }
 
-/* Layout Container for Sidebar and A4 Paper */
+/* Layout Container for A4 Paper and Controls */
 .a4-layout-container {
-  display: grid;
-  grid-template-columns: 290px 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 28px;
-  align-items: flex-start;
+  width: 100%;
 }
-@media (max-width: 992px) {
-  .a4-layout-container {
-    grid-template-columns: 1fr;
-  }
+.a4-toolbar-bottom {
+  margin-top: 32px;
 }
 
 /* Sidebar with Live Updates & State Jump */
@@ -2318,12 +2316,17 @@ td .btn { margin: 0 4px 4px 0; }
 @media print {
   @page {
     size: A4 portrait;
-    margin: 12mm 14mm;
+    margin: 10mm 12mm;
   }
-  body {
+  html, body {
     background: #ffffff !important;
-    color: #000000 !important;
-    font-size: 12pt !important;
+    color: #2b1406 !important;
+    font-size: 11pt !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
   }
   .top-nav-bar,
   .hamburger-btn,
@@ -2331,46 +2334,73 @@ td .btn { margin: 0 4px 4px 0; }
   .mobile-nav-bar,
   .footer,
   .a4-toolbar,
+  .a4-toolbar-bottom,
   .a4-live-sidebar,
+  .puja-price-page-header,
   .price-config-banner,
   #toast,
   #modal-root {
     display: none !important;
+    visibility: hidden !important;
   }
-  .view-section {
+  .view-section:not(#view-puja-prices) {
     display: none !important;
   }
   #view-puja-prices {
     display: block !important;
     padding: 0 !important;
     margin: 0 !important;
+    width: 100% !important;
   }
   .container {
     max-width: 100% !important;
     padding: 0 !important;
     margin: 0 !important;
+    width: 100% !important;
   }
   .a4-layout-container {
     display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .a4-paper-wrapper {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
   .a4-paper-sheet {
     box-shadow: none !important;
-    border: 2px solid #000 !important;
-    margin: 0 0 15mm 0 !important;
-    padding: 20mm 18mm !important;
+    border: 2px solid #351605 !important;
+    margin: 0 0 10mm 0 !important;
+    padding: 16mm 14mm !important;
     width: 100% !important;
     max-width: 100% !important;
-    page-break-after: always;
-    break-after: page;
+    background: #fffdf9 !important;
+    page-break-after: auto !important;
+    break-after: auto !important;
   }
   .a4-rate-table th {
-    background: #f0f0f0 !important;
-    color: #000 !important;
-    border-bottom: 2px solid #000 !important;
+    background: #fbf5ec !important;
+    color: #2b1406 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   .a4-rate-table td {
-    border-bottom: 1px solid #ccc !important;
-    color: #000 !important;
+    border-bottom: 1px solid #dcc4a8 !important;
+    color: #2b1406 !important;
+  }
+  .a4-state-header {
+    background: #351605 !important;
+    color: #ffd88a !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .a4-district-price-chip {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    border: 1.5px solid #dcc4a8 !important;
   }
 }
 
