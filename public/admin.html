@@ -425,8 +425,21 @@
       toast._t = setTimeout(() => (t.className = 'toast'), 3500);
     }
 
+    const API_BASE = (function() {
+      if (typeof window !== 'undefined') {
+        const p = window.location.protocol;
+        const h = window.location.hostname;
+        const port = window.location.port;
+        // If opened as local file or via live-server / alternative dev server on non-5500 port
+        if (p === 'file:' || ((h === 'localhost' || h === '127.0.0.1') && port && port !== '5500')) {
+          return 'http://localhost:5500/api';
+        }
+      }
+      return '/api';
+    })();
+
     async function api(path, { method = 'GET', body } = {}) {
-      const res = await fetch('/api' + path, {
+      const res = await fetch(API_BASE + path, {
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -531,21 +544,25 @@
       return `<span class="badge ${cls}">${esc(s)}</span>`;
     }
 
-    async function checkDb() {
+    async function checkDb(showToast = false) {
       const badge = document.getElementById('admin-db-badge');
       const text = document.getElementById('admin-db-text');
+      if (!badge || !text) return;
       try {
         const d = await api('/db-status');
-        if (d.connected) {
+        if (d && d.connected) {
           badge.className = 'db-badge connected';
           text.textContent = 'MongoDB Atlas Connected 🟢';
+          if (showToast) toast('MongoDB Atlas connected & healthy! 🟢');
         } else {
           badge.className = 'db-badge disconnected';
-          text.textContent = 'Database Disconnected 🔴';
+          text.textContent = 'Database Disconnected 🔴 (Click to Reconnect)';
+          if (showToast) toast('Database is not yet connected. Click badge to reconnect.', true);
         }
       } catch (e) {
         badge.className = 'db-badge disconnected';
-        text.textContent = 'Database Disconnected 🔴';
+        text.textContent = 'Database Disconnected 🔴 (Click to Reconnect)';
+        if (showToast) toast('Backend connection issue: ' + (e.message || 'Check local server on port 5500'), true);
       }
     }
 
@@ -3514,6 +3531,24 @@
     }
 
     (async function init() {
+      const dbBadge = document.getElementById('admin-db-badge');
+      if (dbBadge) {
+        dbBadge.style.cursor = 'pointer';
+        dbBadge.title = 'Click to test and reconnect MongoDB Atlas';
+        dbBadge.onclick = async () => {
+          const text = document.getElementById('admin-db-text');
+          if (text) text.textContent = 'Connecting to MongoDB Atlas... ⏳';
+          await checkDb(true);
+          await loadData();
+        };
+      }
+
+      document.getElementById('btn-refresh-db').onclick = async () => {
+        toast('Refreshing database connection & data... 🔄');
+        await checkDb(false);
+        await loadData();
+      };
+
       try {
         const r = await api('/auth/admin-direct', { method: 'POST' });
         if (r && r.token) {
@@ -3525,8 +3560,17 @@
       } catch (e) {
         console.warn('Direct admin auth notice:', e.message);
       }
-      document.getElementById('btn-refresh-db').onclick = () => loadData();
+
       await loadData();
+
+      // Periodic connection check every 15s to auto-reconnect if connection was dropped
+      setInterval(async () => {
+        const text = document.getElementById('admin-db-text');
+        const isDisconnected = text && text.textContent.includes('Disconnected');
+        if (isDisconnected || document.visibilityState === 'visible') {
+          await checkDb(false);
+        }
+      }, 15000);
     })();
   </script>
 </body>

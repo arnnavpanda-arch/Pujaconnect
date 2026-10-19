@@ -27,9 +27,15 @@ app.use('/api', (req, res, next) => {
 
 // ---- Diagnostics (no DB needed) ----
 app.get('/api/ping', (req, res) => res.json({ status: 'ok', time: Date.now() }));
-app.get('/api/health', (req, res) => {
+app.get('/api/health', wrap(async (req, res) => {
+  let s = mongoose.connection.readyState;
+  if (s !== 1 && process.env.MONGO_URI) {
+    try {
+      await connectDB();
+      s = mongoose.connection.readyState;
+    } catch {}
+  }
   const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
-  const s = mongoose.connection.readyState;
   res.status(s === 1 ? 200 : 503).json({
     status: s === 1 ? 'ok' : 'degraded',
     database: states[s] || 'unknown',
@@ -37,10 +43,13 @@ app.get('/api/health', (req, res) => {
     hasMongoUri: Boolean(process.env.MONGO_URI),
     time: Date.now()
   });
-});
+}));
 
 // ---- Ensure DB connection for everything else ----
 app.use('/api', wrap(async (req, res, next) => {
+  if (req.path === '/health' || req.path === '/ping' || req.path === '/db-status') {
+    return next();
+  }
   try {
     await connectDB();
     next();
@@ -342,8 +351,16 @@ app.post('/api/auth/admin-direct', wrap(async (req, res) => {
 
 // ---- Database connection health check ----
 app.get('/api/db-status', wrap(async (req, res) => {
+  let s = mongoose.connection.readyState;
+  if (s !== 1) {
+    try {
+      await connectDB();
+      s = mongoose.connection.readyState;
+    } catch (e) {
+      // s remains current readyState
+    }
+  }
   const states = ['Disconnected', 'Connected', 'Connecting', 'Disconnecting'];
-  const s = mongoose.connection.readyState;
   res.json({
     connected: s === 1,
     status: s === 1 ? 'Connected' : 'Disconnected',

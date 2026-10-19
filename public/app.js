@@ -198,8 +198,20 @@ function toast(msg, isErr) {
   toast._t = setTimeout(() => (t.className = 'toast'), 3600);
 }
 
+const API_BASE = (function() {
+  if (typeof window !== 'undefined') {
+    const p = window.location.protocol;
+    const h = window.location.hostname;
+    const port = window.location.port;
+    if (p === 'file:' || ((h === 'localhost' || h === '127.0.0.1') && port && port !== '5500')) {
+      return 'http://localhost:5500/api';
+    }
+  }
+  return '/api';
+})();
+
 async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch('/api' + path, {
+  const res = await fetch(API_BASE + path, {
     method,
     headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: 'Bearer ' + S.token } : {}) },
     body: body ? JSON.stringify(body) : undefined,
