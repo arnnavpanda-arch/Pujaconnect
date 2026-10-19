@@ -1355,13 +1355,47 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
     booking: b,
     emailSent: emailRes.ok,
     emailError: emailRes.ok ? null : emailRes.error,
+    panditEmail: targetEmail,
+    acceptUrl,
+    reviewUrl,
     message: emailRes.ok
       ? `Ceremony offered and notification email successfully sent to ${pandit.name} (${targetEmail})`
       : `Pandit assigned, but email notification failed: ${emailRes.error}`
   });
 }));
 
-// Admin can resend offer email to the assigned Pandit at any time
+// Admin can fetch the one-click Pandit offer link to share via WhatsApp / SMS
+app.get('/api/bookings/:id/pandit-offer-link', adminOnly, wrap(async (req, res) => {
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  if (!b.panditEmail) return res.status(400).json({ error: 'No Pandit assigned to this ceremony yet' });
+
+  const panditToken = sign({ email: b.panditEmail, role: 'pandit', bookingId: b.bookingId, purpose: 'pandit_offer_response' });
+  const reqHost = req.get('host') || '';
+  const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+  const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
+  const baseUrl = process.env.APP_URL || origin;
+  const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.panditEmail)}&decision=Accept&token=${encodeURIComponent(panditToken)}`;
+  const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.panditEmail)}&decision=Reject&token=${encodeURIComponent(panditToken)}`;
+  const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.panditEmail)}&token=${encodeURIComponent(panditToken)}`;
+
+  res.json({
+    ok: true,
+    bookingId: b.bookingId,
+    service: b.service,
+    date: b.date,
+    time: b.time,
+    district: b.district,
+    panditName: b.panditName,
+    panditEmail: b.panditEmail,
+    netDakshina: b.panditNetPayout || b.fee,
+    acceptUrl,
+    rejectUrl,
+    reviewUrl
+  });
+}));
+
+// Admin can resend offer email to the assigned Pandit at any time (or to an alternate email if primary bounced)
 app.post('/api/bookings/:id/resend-pandit-offer', adminOnly, wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
@@ -1384,7 +1418,7 @@ app.post('/api/bookings/:id/resend-pandit-offer', adminOnly, wrap(async (req, re
   const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}`;
   const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}`;
 
-  const targetEmail = lc(pandit.email);
+  const targetEmail = lc(req.body && req.body.alternateEmail ? req.body.alternateEmail : pandit.email);
   const emailRes = await sendSafe('PANDIT_NEW_BOOKING', targetEmail, {
     ...b.toObject(),
     userName: b.userName,
@@ -1414,7 +1448,13 @@ app.post('/api/bookings/:id/resend-pandit-offer', adminOnly, wrap(async (req, re
     return res.status(500).json({ error: `Failed to deliver email to ${targetEmail}: ${emailRes.error}` });
   }
 
-  res.json({ ok: true, message: `Ceremony offer email successfully sent to ${pandit.name} (${targetEmail})! 🙏` });
+  res.json({
+    ok: true,
+    acceptUrl,
+    reviewUrl,
+    targetEmail,
+    message: `Ceremony offer email successfully sent to ${pandit.name} (${targetEmail})! 🙏`
+  });
 }));
 
 // Pandit accepts or rejects the ceremony assignment

@@ -817,6 +817,9 @@
                               <button class="btn btn-outline dark btn-sm" onclick="resendPanditOfferEmail('${esc(b.bookingId)}')" title="Resend ceremony offer email to Pandit ji (${esc(b.panditEmail)})">
                                 <span class="material-icons" style="font-size:13px;vertical-align:middle">forward_to_inbox</span> Resend Mail
                               </button>
+                              <button class="btn btn-gold btn-sm" onclick="openPanditOfferShareModal('${esc(b.bookingId)}')" title="View offer details, copy 1-click WhatsApp decision link or send to alternate email">
+                                <span class="material-icons" style="font-size:13px;vertical-align:middle">share</span> Share Link
+                              </button>
                             ` : ''}
                             ${rejectSlotBtnHtml}
                             ${deleteBtnHtml}
@@ -941,6 +944,79 @@
         toast(res.message || 'Ceremony offer email successfully sent to Pandit ji! 🙏');
       } catch (e) {
         toast(e.message || 'Failed to deliver offer email to Pandit ji', true);
+      }
+    }
+
+    async function openPanditOfferShareModal(bookingId) {
+      const b = (S.bookings || []).find(x => x.bookingId === bookingId);
+      if (!b) return toast('Booking record not found', true);
+
+      try {
+        toast('Generating Pandit decision link...');
+        const info = await api(`/bookings/${encodeURIComponent(bookingId)}/pandit-offer-link`);
+        const msg = `Pranam ${info.panditName || 'Pandit ji'} 🙏\nYou have been offered the sacred ceremony: ${info.service} on ${info.date} at ${info.time} (${info.district}).\nNet Dakshina: ₹${Number(info.netDakshina || 0).toLocaleString('en-IN')}.\n\n👉 Click to Accept or Review offer:\n${info.acceptUrl}`;
+
+        openModal(`Ceremony Offer & Decision Link – ${b.bookingId}`, `
+          <div style="font-size:13.5px;color:#3b2115">
+            <div style="background:#fff8ed;border:1.5px solid #ebd9c2;border-radius:8px;padding:12px 14px;margin-bottom:14px">
+              <b>Sacred Ritual:</b> ${esc(info.service)}<br>
+              <b>Assigned Pandit:</b> ${esc(info.panditName)} (${esc(info.panditEmail)})<br>
+              <b>Schedule:</b> ${esc(info.date)} · ${esc(info.time)} (${esc(info.district)})<br>
+              <b>Net Pandit Dakshina:</b> <span style="color:#2e7d32;font-weight:700">₹${Number(info.netDakshina || 0).toLocaleString('en-IN')}</span>
+            </div>
+
+            <label style="font-weight:700;display:block;margin-bottom:4px">1-Click Pandit Acceptance Link:</label>
+            <div style="display:flex;gap:8px;margin-bottom:14px">
+              <input type="text" id="inp-pandit-accept-url" value="${esc(info.acceptUrl)}" readonly style="font-family:monospace;font-size:11.5px;background:#fdfcf9;flex:1">
+              <button class="btn btn-gold btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('inp-pandit-accept-url').value);toast('Acceptance link copied to clipboard! ✅')">
+                <span class="material-icons">content_copy</span> Copy Link
+              </button>
+            </div>
+
+            <div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">
+              <a href="https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}" target="_blank" class="btn btn-green btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+                <span class="material-icons">chat</span> Share via WhatsApp
+              </a>
+              <button class="btn btn-outline dark btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify(msg)});toast('WhatsApp message copied to clipboard! 📋')">
+                <span class="material-icons">content_copy</span> Copy WhatsApp Text
+              </button>
+            </div>
+
+            <div style="border-top:1px dashed #ebd9c2;padding-top:14px;margin-top:10px">
+              <label style="font-weight:700;display:block;margin-bottom:4px">Send / Resend to Alternate Email (Optional):</label>
+              <div style="display:flex;gap:8px">
+                <input type="email" id="inp-pandit-alt-email" placeholder="e.g. personal email if university email blocks" style="flex:1" value="${esc(info.panditEmail)}">
+                <button class="btn btn-dark btn-sm" id="btn-send-alt-email">
+                  <span class="material-icons">send</span> Send Mail
+                </button>
+              </div>
+            </div>
+          </div>
+        `, (m) => {
+          const btn = m.querySelector('#btn-send-alt-email');
+          if (btn) {
+            btn.onclick = async () => {
+              const alt = (m.querySelector('#inp-pandit-alt-email').value || '').trim();
+              if (!alt) return toast('Please enter recipient email', true);
+              btn.disabled = true;
+              btn.innerHTML = '<span class="material-icons spin">sync</span> Sending...';
+              try {
+                const res = await api(`/bookings/${encodeURIComponent(bookingId)}/resend-pandit-offer`, {
+                  method: 'POST',
+                  body: { alternateEmail: alt }
+                });
+                toast(res.message || `Offer email sent to ${alt}! 🙏`);
+                closeModal();
+              } catch (e) {
+                toast(e.message || 'Failed to send email', true);
+                btn.disabled = false;
+                btn.innerHTML = '<span class="material-icons">send</span> Send Mail';
+              }
+            };
+          }
+        });
+      } catch (e) {
+        toast(e.message || 'Failed to load offer link', true);
       }
     }
 
