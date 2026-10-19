@@ -222,7 +222,8 @@ function saveSession(user, token) {
 function openModal(title, html, onMount, wide = false) {
   const drawer = $('#nav-drawer');
   if (drawer) drawer.classList.remove('open');
-  $('#modal-root').innerHTML = `<div class="modal-backdrop" data-action="modalBackdrop"><div class="modal ${wide ? 'modal-wide' : ''}"><div class="modal-head"><h3>${esc(title)}</h3><button data-action="closeModal" aria-label="Close"><span class="material-icons">close</span></button></div><div class="modal-body">${html}</div></div></div>`;
+  const wideClass = wide === 'fullscreen' ? 'modal-fullscreen' : wide === true ? 'modal-wide' : '';
+  $('#modal-root').innerHTML = `<div class="modal-backdrop" data-action="modalBackdrop"><div class="modal ${wideClass}"><div class="modal-head"><h3>${esc(title)}</h3><button data-action="closeModal" aria-label="Close"><span class="material-icons">close</span></button></div><div class="modal-body">${html}</div></div></div>`;
   if (onMount) onMount($('#modal-root .modal'));
 }
 const closeModal = () => ($('#modal-root').innerHTML = '');
@@ -1079,6 +1080,8 @@ async function openBooking(arg) {
   let targetBookingId = null;
   let isRebook = false;
 
+  let skipOverview = false;
+
   if (typeof arg === 'string') {
     targetPanditId = arg;
   } else if (arg && typeof arg === 'object') {
@@ -1091,6 +1094,7 @@ async function openBooking(arg) {
     targetPhone = arg.phone || '';
     targetBookingId = arg.bookingId || null;
     isRebook = Boolean(arg.isRebook || targetBookingId);
+    skipOverview = Boolean(arg.skipOverview);
   }
 
   if (!requireLogin(() => openBooking(arg))) return;
@@ -1116,6 +1120,234 @@ async function openBooking(arg) {
   const sel = { date: targetDate || '', time: targetTime || '' };
   const initialPuja = targetPujaName || S.filters.service || (selectedPandit && selectedPandit.services && selectedPandit.services[0]) || allShortPujas[0] || 'Satyanarayan Puja';
   const initialDistrict = lockedDistrict || targetDistrict || (selectedPandit && ((selectedPandit.workingDistricts && selectedPandit.workingDistricts[0]) || selectedPandit.district)) || S.filters.district || availableDistricts[0];
+
+  // Full-Screen Verified Vedic Scholars & Location Rates Popup
+  // Shown when devotee presses any Book Now puja before booking form
+  if (!isRebook && !skipOverview) {
+    const verifiedPandits = (S.pandits || []).filter((p) => p.verified || p.status === 'Verified');
+    const inDistPandits = verifiedPandits.filter((p) =>
+      (p.workingDistricts && p.workingDistricts.some((d) => d.trim().toLowerCase() === initialDistrict.toLowerCase())) ||
+      (p.district && p.district.trim().toLowerCase() === initialDistrict.toLowerCase())
+    );
+
+    const feeList = inDistPandits.map((p) => {
+      const curPrices = p.districtPrices || {};
+      return curPrices[initialDistrict] && Number(curPrices[initialDistrict]) > 0
+        ? Number(curPrices[initialDistrict])
+        : (p.fee || 1500);
+    });
+
+    const minFee = feeList.length ? Math.min(...feeList) : 1199;
+    const maxFee = feeList.length ? Math.max(...feeList) : 1500;
+
+    const pujaDoc = (S.pujas || []).find((x) => (x.name || '').trim().toLowerCase() === (initialPuja || '').trim().toLowerCase());
+    const baseDakshina = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
+
+    openModal(`Verified Vedic Scholars & Location Rates – ${esc(initialDistrict)}`, `
+      <div class="loc-popup-banner">
+        <div class="loc-popup-shloka">॥ श्री गणेशाय नमः ॥ ॐ PujaConnect Vedic Services</div>
+        <h2 class="loc-popup-title">
+          <span class="material-icons" style="color:var(--ochre);font-size:26px">verified_user</span>
+          Verified Vedic Scholars &amp; Official Location Rates
+        </h2>
+        <p class="loc-popup-subtitle">
+          Official transparency report filtered for your registered devotee location (<strong>📍 ${esc(initialDistrict)}, ${esc(curState)}</strong>). Review authorized scholars, verified credentials, and fixed district Dakshina rates before proceeding to schedule.
+        </p>
+        
+        <div class="loc-stat-grid">
+          <div class="loc-stat-box">
+            <span class="material-icons stat-icon">location_on</span>
+            <div>
+              <div class="stat-lbl">Devotee Registered Location</div>
+              <div class="stat-val">${esc(initialDistrict)}, ${esc(curState)}</div>
+            </div>
+          </div>
+          <div class="loc-stat-box">
+            <span class="material-icons stat-icon">groups</span>
+            <div>
+              <div class="stat-lbl">Verified Scholars in Area</div>
+              <div class="stat-val">${inDistPandits.length} Verified Pandit${inDistPandits.length === 1 ? '' : 's'}</div>
+            </div>
+          </div>
+          <div class="loc-stat-box">
+            <span class="material-icons stat-icon">payments</span>
+            <div>
+              <div class="stat-lbl">District Dakshina Schedule</div>
+              <div class="stat-val" style="color:#2e7d32">${minFee === maxFee ? inr(minFee) : `${inr(minFee)} – ${inr(maxFee)}`}</div>
+            </div>
+          </div>
+          <div class="loc-stat-box">
+            <span class="material-icons stat-icon">temple_hindu</span>
+            <div>
+              <div class="stat-lbl">Selected Ritual</div>
+              <div class="stat-val" style="color:var(--mahogany)">${esc(initialPuja)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0;font-size:17px;color:var(--mahogany);display:flex;align-items:center;gap:6px">
+          <span class="material-icons" style="font-size:20px;color:var(--ochre)">badge</span>
+          Verified Scholars Serving ${esc(initialDistrict)} (${inDistPandits.length}):
+        </h3>
+        <span class="badge green" style="font-size:11.5px;padding:3px 10px">
+          <span class="material-icons" style="font-size:13px;vertical-align:middle">lock</span> 100% Admin Fixed Dakshina
+        </span>
+      </div>
+
+      <div class="loc-scholars-list">
+        ${inDistPandits.length ? inDistPandits.map((p) => {
+          const curPrices = p.districtPrices || {};
+          const pCharge = curPrices[initialDistrict] && Number(curPrices[initialDistrict]) > 0
+            ? Number(curPrices[initialDistrict])
+            : (p.fee || 1500);
+          const workingDists = p.workingDistricts && p.workingDistricts.length ? p.workingDistricts : [p.district || initialDistrict];
+
+          return `
+            <div class="loc-scholar-card">
+              <div class="loc-scholar-main">
+                <img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="loc-scholar-avatar" alt="${esc(p.name)}" onerror="this.src='https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200'">
+                <div>
+                  <div class="loc-scholar-name">
+                    Pt. ${esc(p.name)}
+                    <span class="badge green" style="font-size:11px;padding:2px 8px">
+                      <span class="material-icons" style="font-size:12px;vertical-align:middle">verified</span> Verified Scholar
+                    </span>
+                  </div>
+                  <div class="loc-scholar-meta">
+                    <span><span class="material-icons" style="font-size:14px;color:var(--ochre);vertical-align:middle">school</span> ${esc(p.exp || `${p.experience || 5}+ Years Rigor`)}</span>
+                    <span>·</span>
+                    <span><span class="material-icons" style="font-size:14px;color:var(--ochre);vertical-align:middle">spa</span> ${esc(p.specialty || 'Vedic Rituals & Katha')}</span>
+                    <span>·</span>
+                    <span><span class="material-icons" style="font-size:14px;color:var(--ochre);vertical-align:middle">home</span> Base: <b>${esc(p.district || initialDistrict)}</b></span>
+                  </div>
+                  <div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                    <span style="font-size:11px;color:var(--muted);font-weight:700">Serviced Areas:</span>
+                    ${workingDists.map(d => `<span class="badge" style="font-size:10.5px;padding:1px 6px;background:${d.toLowerCase() === initialDistrict.toLowerCase() ? '#e8f5e9' : '#fff8ed'};color:${d.toLowerCase() === initialDistrict.toLowerCase() ? '#1b5e20' : '#7a4e21'}">${esc(d)}</span>`).join('')}
+                  </div>
+                </div>
+              </div>
+
+              <div class="loc-scholar-actions">
+                <div class="loc-scholar-price-badge">
+                  <div class="loc-scholar-price-val">${inr(pCharge)}</div>
+                  <div class="loc-scholar-price-lbl">Fixed Dakshina for ${esc(initialDistrict)}</div>
+                </div>
+                <button class="btn btn-gold btn-sm" data-action="pickScholar" data-pid="${esc(p._id)}" style="padding:10px 16px;white-space:nowrap">
+                  <span class="material-icons" style="font-size:16px">event</span> Book with Pt. ${esc(p.name)} &rarr;
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('') : `
+          <div class="empty" style="padding:32px 20px;border:1.5px dashed #ebd9c2;border-radius:12px;background:#fffdf9">
+            <span class="material-icons" style="font-size:42px;color:var(--ochre)">temple_hindu</span>
+            <h4 style="margin:8px 0 4px;color:var(--mahogany)">Regional Vedic Allocation for ${esc(initialDistrict)}</h4>
+            <p class="muted" style="max-width:520px;margin:0 auto 12px;font-size:13.5px">
+              No individual pandit currently lists a resident address solely in ${esc(initialDistrict)}. PujaConnect Admin directly allocates verified mobile scholars from the state center with the transparent base Dakshina of ${inr(baseDakshina)}.
+            </p>
+          </div>
+        `}
+
+        <!-- Any Available Verified Pandit Option -->
+        <div class="loc-scholar-card" style="background:#fffcf5;border:1.5px dashed var(--ochre)">
+          <div class="loc-scholar-main">
+            <div style="width:62px;height:62px;border-radius:50%;background:linear-gradient(135deg,var(--mahogany),#662908);display:flex;align-items:center;justify-content:center;color:var(--gold);font-size:26px">
+              ॐ
+            </div>
+            <div>
+              <div class="loc-scholar-name">
+                Any Available Verified Pandit (Auto-assigned by Admin)
+                <span class="badge" style="background:#fff3e0;color:#b23b00;font-size:11px;padding:2px 8px">
+                  <span class="material-icons" style="font-size:12px;vertical-align:middle">auto_awesome</span> Recommended
+                </span>
+              </div>
+              <div class="loc-scholar-meta">
+                PujaConnect Spiritual Advisory Board will auto-assign an authentic, verified Vedic Purohit for your date &amp; time slot.
+              </div>
+            </div>
+          </div>
+          <div class="loc-scholar-actions">
+            <div class="loc-scholar-price-badge">
+              <div class="loc-scholar-price-val">${inr(baseDakshina)}</div>
+              <div class="loc-scholar-price-lbl">Standard Base Dakshina</div>
+            </div>
+            <button class="btn btn-outline dark btn-sm" data-action="pickAny" style="padding:10px 16px;white-space:nowrap">
+              <span class="material-icons" style="font-size:16px">auto_awesome</span> Book with Any Pandit &rarr;
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="loc-popup-bottom-bar">
+        <div style="font-size:12.5px;color:var(--muted)">
+          <span class="material-icons" style="font-size:15px;vertical-align:middle;color:#2e7d32">verified</span>
+          100% Fixed Rates · No Hidden Costs · Full Report Emailed upon Booking
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="btn btn-outline" data-action="closeModal">
+            <span class="material-icons">close</span> Close / Cut
+          </button>
+          <button class="btn btn-gold btn-lg" data-action="continueBooking">
+            <span class="material-icons">arrow_forward</span> Continue to Booking Form &rarr;
+          </button>
+        </div>
+      </div>
+    `, (m) => {
+      m.querySelectorAll('[data-action="pickScholar"]').forEach((btn) => {
+        btn.onclick = () => {
+          const pid = btn.dataset.pid;
+          openBooking({
+            ...((typeof arg === 'object' && arg) || {}),
+            panditId: pid,
+            pujaName: initialPuja,
+            district: initialDistrict,
+            date: targetDate,
+            time: targetTime,
+            address: targetAddress,
+            phone: targetPhone,
+            skipOverview: true
+          });
+        };
+      });
+
+      const anyBtn = m.querySelector('[data-action="pickAny"]');
+      if (anyBtn) {
+        anyBtn.onclick = () => {
+          openBooking({
+            ...((typeof arg === 'object' && arg) || {}),
+            panditId: '',
+            pujaName: initialPuja,
+            district: initialDistrict,
+            date: targetDate,
+            time: targetTime,
+            address: targetAddress,
+            phone: targetPhone,
+            skipOverview: true
+          });
+        };
+      }
+
+      const contBtn = m.querySelector('[data-action="continueBooking"]');
+      if (contBtn) {
+        contBtn.onclick = () => {
+          openBooking({
+            ...((typeof arg === 'object' && arg) || {}),
+            panditId: targetPanditId || '',
+            pujaName: initialPuja,
+            district: initialDistrict,
+            date: targetDate,
+            time: targetTime,
+            address: targetAddress,
+            phone: targetPhone,
+            skipOverview: true
+          });
+        };
+      }
+    }, 'fullscreen');
+    return;
+  }
 
   const modalTitle = isRebook ? `Rebook Sacred Ritual – ${esc(targetBookingId || 'Edit Details')}` : 'Book a Sacred Ritual';
 
@@ -1154,6 +1386,12 @@ async function openBooking(arg) {
         <option value="">✨ Any Available Verified Pandit (Auto-assigned by PujaConnect Admin)</option>
       </select>
       <div id="b-pandit-info" style="margin-top:8px"></div>
+      <div style="margin-top:6px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+        <button type="button" class="btn btn-outline dark btn-sm" id="b-view-area-scholars" style="font-size:11.5px;padding:3px 10px">
+          <span class="material-icons" style="font-size:14px;vertical-align:middle">visibility</span> View Verified Scholars &amp; Rates for ${esc(initialDistrict)}
+        </button>
+        <span style="font-size:11px;color:var(--muted)">100% Fixed Dakshina</span>
+      </div>
       <small class="muted" style="display:block;margin-top:4px;font-size:12px">
         All registered verified Pandits can perform all sacred Vedic pujas. Pandit's specialty is shown for your reference.
       </small>
@@ -1323,6 +1561,22 @@ async function openBooking(arg) {
     districtSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
     panditSel.onchange = () => { updatePanditInfo(); paintFee(); };
     dateInp.onchange = drawSlots;
+
+    const viewAreaScholarsBtn = $('#b-view-area-scholars', m);
+    if (viewAreaScholarsBtn) {
+      viewAreaScholarsBtn.onclick = () => {
+        openBooking({
+          panditId: panditSel ? panditSel.value : targetPanditId,
+          pujaName: serviceSel ? serviceSel.value : initialPuja,
+          district: districtSel ? districtSel.value : initialDistrict,
+          date: dateInp ? dateInp.value : targetDate,
+          time: sel.time,
+          address: $('#b-address', m) ? $('#b-address', m).value : targetAddress,
+          phone: $('#b-phone', m) ? $('#b-phone', m).value : targetPhone,
+          skipOverview: false
+        });
+      };
+    }
 
     $('#b-slots', m).onclick = (e) => {
       const b = e.target.closest('.slot');

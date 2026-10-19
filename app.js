@@ -1049,8 +1049,68 @@ app.post('/api/bookings/bulk-delete', adminOnly, wrap(async (req, res) => {
   res.json({ ok: true, count: result.deletedCount });
 }));
 
+// Build a comprehensive, uncompacted report of verified scholars & rates in a devotee's location
+async function prepareDevoteeLocationReport(district = '', state = '') {
+  const cleanDist = (district || '').trim();
+  const cleanState = (state || 'Odisha').trim();
+  if (!cleanDist) {
+    return { district: '', state: cleanState, totalPandits: 0, pandits: [], minPrice: 1199, maxPrice: 1500 };
+  }
+
+  const dRegex = new RegExp('^' + cleanDist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+  const panditsInArea = await Pandit.find({
+    $and: [
+      {
+        $or: [
+          { status: 'Verified' },
+          { status: new RegExp('^verified$', 'i') },
+          { verified: true }
+        ]
+      },
+      {
+        $or: [
+          { district: dRegex },
+          { workingDistricts: dRegex }
+        ]
+      }
+    ]
+  }).lean();
+
+  const panditList = panditsInArea.map((p) => {
+    let rate = 0;
+    if (p.districtPrices && typeof p.districtPrices === 'object') {
+      const matchKey = Object.keys(p.districtPrices).find(
+        (k) => k.trim().toLowerCase() === cleanDist.toLowerCase()
+      );
+      if (matchKey && Number(p.districtPrices[matchKey]) > 0) {
+        rate = Number(p.districtPrices[matchKey]);
+      }
+    }
+    if (!rate || isNaN(rate) || rate <= 0) {
+      rate = Number(p.fee) || 1500;
+    }
+    return {
+      name: p.name,
+      photo: p.photo,
+      specialty: p.specialty || 'Vedic Rituals & Katha',
+      experience: p.exp || `${p.experience || 5}+ Years Vedic Rigor`,
+      districtRate: rate
+    };
+  });
+
+  const prices = panditList.map((x) => x.districtRate);
+  return {
+    district: cleanDist,
+    state: cleanState,
+    totalPandits: panditList.length,
+    pandits: panditList,
+    minPrice: prices.length ? Math.min(...prices) : 1199,
+    maxPrice: prices.length ? Math.max(...prices) : 1500
+  };
+}
+
 // Devotee books a puja: selecting a specific pandit is OPTIONAL.
-// No confirmation mail sent yet. Sends request acknowledgement mail with booking details.
+// Sends booking request confirmation email with filtered local scholars & rates report.
 app.post('/api/bookings', wrap(async (req, res) => {
   const b = req.body;
   if (!b.userEmail || !b.service || !b.date || !b.district) {
@@ -1115,12 +1175,18 @@ app.post('/api/bookings', wrap(async (req, res) => {
     bookingType: b.bookingType || 'Standard'
   });
 
-  // Send acknowledgement email to devotee (NOT confirmation email yet!)
+  // Prepare uncompacted location report for the devotee's registered account district
+  const devoteeLocDistrict = (devoteeUser && devoteeUser.district) ? devoteeUser.district.trim() : booking.district;
+  const devoteeLocState = (devoteeUser && devoteeUser.state) ? devoteeUser.state.trim() : 'Odisha';
+  const locationReport = await prepareDevoteeLocationReport(devoteeLocDistrict, devoteeLocState);
+
+  // Send acknowledgement email to devotee with local area report
   const mailPayload = {
     ...booking.toObject(),
     preferredPanditName: preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit',
     district: booking.district,
-    address: booking.address || booking.district
+    address: booking.address || booking.district,
+    locationReport
   };
   const mailResult = await sendSafe('BOOKING_REQUEST_RECEIVED', booking.userEmail, mailPayload);
 
@@ -1208,11 +1274,13 @@ app.put('/api/bookings/:id/pandit-response', wrap(async (req, res) => {
 
     // Now send the official confirmation email automatically to devotee!
     const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
+    const locationReport = await prepareDevoteeLocationReport(b.district, b.state || 'Odisha');
     await sendSafe('BOOKING_CONFIRMATION', b.userEmail, {
       ...b.toObject(),
       panditPhone: pandit ? pandit.phone : '',
       district: b.district,
-      address: b.address
+      address: b.address,
+      locationReport
     });
     await sendSafe('PANDIT_CONFIRMED_BOOKING', b.userEmail, {
       bookingId: b.bookingId,
@@ -1569,11 +1637,13 @@ app.put('/api/bookings/:id/rebook', wrap(async (req, res) => {
   await b.save();
 
   // Send acknowledgement email to devotee
+  const locationReport = await prepareDevoteeLocationReport(b.district, b.state || 'Odisha');
   await sendSafe('BOOKING_REQUEST_RECEIVED', b.userEmail, {
     ...b.toObject(),
     preferredPanditName: preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit',
     district: b.district,
-    address: b.address || b.district
+    address: b.address || b.district,
+    locationReport
   });
 
   res.json({ ok: true, booking: b, message: 'Puja rebooked successfully! Our team will assign a verified Pandit for your new slot.' });
