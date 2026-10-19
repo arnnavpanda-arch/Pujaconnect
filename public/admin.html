@@ -787,7 +787,7 @@
                     return `
                       <tr>
                         <td class="td-cb"><input type="checkbox" ${SELECTED.bookings.has(b.bookingId) ? 'checked' : ''} onchange="toggleSelectRow('bookings', '${esc(b.bookingId)}', this.checked)"></td>
-                        <td><b>${esc(b.bookingId)}</b><br><small class="muted">${inr(b.fee)}</small></td>
+                        <td><b>${esc(b.bookingId)}</b><br><small class="muted">${b.fee > 0 ? inr(b.fee) : 'Unassigned Fee'}</small></td>
                         <td><b>${esc(b.userName)}</b><br><small class="muted">${esc(b.userEmail)}<br>📞 ${esc(b.phone || 'N/A')}</small></td>
                         <td><b>${esc(b.service)}</b></td>
                         <td><b>${esc(b.district)}</b><br><small class="muted">📅 ${esc(b.date)} (${esc(b.time)})</small></td>

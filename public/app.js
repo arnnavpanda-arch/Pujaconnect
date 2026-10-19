@@ -1245,7 +1245,7 @@ async function openBooking(arg) {
             <span class="material-icons" style="font-size:42px;color:var(--ochre)">temple_hindu</span>
             <h4 style="margin:8px 0 4px;color:var(--mahogany)">Regional Vedic Allocation for ${esc(initialDistrict)}</h4>
             <p class="muted" style="max-width:520px;margin:0 auto 12px;font-size:13.5px">
-              No individual pandit currently lists a resident address solely in ${esc(initialDistrict)}. PujaConnect Admin directly allocates verified mobile scholars from the state center with the transparent base Dakshina of ${inr(baseDakshina)}.
+              No individual pandit currently lists a resident address solely in ${esc(initialDistrict)}. PujaConnect Admin directly allocates verified mobile scholars from the regional center for your sacred ritual.
             </p>
           </div>
         `}
@@ -1269,12 +1269,8 @@ async function openBooking(arg) {
             </div>
           </div>
           <div class="loc-scholar-actions">
-            <div class="loc-scholar-price-badge">
-              <div class="loc-scholar-price-val">${inr(baseDakshina)}</div>
-              <div class="loc-scholar-price-lbl">Standard Base Dakshina</div>
-            </div>
-            <button class="btn btn-outline dark btn-sm" data-action="pickAny" style="padding:10px 16px;white-space:nowrap">
-              <span class="material-icons" style="font-size:16px">auto_awesome</span> Book with Any Pandit &rarr;
+            <button class="btn btn-gold btn-sm" data-action="pickAny" style="padding:10px 18px;white-space:nowrap">
+              <span class="material-icons" style="font-size:16px">auto_awesome</span> Book with Any Available Pandit &rarr;
             </button>
           </div>
         </div>
@@ -1416,20 +1412,7 @@ async function openBooking(arg) {
         <input id="b-email" value="${esc(u.email || '')}" readonly style="background:#fcf8f0;cursor:not-allowed">
       </div>
     </div>
-    <div class="cost-box" style="margin-top:14px;background:#fff8ed;border:1.5px dashed var(--ochre);border-radius:12px;padding:14px">
-      <div class="row" style="align-items:center;justify-content:space-between">
-        <div>
-          <span style="font-size:14px;font-weight:700;color:var(--mahogany)">Estimated Dakshina</span>
-          <div id="b-fee-note" style="font-size:12px;color:var(--muted);margin-top:2px">
-            Standard fixed Vedic Dakshina for ritual
-          </div>
-        </div>
-        <b id="b-fee" style="font-size:24px;color:var(--ochre);font-weight:700">₹1,199</b>
-      </div>
-      <small class="muted" style="display:block;margin-top:6px;font-size:12px;border-top:1px dashed #ebd9c2;padding-top:6px">
-        Dakshina rates are fixed district-wise by PujaConnect Admin. Payment is completed only after admin assignment and confirmation.
-      </small>
-    </div>
+    <div class="cost-box" style="margin-top:14px"></div>
     <button class="btn btn-gold btn-lg" id="b-submit" style="width:100%;margin-top:12px">
       <span class="material-icons">${isRebook ? 'event_repeat' : 'send'}</span> ${isRebook ? 'Submit Rebook Request' : 'Submit Booking Request'}
     </button>
@@ -1438,7 +1421,6 @@ async function openBooking(arg) {
     const districtSel = $('#b-district', m);
     const panditSel = $('#b-pandit', m);
     const dateInp = $('#b-date', m);
-    const feeEl = $('#b-fee', m);
 
     const updatePanditInfo = () => {
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
@@ -1491,7 +1473,7 @@ async function openBooking(arg) {
       const pujaDoc = (S.pujas || []).find((x) => (x.name || '').trim().toLowerCase() === (ritual || '').trim().toLowerCase());
       const baseDakshina = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
 
-      let optionsHtml = `<option value="">✨ Any Available Verified Pandit (Auto-assigned by Admin) — Base Dakshina: ${inr(baseDakshina)}</option>`;
+      let optionsHtml = `<option value="">✨ Any Available Verified Pandit (Auto-assigned by Admin)</option>`;
       allPandits.forEach((p) => {
         const isSelected = (selectedPandit && selectedPandit.email.toLowerCase() === p.email.toLowerCase()) || (targetPanditId && (p._id === targetPanditId || p.email.toLowerCase() === String(targetPanditId).toLowerCase()));
         const pFee = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || baseDakshina;
@@ -1509,34 +1491,43 @@ async function openBooking(arg) {
       const ritual = (serviceSel ? serviceSel.value : '') || initialPuja;
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
       const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
+      const costBox = m.querySelector('.cost-box');
+      if (!costBox) return;
 
-      let f = 0;
-      let noteText = '';
       if (p) {
-        f = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || 1500;
-        noteText = `Dakshina rate for Pandit ${p.name} in ${dist}`;
+        // Specific Pandit selected: show official Dakshina for this Pandit in district
+        const f = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || 1500;
+        costBox.innerHTML = `
+          <div style="background:#fff8ed;border:1.5px dashed var(--ochre);border-radius:12px;padding:14px">
+            <div class="row" style="align-items:center;justify-content:space-between">
+              <div>
+                <span style="font-size:14px;font-weight:700;color:var(--mahogany)">Pandit Dakshina Rate</span>
+                <div id="b-fee-note" style="font-size:12px;color:var(--muted);margin-top:2px">
+                  Official Dakshina for Pandit ${esc(p.name)} in ${esc(dist)}
+                </div>
+              </div>
+              <b id="b-fee" style="font-size:24px;color:var(--ochre);font-weight:700">${inr(f)}</b>
+            </div>
+            <small class="muted" style="display:block;margin-top:6px;font-size:12px;border-top:1px dashed #ebd9c2;padding-top:6px">
+              Dakshina rates are fixed district-wise by PujaConnect Admin. Payment is completed only after admin assignment and confirmation.
+            </small>
+          </div>
+        `;
       } else {
-        // Any Available Verified Pandit
-        const pujaDoc = (S.pujas || []).find((x) => (x.name || '').trim().toLowerCase() === (ritual || '').trim().toLowerCase());
-        if (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) {
-          f = pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, ''));
-        } else {
-          const eligibleInDist = (S.pandits || []).filter(
-            (x) => x.verified && ((x.workingDistricts && x.workingDistricts.includes(dist)) || x.district === dist)
-          );
-          const distPriceCandidate = eligibleInDist.find((x) => x.districtPrices && Number(x.districtPrices[dist]) > 0);
-          if (distPriceCandidate) {
-            f = Number(distPriceCandidate.districtPrices[dist]);
-          } else if (eligibleInDist.length && eligibleInDist[0].fee) {
-            f = Number(eligibleInDist[0].fee);
-          }
-        }
-        noteText = `Standard fixed Vedic Dakshina for ${ritual} in ${dist}`;
+        // Any Available Verified Pandit (Auto-assigned by Admin):
+        // REMOVE Standard Base Dakshina completely!
+        costBox.innerHTML = `
+          <div style="background:#fcf8f0;border:1.5px dashed #ebd9c2;border-radius:12px;padding:14px;display:flex;align-items:flex-start;gap:12px">
+            <span class="material-icons" style="font-size:22px;color:var(--ochre);margin-top:2px">auto_awesome</span>
+            <div style="flex:1">
+              <div style="font-size:13.5px;font-weight:700;color:var(--mahogany)">Dakshina Finalized by Admin upon Pandit Allocation</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5">
+                You selected <strong>Any Available Verified Pandit (Auto-assigned by Admin)</strong>. PujaConnect Admin will auto-assign a qualified Vedic Pandit for your district. Official Dakshina will be confirmed upon Pandit allocation. No advance payment required now.
+              </div>
+            </div>
+          </div>
+        `;
       }
-      if (!f || isNaN(f) || f <= 0) f = 1199;
-      if (feeEl) feeEl.innerHTML = inr(f);
-      const noteEl = $('#b-fee-note', m);
-      if (noteEl) noteEl.textContent = noteText;
     };
 
     const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
@@ -1595,8 +1586,14 @@ async function openBooking(arg) {
       const phone = $('#b-phone', m).value.trim();
       if (!phone) return toast('Please enter your contact mobile number', true);
 
-      const feeText = feeEl.textContent.replace(/[^0-9]/g, '');
-      const fee = Number(feeText) || 1199;
+      const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
+      const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
+      let fee = 0;
+      if (p) {
+        const feeEl = $('#b-fee', m);
+        const feeText = feeEl ? feeEl.textContent.replace(/[^0-9]/g, '') : '';
+        fee = Number(feeText) || (p.districtPrices && Number(p.districtPrices[lockedDistrict || districtSel.value])) || p.fee || 0;
+      }
 
       const submitBtn = e.target.closest('button') || e.target;
       submitBtn.disabled = true;
@@ -1646,7 +1643,7 @@ async function openBooking(arg) {
               <div><b>Preferred Pandit:</b> ${esc(bk.preferredPanditName || 'Any Available Verified Pandit')}</div>
               <div><b>Ceremony Schedule:</b> ${esc(bk.date)} · ${esc(bk.time)}</div>
               <div><b>District:</b> ${esc(bk.district)}</div>
-              <div><b>Estimated Dakshina:</b> ${inr(bk.fee)}</div>
+              <div><b>Estimated Dakshina:</b> ${bk.fee && bk.fee > 0 ? inr(bk.fee) : 'To be assigned by Admin upon Pandit allocation'}</div>
             </div>
             <div style="display:flex;gap:10px;justify-content:center">
               <button class="btn btn-gold" onclick="closeModal();showView('dashboard')">
@@ -2490,7 +2487,7 @@ async function openBookingTimeline(arg) {
   if (!b) return toast('Ceremony booking record not found', true);
 
   const isSlotRejected = isBookingRejected(b);
-  const fee = b.fee || 1199;
+  const fee = Number(b.fee) || 0;
 
   // Stage 2: Admin Review & Pandit Assignment
   let step2State = 'pending';
@@ -2595,7 +2592,7 @@ async function openBookingTimeline(arg) {
             <div style="font-size:13px;color:#5c3818;display:flex;flex-wrap:wrap;gap:14px;margin-top:6px">
               <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">schedule</span> <b>${esc(b.date)}</b> at <b>${esc(b.time || '10:00 AM')}</b></span>
               <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">place</span> <b>${esc(b.district)}</b></span>
-              <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">payments</span> Dakshina: <b>${inr(fee)}</b></span>
+              <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">payments</span> Dakshina: <b>${fee > 0 ? inr(fee) : 'To be assigned by Admin'}</b></span>
             </div>
           </div>
           <div>
@@ -2740,7 +2737,7 @@ function renderDevoteeBookingsTab(bookings) {
     <div class="booking-cards-grid">
       ${bookings.map((b) => {
         const isSlotRejected = isBookingRejected(b);
-        const fee = b.fee || 1199;
+        const fee = Number(b.fee) || 0;
 
         let badgeHtml = '';
         if (isSlotRejected) {
@@ -2803,7 +2800,7 @@ function renderDevoteeBookingsTab(bookings) {
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">payments</span>
-              <span>Estimated Dakshina: <b>${inr(fee)}</b> <small class="muted">(${b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' ? 'Paid & Verified' : (b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending' ? 'Under Processing' : (b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected' ? 'Payment Rejected' : (b.paymentStatus || 'Pending')))})</small></span>
+              <span>Estimated Dakshina: <b>${fee > 0 ? inr(fee) : 'To be assigned by Admin'}</b> ${fee > 0 ? `<small class="muted">(${b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' ? 'Paid & Verified' : (b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending' ? 'Under Processing' : (b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected' ? 'Payment Rejected' : (b.paymentStatus || 'Pending')))})</small>` : ''}</span>
             </div>
           </div>
           <div class="booking-card-footer">

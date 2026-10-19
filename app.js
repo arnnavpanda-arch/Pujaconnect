@@ -1128,15 +1128,11 @@ app.post('/api/bookings', wrap(async (req, res) => {
     preferredPandit = await Pandit.findOne({ email: lc(b.panditEmail), verified: true });
   }
 
-  let fee = Number(b.fee);
-  if (!fee) {
-    if (preferredPandit) {
-      fee = (preferredPandit.districtPrices && preferredPandit.districtPrices[b.district]) || preferredPandit.fee || 1500;
-    } else {
-      const pujaDoc = await Puja.findOne({ name: new RegExp('^' + (b.service || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
-      fee = (pujaDoc && pujaDoc.baseFee) || 1199;
-    }
+  let fee = Number(b.fee) || 0;
+  if (!fee && preferredPandit) {
+    fee = (preferredPandit.districtPrices && preferredPandit.districtPrices[b.district]) || preferredPandit.fee || 1500;
   }
+  // When Any Available Verified Pandit is chosen, Standard Base Dakshina is removed and fee remains 0 until Admin assigns a Pandit
 
   const advanceAmount = Number(b.advanceAmount) || 0;
   const bookingId = await uniqueId(Booking, 'bookingId', 'PUJA');
@@ -1222,7 +1218,7 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
     return res.status(409).json({ error: `Pandit ${pandit.name} is already booked on ${b.date} at ${b.time}. Please select another Pandit.` });
   }
 
-  const fee = (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || b.fee;
+  const fee = (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || (b.fee > 0 ? b.fee : 1500);
   const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
   const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
   const adminFeeAmount = Math.round((fee * commPct) / 100);
@@ -1609,21 +1605,16 @@ app.put('/api/bookings/:id/rebook', wrap(async (req, res) => {
     b.preferredPanditName = 'Any Available Verified Pandit';
   }
 
-  let newFee = Number(fee);
-  if (!newFee) {
-    if (preferredPandit) {
-      newFee = (preferredPandit.districtPrices && preferredPandit.districtPrices[b.district]) || preferredPandit.fee || 1500;
-    } else {
-      const pujaDoc = await Puja.findOne({ name: new RegExp('^' + (b.service || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
-      newFee = (pujaDoc && pujaDoc.baseFee) || 1199;
-    }
+  let newFee = Number(fee) || 0;
+  if (!newFee && preferredPandit) {
+    newFee = (preferredPandit.districtPrices && preferredPandit.districtPrices[b.district]) || preferredPandit.fee || 1500;
   }
   b.fee = newFee;
 
   const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
   const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
   b.adminFeePercent = commPct;
-  b.adminFeeAmount = Math.round((newFee * commPct) / 100);
+  b.adminFeeAmount = newFee > 0 ? Math.round((newFee * commPct) / 100) : 0;
   b.panditNetPayout = Math.max(0, newFee - b.adminFeeAmount);
 
   b.status = 'Pending Assignment';
