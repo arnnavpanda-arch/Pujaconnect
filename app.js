@@ -102,6 +102,15 @@ async function hasPricedPanditsInDistrict(district = '', state = '') {
   });
 }
 
+function bookingFindQuery(param) {
+  return {
+    $or: [
+      { bookingId: param },
+      { _id: String(param).match(/^[0-9a-fA-F]{24}$/) ? param : null }
+    ]
+  };
+}
+
 app.post('/api/auth/register', wrap(async (req, res) => {
   const { name, email, phone, state, district, city } = req.body;
   if (!email || !name || !phone) return res.status(400).json({ error: 'Name, email and phone are required' });
@@ -200,6 +209,62 @@ app.post('/api/auth/magic-rebook', wrap(async (req, res) => {
     ok: true,
     user: publicUser(user),
     token: sign({ email: user.email, role: user.role }),
+    booking
+  });
+}));
+
+// Magic login and decision verification for Pandits responding via email
+app.post('/api/auth/magic-pandit-decision', wrap(async (req, res) => {
+  const { bookingId, email, token } = req.body || {};
+  let panditEmail = email ? lc(email) : '';
+  let valid = false;
+
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET());
+      if (decoded && decoded.email) {
+        panditEmail = lc(decoded.email);
+        valid = true;
+      }
+    } catch (e) {
+      // Fallback to booking validation below
+    }
+  }
+
+  let booking = null;
+  if (bookingId) {
+    booking = await Booking.findOne(bookingFindQuery(bookingId));
+    if (booking) {
+      if (!panditEmail) panditEmail = lc(booking.panditEmail);
+      if (lc(booking.panditEmail) === panditEmail || (booking.rejectedPandits || []).includes(panditEmail)) {
+        valid = true;
+      }
+    }
+  }
+
+  if (!valid || !panditEmail) {
+    return res.status(401).json({ error: 'Invalid or expired Pandit assignment authorization link' });
+  }
+
+  let pandit = await Pandit.findOne({ email: panditEmail });
+  if (!pandit) {
+    return res.status(404).json({ error: 'Pandit profile not found' });
+  }
+
+  const userSession = {
+    name: pandit.name,
+    email: pandit.email,
+    phone: pandit.phone,
+    role: 'pandit',
+    verified: pandit.verified,
+    district: pandit.district
+  };
+  const authToken = sign({ email: pandit.email, role: 'pandit' });
+
+  res.json({
+    ok: true,
+    user: userSession,
+    token: authToken,
     booking
   });
 }));
@@ -1007,12 +1072,7 @@ async function uniqueId(Model, field, prefix) {
   return `${prefix}-${Date.now().toString().slice(-6)}`;
 }
 
-const bookingFindQuery = (param) => ({
-  $or: [
-    { bookingId: param },
-    { _id: String(param).match(/^[0-9a-fA-F]{24}$/) ? param : null }
-  ]
-});
+// bookingFindQuery(param) is defined at top of file
 
 app.get('/api/bookings', wrap(async (req, res) => {
   const q = {};
@@ -1235,19 +1295,37 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
   b.adminApproval = 'Approved';
   await b.save();
 
-  // Send assignment offer alert to Pandit with uncompacted fee and admin charge % breakdown
+  // Sign authorization token and build one-click decision URLs for Pandit email
+  const panditToken = sign({ email: pandit.email, role: 'pandit', bookingId: b.bookingId, purpose: 'pandit_offer_response' });
+  const baseUrl = 'https://pujaconnect-one.vercel.app';
+  const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Accept&token=${encodeURIComponent(panditToken)}`;
+  const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}`;
+  const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}`;
+
+  // Send assignment offer alert to Pandit with uncompacted fee, breakdown, and direct Accept/Reject action links
   await sendSafe('PANDIT_NEW_BOOKING', pandit.email, {
     ...b.toObject(),
+    userName: b.userName,
+    userEmail: b.userEmail,
+    phone: b.phone || b.userPhone,
     panditName: pandit.name,
+    panditEmail: pandit.email,
     district: b.district,
     address: b.address || b.district,
+    date: b.date,
+    time: b.time,
     fee,
     totalPujaCost: fee,
     adminFeePercent: commPct,
     adminFeeAmount,
     adminFee: adminFeeAmount,
     netDakshina: panditNetPayout,
-    panditFee: panditNetPayout
+    panditFee: panditNetPayout,
+    panditToken,
+    acceptUrl,
+    rejectUrl,
+    reviewUrl,
+    baseUrl
   });
 
   res.json({ ok: true, booking: b });
@@ -1255,7 +1333,7 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
 
 // Pandit accepts or rejects the ceremony assignment
 app.put('/api/bookings/:id/pandit-response', wrap(async (req, res) => {
-  const { response, rejectionReason, panditEmail } = req.body; // 'Accept' | 'Reject'
+  const { response, rejectionReason, panditEmail, token } = req.body; // 'Accept' | 'Reject'
   if (!['Accept', 'Reject'].includes(response)) {
     return res.status(400).json({ error: 'Invalid response. Must be Accept or Reject.' });
   }
@@ -1263,35 +1341,56 @@ app.put('/api/bookings/:id/pandit-response', wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
+  // Optional token verification if called directly from email link
+  let verifiedPanditEmail = panditEmail ? lc(panditEmail) : (b.panditEmail ? lc(b.panditEmail) : '');
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET());
+      if (decoded && decoded.email) verifiedPanditEmail = lc(decoded.email);
+    } catch (e) {}
+  }
+
   if (response === 'Accept') {
     b.status = 'Confirmed';
     b.panditApproval = 'Approved';
+    if (verifiedPanditEmail && !b.panditEmail) {
+      const p = await Pandit.findOne({ email: verifiedPanditEmail });
+      if (p) {
+        b.panditEmail = p.email;
+        b.panditName = p.name;
+      }
+    }
+    const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
+    if (pandit && pandit.phone) {
+      b.panditPhone = pandit.phone;
+    }
     await b.save();
 
-    // Now send the official confirmation email automatically to devotee!
-    const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
+    // Now send the official confirmation email automatically to devotee's registered email with website link!
+    const devoteeEmail = (b.userEmail || '').trim().toLowerCase();
     const locationReport = await prepareDevoteeLocationReport(b.district, b.state || 'Odisha');
-    await sendSafe('BOOKING_CONFIRMATION', b.userEmail, {
-      ...b.toObject(),
-      panditPhone: pandit ? pandit.phone : '',
-      district: b.district,
-      address: b.address,
-      locationReport
-    });
-    await sendSafe('PANDIT_CONFIRMED_BOOKING', b.userEmail, {
-      bookingId: b.bookingId,
-      userName: b.userName,
-      panditName: b.panditName,
-      service: b.service,
-      date: b.date,
-      time: b.time,
-      district: b.district,
-      address: b.address,
-      fee: b.fee
-    });
+    if (devoteeEmail) {
+      await sendSafe('BOOKING_CONFIRMATION', devoteeEmail, {
+        ...b.toObject(),
+        userName: b.userName,
+        userEmail: devoteeEmail,
+        panditName: b.panditName || (pandit ? pandit.name : 'Vedic Pandit'),
+        panditPhone: (pandit && pandit.phone) || b.panditPhone || 'Available in Devotee Dashboard',
+        service: b.service,
+        date: b.date,
+        time: b.time,
+        district: b.district,
+        address: b.address || b.district,
+        fee: b.fee,
+        portalUrl: 'https://pujaconnect-one.vercel.app/#dashboard',
+        appUrl: 'https://pujaconnect-one.vercel.app',
+        locationReport
+      });
+    }
   } else {
-    // Rejected by Pandit
-    const rejectedEmail = b.panditEmail || (panditEmail ? lc(panditEmail) : '');
+    // Rejected by Pandit: DO NOT send email to devotee!
+    // Admin will reassign another available pandit. Devotee is only contacted if Admin marks slot unavailable.
+    const rejectedEmail = verifiedPanditEmail || b.panditEmail;
     const rejectedName = b.panditName;
     if (rejectedEmail && !b.rejectedPandits.includes(rejectedEmail)) {
       b.rejectedPandits.push(rejectedEmail);
@@ -1302,7 +1401,6 @@ app.put('/api/bookings/:id/pandit-response', wrap(async (req, res) => {
     b.panditEmail = '';
     b.panditName = 'To Be Assigned by Admin';
     await b.save();
-    // No confirmation or cancellation email sent to devotee yet; Admin reassigns another Pandit!
   }
 
   res.json({ ok: true, booking: b });
