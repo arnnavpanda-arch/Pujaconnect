@@ -389,6 +389,100 @@ app.get('/api/pandits', wrap(async (req, res) => {
   res.json(await Pandit.find(q).sort({ experience: -1 }).lean());
 }));
 
+// Public endpoint for Puja Price Configuration (State-wise & District-wise pricing chart)
+app.get('/api/pricing-configuration', wrap(async (req, res) => {
+  const pandits = await Pandit.find({ status: 'Verified' }).sort({ experience: -1 }).lean();
+  const pujas = await Puja.find({}).lean();
+
+  const stateMap = {};
+
+  pandits.forEach(p => {
+    const stateName = (p.workingState || p.state || 'Odisha').trim();
+    if (!stateMap[stateName]) {
+      stateMap[stateName] = {
+        state: stateName,
+        pandits: [],
+        districtSet: new Set(),
+        districtPriceMatrix: {}
+      };
+    }
+    const stateObj = stateMap[stateName];
+    const workingDists = (Array.isArray(p.workingDistricts) && p.workingDistricts.length)
+      ? p.workingDistricts
+      : [p.district || 'Khordha'];
+
+    const distPrices = p.districtPrices || {};
+
+    stateObj.pandits.push({
+      _id: p._id,
+      name: p.name,
+      experience: p.experience,
+      exp: p.exp || `${p.experience || 5}+ Years`,
+      specialty: p.specialty || 'Vedic Rituals',
+      fee: p.fee || 1500,
+      state: stateName,
+      location: p.location || `${p.city || p.district || ''}, ${stateName}`,
+      workingDistricts: workingDists,
+      districtPrices: distPrices,
+      services: p.services || [],
+      photo: p.photo,
+      status: p.status,
+      verified: p.verified
+    });
+
+    workingDists.forEach(d => {
+      const cleanDist = d.trim();
+      stateObj.districtSet.add(cleanDist);
+      if (!stateObj.districtPriceMatrix[cleanDist]) {
+        stateObj.districtPriceMatrix[cleanDist] = [];
+      }
+      const price = (distPrices[cleanDist] && Number(distPrices[cleanDist]) > 0)
+        ? Number(distPrices[cleanDist])
+        : (p.fee || 1500);
+
+      stateObj.districtPriceMatrix[cleanDist].push({
+        panditId: p._id,
+        panditName: p.name,
+        price
+      });
+    });
+  });
+
+  const states = Object.keys(stateMap).sort().map(sName => {
+    const s = stateMap[sName];
+    const districtSummary = Object.keys(s.districtPriceMatrix).sort().map(dName => {
+      const pList = s.districtPriceMatrix[dName];
+      const prices = pList.map(item => item.price);
+      return {
+        district: dName,
+        availablePanditsCount: pList.length,
+        panditNames: pList.map(item => item.panditName),
+        minPrice: Math.min(...prices),
+        maxPrice: Math.max(...prices),
+        typicalFee: Math.round(prices.reduce((a, b) => a + b, 0) / prices.length)
+      };
+    });
+
+    return {
+      state: sName,
+      totalVerifiedPandits: s.pandits.length,
+      districtsCoveredCount: s.districtSet.size,
+      districts: Array.from(s.districtSet).sort(),
+      districtSummary,
+      pandits: s.pandits
+    };
+  });
+
+  res.json({
+    ok: true,
+    states,
+    pujas,
+    totalStates: states.length,
+    totalVerifiedPandits: pandits.length,
+    lastSynchronized: new Date().toISOString()
+  });
+}));
+
 app.get('/api/pandits/:id', wrap(async (req, res) => {
   const raw = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
   let p = null;

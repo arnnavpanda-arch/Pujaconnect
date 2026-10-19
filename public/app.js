@@ -177,6 +177,8 @@ const S = {
   pujas: [],
   pujaTab: 'Short',
   filters: { state: 'Odisha', district: '', service: '' },
+  priceConfigFilters: { state: '', district: '', search: '' },
+  priceConfigData: null,
   view: 'home'
 };
 
@@ -339,6 +341,7 @@ function showView(name) {
   if (name === 'pujas') renderPujas();
   if (name === 'long') renderLongForm();
   if (name === 'dashboard') renderDashboard();
+  if (name === 'puja-prices') renderPujaPriceConfig();
 }
 
 async function renderHomePandits() {
@@ -519,6 +522,640 @@ function panditCard(p) {
       ${districtFeesSnippet}
       <div class="row" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><span class="price-wrap">${priceHtml}</span>
       <button class="btn btn-gold btn-sm" data-action="bookPandit" data-id="${esc(p._id)}">Book Pandit</button></div></div></div>`;
+}
+
+/* ---------- Puja Price Configuration & A4 Rate Chart ---------- */
+async function loadPriceConfigData(forceRefresh) {
+  if (S.priceConfigData && !forceRefresh) return S.priceConfigData;
+  try {
+    const res = await api('/pricing-configuration');
+    if (res && res.ok && res.states) {
+      S.priceConfigData = res;
+      return res;
+    }
+  } catch (err) {
+    console.warn('[pricing-configuration endpoint fallback]:', err.message);
+  }
+
+  // Graceful client fallback
+  try {
+    const [pandits, pujas] = await Promise.all([
+      api('/pandits?verified=true'),
+      api('/pujas')
+    ]);
+    const stateMap = {};
+    (pandits || []).forEach((p) => {
+      const stateName = (p.workingState || p.state || 'Odisha').trim();
+      if (!stateMap[stateName]) {
+        stateMap[stateName] = { state: stateName, pandits: [], districtSet: new Set(), districtPriceMatrix: {} };
+      }
+      const sObj = stateMap[stateName];
+      const dists = Array.isArray(p.workingDistricts) && p.workingDistricts.length ? p.workingDistricts : [p.district || 'Khordha'];
+      const curPrices = p.districtPrices || {};
+      sObj.pandits.push({
+        _id: p._id,
+        name: p.name,
+        experience: p.experience,
+        exp: p.exp || `${p.experience || 5}+ Years`,
+        specialty: p.specialty || 'Vedic Rituals',
+        fee: p.fee || 1500,
+        state: stateName,
+        location: p.location || `${p.city || p.district || ''}, ${stateName}`,
+        workingDistricts: dists,
+        districtPrices: curPrices,
+        services: p.services || [],
+        photo: p.photo,
+        status: p.status,
+        verified: p.verified
+      });
+      dists.forEach((d) => {
+        const cleanD = d.trim();
+        sObj.districtSet.add(cleanD);
+        if (!sObj.districtPriceMatrix[cleanD]) sObj.districtPriceMatrix[cleanD] = [];
+        const pr = curPrices[cleanD] && Number(curPrices[cleanD]) > 0 ? Number(curPrices[cleanD]) : (p.fee || 1500);
+        sObj.districtPriceMatrix[cleanD].push({ panditId: p._id, panditName: p.name, price: pr });
+      });
+    });
+
+    const states = Object.keys(stateMap).sort().map((sName) => {
+      const s = stateMap[sName];
+      const districtSummary = Object.keys(s.districtPriceMatrix).sort().map((dName) => {
+        const pList = s.districtPriceMatrix[dName];
+        const prices = pList.map((x) => x.price);
+        return {
+          district: dName,
+          availablePanditsCount: pList.length,
+          panditNames: pList.map((x) => x.panditName),
+          minPrice: Math.min(...prices),
+          maxPrice: Math.max(...prices),
+          typicalFee: Math.round(prices.reduce((a, b) => a + b, 0) / prices.length)
+        };
+      });
+      return {
+        state: sName,
+        totalVerifiedPandits: s.pandits.length,
+        districtsCoveredCount: s.districtSet.size,
+        districts: Array.from(s.districtSet).sort(),
+        districtSummary,
+        pandits: s.pandits
+      };
+    });
+
+    S.priceConfigData = {
+      ok: true,
+      states,
+      pujas: pujas || [],
+      totalStates: states.length,
+      totalVerifiedPandits: (pandits || []).length,
+      lastSynchronized: new Date().toISOString()
+    };
+    return S.priceConfigData;
+  } catch (err2) {
+    throw new Error('Unable to synchronize Puja Price Configuration: ' + err2.message);
+  }
+}
+
+async function renderPujaPriceConfig(forceRefresh = false) {
+  const root = $('#puja-prices-root');
+  if (!root) return;
+
+  if (forceRefresh || !S.priceConfigData) {
+    root.innerHTML = `
+      <div style="text-align:center;padding:70px 20px;">
+        <div class="brand" style="font-size:42px;display:inline-flex;justify-content:center;color:var(--ochre);animation:glow 1.8s infinite">ॐ</div>
+        <h3 style="font-size:22px;color:var(--mahogany);margin:16px 0 8px">Synchronizing Puja Price Configuration…</h3>
+        <p class="muted" style="font-size:14px;max-width:520px;margin:0 auto">Fetching verified Vedic Pandits, available district locations, and official Dakshina rates across all states.</p>
+      </div>
+    `;
+  }
+
+  let data;
+  try {
+    data = await loadPriceConfigData(forceRefresh);
+  } catch (e) {
+    root.innerHTML = `
+      <div class="empty" style="padding:50px 20px">
+        <span class="material-icons" style="font-size:42px;color:#c62828">error_outline</span>
+        <h3 style="color:#c62828;margin:12px 0 6px">Configuration Unavailable</h3>
+        <p class="muted">${esc(e.message)}</p>
+        <button class="btn btn-gold btn-sm" onclick="renderPujaPriceConfig(true)" style="margin-top:14px">Retry Connection</button>
+      </div>
+    `;
+    return;
+  }
+
+  const allStates = data.states || [];
+  const allPujas = data.pujas || [];
+  const filters = S.priceConfigFilters;
+
+  // Extract all available districts across the selected state (or all states)
+  let activeDistrictsList = [];
+  if (filters.state) {
+    const stMatch = allStates.find((s) => s.state.toLowerCase() === filters.state.toLowerCase());
+    if (stMatch) activeDistrictsList = stMatch.districts || [];
+  } else {
+    const dSet = new Set();
+    allStates.forEach((s) => (s.districts || []).forEach((d) => dSet.add(d)));
+    activeDistrictsList = Array.from(dSet).sort();
+  }
+
+  // Filtered states for display
+  const displayStates = allStates
+    .filter((s) => !filters.state || s.state.toLowerCase() === filters.state.toLowerCase())
+    .map((s) => {
+      let filteredPandits = s.pandits || [];
+      if (filters.district) {
+        filteredPandits = filteredPandits.filter((p) =>
+          (p.workingDistricts || []).some((d) => d.toLowerCase() === filters.district.toLowerCase())
+        );
+      }
+      if (filters.search) {
+        const q = filters.search.toLowerCase().trim();
+        filteredPandits = filteredPandits.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            (p.specialty && p.specialty.toLowerCase().includes(q)) ||
+            (p.services && p.services.some((sv) => sv.toLowerCase().includes(q))) ||
+            (p.workingDistricts && p.workingDistricts.some((d) => d.toLowerCase().includes(q)))
+        );
+      }
+
+      let filteredSummary = s.districtSummary || [];
+      if (filters.district) {
+        filteredSummary = filteredSummary.filter((ds) => ds.district.toLowerCase() === filters.district.toLowerCase());
+      }
+      if (filters.search) {
+        const q = filters.search.toLowerCase().trim();
+        filteredSummary = filteredSummary.filter(
+          (ds) => ds.district.toLowerCase().includes(q) || ds.panditNames.some((n) => n.toLowerCase().includes(q))
+        );
+      }
+
+      return {
+        ...s,
+        pandits: filteredPandits,
+        districtSummary: filteredSummary
+      };
+    })
+    .filter((s) => s.pandits.length > 0 || s.districtSummary.length > 0 || (!filters.search && !filters.district));
+
+  const totalFilteredPandits = displayStates.reduce((acc, s) => acc + s.pandits.length, 0);
+  const syncDateStr = new Date(data.lastSynchronized || Date.now()).toLocaleString('en-IN', {
+    dateStyle: 'full',
+    timeStyle: 'short'
+  });
+
+  // Collect all verified pandits across all states for the live side feed
+  const allVerifiedPanditsList = [];
+  allStates.forEach((st) => {
+    (st.pandits || []).forEach((pt) => allVerifiedPanditsList.push(pt));
+  });
+
+  root.innerHTML = `
+    <div class="puja-price-page-header">
+      <div class="header-top-row">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span class="badge" style="background:var(--mahogany);color:var(--gold);font-weight:700;font-size:12px;padding:3px 10px;border-radius:20px">
+              📜 OFFICIAL VEDIC GAZETTE
+            </span>
+            <span class="badge green" style="font-size:12px;padding:3px 10px">
+              <span class="material-icons" style="font-size:13px;vertical-align:middle">verified</span> Live Platform Sync
+            </span>
+          </div>
+          <h1>Puja Price Configuration</h1>
+          <p>State-wise and District-wise Vedic Dakshina rates, verified Pandit availability, and sacred ceremony pricing schedule.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Interactive Control Toolbar -->
+    <div class="a4-toolbar">
+      <div class="a4-toolbar-filters">
+        <select id="a4-sel-state" aria-label="Select State">
+          <option value="">All States (${allStates.length})</option>
+          ${allStates.map((st) => `<option value="${esc(st.state)}" ${st.state === filters.state ? 'selected' : ''}>${esc(st.state)} (${st.totalVerifiedPandits} Pandits)</option>`).join('')}
+        </select>
+        <select id="a4-sel-district" aria-label="Select District">
+          <option value="">All Available Districts (${activeDistrictsList.length})</option>
+          ${activeDistrictsList.map((d) => `<option value="${esc(d)}" ${d === filters.district ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+        </select>
+        <input type="text" id="a4-txt-search" placeholder="🔍 Search Pandit, District or Ritual…" value="${esc(filters.search)}">
+        ${filters.state || filters.district || filters.search ? `
+          <button class="btn btn-outline dark btn-sm" id="a4-btn-clear" title="Clear all filters">Clear</button>
+        ` : ''}
+      </div>
+      <div class="a4-toolbar-actions">
+        <button class="btn btn-gold btn-sm" id="a4-btn-print" title="Print or save as A4 Document">
+          <span class="material-icons" style="font-size:16px">print</span> Print / Save A4 PDF
+        </button>
+        <button class="btn btn-outline dark btn-sm" id="a4-btn-refresh" title="Synchronize fresh rates from server">
+          <span class="material-icons" style="font-size:16px">sync</span> Live Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Two-column Layout: Side Updates Panel + Authentic A4 Paper Sheet -->
+    <div class="a4-layout-container">
+      
+      <!-- Left / Side Update & Live Feed Panel -->
+      <aside class="a4-live-sidebar">
+        <div class="a4-side-card">
+          <h4><span class="material-icons" style="color:var(--ochre)">bolt</span> Live Sync Monitor</h4>
+          <div class="a4-stat-grid">
+            <div class="a4-stat-box">
+              <div class="a4-stat-num">${data.totalVerifiedPandits || 0}</div>
+              <div class="a4-stat-lbl">Verified Pandits</div>
+            </div>
+            <div class="a4-stat-box">
+              <div class="a4-stat-num">${data.totalStates || allStates.length}</div>
+              <div class="a4-stat-lbl">Active States</div>
+            </div>
+            <div class="a4-stat-box">
+              <div class="a4-stat-num">${activeDistrictsList.length}</div>
+              <div class="a4-stat-lbl">Districts Serviced</div>
+            </div>
+            <div class="a4-stat-box">
+              <div class="a4-stat-num">${allPujas.length || 0}</div>
+              <div class="a4-stat-lbl">Pujas Listed</div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:#2e7d32;display:flex;align-items:center;gap:6px;font-weight:600;margin-top:8px">
+            <span class="pulse-dot" style="background:#2e7d32;box-shadow:0 0 6px #2e7d32"></span>
+            Real-time synchronization enabled
+          </div>
+        </div>
+
+        <!-- Live Added Pandits & District Rates Feed (Side Update) -->
+        <div class="a4-side-card">
+          <h4><span class="material-icons" style="color:var(--ochre)">history_edu</span> Added Pandits &amp; Rates</h4>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px">
+            Whenever a Pandit is added or a district location is configured, this live registry updates automatically.
+          </p>
+          <div class="live-updates-feed">
+            ${allVerifiedPanditsList.length ? allVerifiedPanditsList.map((p) => {
+              const curPrices = p.districtPrices || {};
+              const workingDists = p.workingDistricts && p.workingDistricts.length ? p.workingDistricts : [p.district || 'Khordha'];
+              return `
+                <div class="live-feed-item">
+                  <div class="feed-title">
+                    <span>${esc(p.name)}</span>
+                    <span class="badge green" style="font-size:10px;padding:1px 6px">Live</span>
+                  </div>
+                  <div class="feed-loc">
+                    <span class="material-icons" style="font-size:12px;vertical-align:middle;color:var(--ochre)">place</span>
+                    ${esc(p.state || 'Odisha')} (${workingDists.length} Districts)
+                  </div>
+                  <div class="feed-rates">
+                    ${workingDists.map((d) => {
+                      const fee = curPrices[d] && Number(curPrices[d]) > 0 ? Number(curPrices[d]) : (p.fee || 1500);
+                      return `<span class="live-dist-tag">${esc(d)}: <b>${inr(fee)}</b></span>`;
+                    }).join('')}
+                  </div>
+                </div>
+              `;
+            }).join('') : '<div class="muted" style="font-size:12px">No registered pandits yet.</div>'}
+          </div>
+        </div>
+
+        <!-- Vedic Standards Card -->
+        <div class="a4-side-card" style="background:#fffcf7;border-color:#ebd9c2">
+          <h4><span class="material-icons" style="color:var(--ochre)">verified_user</span> Shastric Integrity</h4>
+          <ul style="margin:0;padding-left:18px;font-size:12.5px;color:#4a2b16;display:flex;flex-direction:column;gap:8px">
+            <li><strong>100% Fixed Dakshina:</strong> Zero haggling, transparent rate per district.</li>
+            <li><strong>KYC &amp; Lineage Verified:</strong> Admin approved Vedic credentials.</li>
+            <li><strong>Samagri List Included:</strong> Prescribed Vedic ingredients catalog provided in advance.</li>
+          </ul>
+          ${S.user && S.user.role === 'admin' ? `
+            <div style="margin-top:16px;padding-top:14px;border-top:1px dashed #ebd9c2">
+              <a href="/admin.html" class="btn btn-dark btn-sm" style="width:100%;justify-content:center">
+                <span class="material-icons" style="font-size:15px">settings</span> Super Admin Portal
+              </a>
+            </div>
+          ` : ''}
+        </div>
+      </aside>
+
+      <!-- Main A4 Paper Document Wrapper (No Compacting - Full Space) -->
+      <main class="a4-paper-wrapper" id="a4-printable-area">
+        <article class="a4-paper-sheet" id="a4-sheet-1">
+          <div class="a4-paper-inner-frame">
+            
+            <!-- Sacred Vedic Document Header -->
+            <header class="a4-doc-header">
+              <div class="a4-sanskrit-shloka">॥ श्री गणेशाय नमः ॥ ॐ नमो भगवते वासुदेवाय ॥</div>
+              <div class="a4-brand-seal">
+                <span class="om">ॐ</span> PujaConnect Vedic Services
+              </div>
+              <h2 class="a4-doc-title">Official Puja Price &amp; District Dakshina Configuration Chart</h2>
+              <p class="a4-doc-subtitle">
+                Authorized Vedic Gazette of Lineage-Verified Pandits, Available District Locations &amp; Transparent Dakshina Schedules
+              </p>
+              <div class="a4-meta-strip">
+                <div><strong>Gazette Ref:</strong> PC-RAT-CFG-2026/A4</div>
+                <div><strong>Verification Authority:</strong> PujaConnect Super Admin Board</div>
+                <div><strong>Standard:</strong> 100% Fixed Transparent Dakshina</div>
+                <div><strong>Synchronized:</strong> ${esc(syncDateStr)}</div>
+              </div>
+            </header>
+
+            <!-- State-Wise Sections (Uncompacted & Roomy) -->
+            ${displayStates.length ? displayStates.map((st) => `
+              <section class="a4-state-block">
+                <div class="a4-state-header">
+                  <h3>
+                    <span class="material-icons" style="color:var(--gold)">temple_hindu</span>
+                    State: ${esc(st.state.toUpperCase())}
+                  </h3>
+                  <div class="a4-state-badge">
+                    ${st.pandits.length} Verified Pandit${st.pandits.length === 1 ? '' : 's'} · ${st.districtsCoveredCount || (st.districts || []).length} Serviced District${(st.districts || []).length === 1 ? '' : 's'}
+                  </div>
+                </div>
+
+                <!-- Verified Pandits Detailed District Price List (No Compacting) -->
+                <div class="a4-pandits-section">
+                  <h4 class="a4-section-heading">
+                    <span class="material-icons" style="font-size:18px;color:var(--ochre)">badge</span>
+                    Verified Vedic Scholars &amp; District-wise Dakshina Rates
+                  </h4>
+
+                  ${st.pandits.length ? st.pandits.map((p) => {
+                    const workingDists = p.workingDistricts && p.workingDistricts.length ? p.workingDistricts : [p.district || 'Khordha'];
+                    const curPrices = p.districtPrices || {};
+                    const servicesList = p.services && p.services.length ? p.services : ['Satyanarayan Puja', 'Griha Pravesh', 'Ganesh Puja', 'Rudrabhishek'];
+
+                    return `
+                      <div class="a4-pandit-card">
+                        <div class="a4-pandit-card-top">
+                          <div class="a4-pandit-info">
+                            <img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" class="a4-pandit-avatar" alt="${esc(p.name)}" onerror="this.src='https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200'">
+                            <div>
+                              <div class="a4-pandit-name">${esc(p.name)} <span class="badge green" style="font-size:11px;padding:2px 8px;vertical-align:middle;margin-left:6px"><span class="material-icons" style="font-size:12px">verified</span> Verified Scholar</span></div>
+                              <div class="a4-pandit-meta">
+                                <span><span class="material-icons" style="font-size:14px;vertical-align:middle;color:var(--ochre)">school</span> ${esc(p.exp || (p.experience + '+ Years Vedic Rigor'))}</span>
+                                <span>·</span>
+                                <span><span class="material-icons" style="font-size:14px;vertical-align:middle;color:var(--ochre)">spa</span> ${esc(p.specialty || 'Vedic Rituals & Katha')}</span>
+                                <span>·</span>
+                                <span><span class="material-icons" style="font-size:14px;vertical-align:middle;color:var(--ochre)">home</span> Base: <b>${esc(p.location || p.state)}</b></span>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="a4-base-fee-badge">
+                            <div class="a4-base-fee-val">${inr(p.fee || 1500)}</div>
+                            <div class="a4-base-fee-lbl">Standard Base Dakshina</div>
+                          </div>
+                        </div>
+
+                        <!-- Available District Locations & Set Dakshina Fees (Spacious & Clear) -->
+                        <div class="a4-district-rates-panel">
+                          <div class="a4-district-rates-title">
+                            <span class="material-icons" style="font-size:17px;color:var(--ochre)">payments</span>
+                            Available District Locations &amp; District-Wise Set Dakshina:
+                          </div>
+                          <div class="a4-district-rates-grid">
+                            ${workingDists.map((d) => {
+                              const dFee = curPrices[d] && Number(curPrices[d]) > 0 ? Number(curPrices[d]) : (p.fee || 1500);
+                              return `
+                                <div class="a4-district-price-chip">
+                                  <span class="dist-name">📍 ${esc(d)}</span>
+                                  <b class="dist-price">${inr(dFee)}</b>
+                                </div>
+                              `;
+                            }).join('')}
+                          </div>
+                        </div>
+
+                        <!-- Services & Booking Action -->
+                        <div style="margin-top:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding-top:10px;border-top:1px solid #ebd9c2">
+                          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                            <span style="font-size:12px;font-weight:700;color:var(--muted)">Key Pujas:</span>
+                            ${servicesList.slice(0, 5).map((s) => `<span class="badge" style="background:#fdf6ec;border:1px solid #ebd9c2;font-size:11.5px;color:#4a2b16">${esc(s)}</span>`).join('')}
+                          </div>
+                          <button class="btn btn-gold btn-sm" data-action="bookPandit" data-id="${esc(p._id)}">
+                            <span class="material-icons" style="font-size:15px">event_available</span> Book ${esc(p.name)}
+                          </button>
+                        </div>
+                      </div>
+                    `;
+                  }).join('') : `
+                    <div class="empty" style="padding:24px;border:1px dashed #ebd9c2;border-radius:8px">
+                      No verified Pandits match the current filter in ${esc(st.state)}.
+                    </div>
+                  `}
+                </div>
+
+                <!-- District-Wise Master Rate Table for this State (Uncompacted) -->
+                <div style="margin-top:28px">
+                  <h4 class="a4-section-heading">
+                    <span class="material-icons" style="font-size:18px;color:var(--ochre)">table_chart</span>
+                    ${esc(st.state)} District-Wise Dakshina Schedule &amp; Coverage Summary
+                  </h4>
+                  <div class="a4-table-container">
+                    <table class="a4-rate-table">
+                      <thead>
+                        <tr>
+                          <th style="width:22%">District Name</th>
+                          <th style="width:28%">Available Verified Pandits</th>
+                          <th style="width:22%">Fixed Dakshina Range</th>
+                          <th style="width:16%">Ceremony Coverage</th>
+                          <th style="width:12%;text-align:center">Booking</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${st.districtSummary && st.districtSummary.length ? st.districtSummary.map((ds) => `
+                          <tr>
+                            <td>
+                              <strong style="font-size:15px;color:var(--mahogany)">${esc(ds.district)}</strong><br>
+                              <small class="muted">${esc(st.state)} Region</small>
+                            </td>
+                            <td>
+                              <div style="font-weight:600;color:#2b1406;font-size:13.5px">${esc(ds.panditNames.join(', '))}</div>
+                              <small style="color:#2e7d32;font-weight:600">${ds.availablePanditsCount} Verified Scholar${ds.availablePanditsCount === 1 ? '' : 's'}</small>
+                            </td>
+                            <td>
+                              <div style="font-size:16px;font-weight:800;color:#b85d19">
+                                ${ds.minPrice === ds.maxPrice ? inr(ds.minPrice) : `${inr(ds.minPrice)} – ${inr(ds.maxPrice)}`}
+                              </div>
+                              <small class="muted">Per Sacred Puja</small>
+                            </td>
+                            <td>
+                              <span class="badge" style="background:#fdf6ec;border:1px solid #ebd9c2;font-size:11.5px">Home &amp; Temple</span>
+                            </td>
+                            <td style="text-align:center">
+                              <button class="btn btn-outline dark btn-sm" data-action="nav" data-view="pandits" onclick="S.filters.state='${esc(st.state)}'; S.filters.district='${esc(ds.district)}';">
+                                View
+                              </button>
+                            </td>
+                          </tr>
+                        `).join('') : `
+                          <tr>
+                            <td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">
+                              No district records found for this selection.
+                            </td>
+                          </tr>
+                        `}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+            `) : `
+              <div class="empty" style="padding:60px 20px">
+                <span class="material-icons" style="font-size:42px;color:var(--ochre)">search_off</span>
+                <h3 style="margin:12px 0 6px;color:var(--mahogany)">No Matching Rate Records</h3>
+                <p class="muted">No verified Pandits or districts match your filter parameters.</p>
+                <button class="btn btn-outline dark btn-sm" id="a4-btn-reset-filters" style="margin-top:10px">Reset All Filters</button>
+              </div>
+            `}
+
+            <!-- Sacred Puja Services & Standard Dakshina Catalog (Sheet Section 2) -->
+            <section style="margin-top:40px;padding-top:28px;border-top:2px solid #d99a19">
+              <h4 class="a4-section-heading">
+                <span class="material-icons" style="font-size:18px;color:var(--ochre)">temple_hindu</span>
+                Sacred Puja Ceremonies &amp; Reference Dakshina Schedule
+              </h4>
+              <div class="a4-table-container">
+                <table class="a4-rate-table">
+                  <thead>
+                    <tr>
+                      <th style="width:25%">Ceremony / Puja</th>
+                      <th style="width:15%">Category</th>
+                      <th style="width:35%">Shastric Significance &amp; Inclusions</th>
+                      <th style="width:25%">Transparent Dakshina</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${allPujas.slice(0, 8).map((puja) => `
+                      <tr>
+                        <td>
+                          <b style="font-size:15px;color:var(--mahogany)">${esc(puja.name)}</b>
+                        </td>
+                        <td>
+                          <span class="badge ${puja.type === 'Long' ? '' : 'green'}" style="font-size:11.5px">
+                            ${puja.type === 'Long' ? 'Multi-Day Mahayajna' : 'Home Ritual'}
+                          </span>
+                        </td>
+                        <td style="font-size:13.5px;color:#4a2b16">
+                          ${esc(puja.desc || 'Conducted according to authentic Vedic Shastras with complete samagri guidance.')}
+                        </td>
+                        <td>
+                          <b style="font-size:15px;color:#b85d19">${puja.type === 'Long' ? esc(puja.price) : 'From ' + inr(puja.baseFee)}</b><br>
+                          <small class="muted">${puja.type === 'Long' ? 'Multi-Priest Plan' : 'Standard Dakshina'}</small>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- Official Vedic Guidelines & Devotee Protection Notice -->
+            <section style="margin-top:36px;background:#fff8ee;border:1.5px solid #ebd9c2;border-radius:10px;padding:22px 24px">
+              <h4 style="margin:0 0 10px;font-size:15px;font-weight:800;color:var(--mahogany);display:flex;align-items:center;gap:8px">
+                <span class="material-icons" style="color:var(--ochre)">gavel</span>
+                PujaConnect Shastric Dakshina Charter &amp; Transparency Guarantee
+              </h4>
+              <div style="font-size:13px;line-height:1.6;color:#4a2b16;display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:14px">
+                <div>
+                  <strong>1. Fixed Dakshina Commitment:</strong> All amounts listed in this configuration chart are official, authorized Dakshina fees. Pandits will never request unannounced surcharges on ceremony day.
+                </div>
+                <div>
+                  <strong>2. Brahmin Verification:</strong> Every listed scholar has submitted verified identity proofs, Vedic lineage certificates, and has been reviewed by the Super Admin Council.
+                </div>
+                <div>
+                  <strong>3. Pure Samagri Provision:</strong> The Pandit supplies the detailed list of pure, prescribed ingredients (dhoop, ghee, wood, prasad items) beforehand, ensuring Shastric authenticity.
+                </div>
+              </div>
+            </section>
+
+            <!-- Document Verification Seal & Dual Signatures -->
+            <footer class="a4-doc-footer">
+              <div class="a4-sign-box">
+                <span class="material-icons" style="font-size:28px;color:var(--ochre)">verified</span>
+                <div class="a4-sign-title">Vedic Scholar Accreditation Council</div>
+                <div class="a4-sign-sub">PujaConnect Spiritual Advisory Board</div>
+                <div style="font-size:11px;color:#2e7d32;font-weight:700;margin-top:4px">DIGITALLY VERIFIED &amp; ENDORSED</div>
+              </div>
+              <div class="a4-sign-box">
+                <span class="material-icons" style="font-size:28px;color:var(--ochre)">verified_user</span>
+                <div class="a4-sign-title">Super Admin Platform Registrar</div>
+                <div class="a4-sign-sub">Official Gazette Document Seal · Ref #PC-2026-A4</div>
+                <div style="font-size:11px;color:#2e7d32;font-weight:700;margin-top:4px">RATIFIED · 100% TRANSPARENCY ASSURED</div>
+              </div>
+            </footer>
+
+          </div>
+        </article>
+      </main>
+    </div>
+  `;
+
+  // Attach interactive listeners for the toolbar
+  const stateSel = $('#a4-sel-state');
+  if (stateSel) {
+    stateSel.onchange = (e) => {
+      S.priceConfigFilters.state = e.target.value;
+      S.priceConfigFilters.district = '';
+      renderPujaPriceConfig(false);
+    };
+  }
+
+  const distSel = $('#a4-sel-district');
+  if (distSel) {
+    distSel.onchange = (e) => {
+      S.priceConfigFilters.district = e.target.value;
+      renderPujaPriceConfig(false);
+    };
+  }
+
+  const searchInp = $('#a4-txt-search');
+  if (searchInp) {
+    let t;
+    searchInp.oninput = (e) => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        S.priceConfigFilters.search = e.target.value;
+        renderPujaPriceConfig(false);
+      }, 250);
+    };
+  }
+
+  const clearBtn = $('#a4-btn-clear');
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      S.priceConfigFilters = { state: '', district: '', search: '' };
+      renderPujaPriceConfig(false);
+    };
+  }
+
+  const resetBtn = $('#a4-btn-reset-filters');
+  if (resetBtn) {
+    resetBtn.onclick = () => {
+      S.priceConfigFilters = { state: '', district: '', search: '' };
+      renderPujaPriceConfig(false);
+    };
+  }
+
+  const printBtn = $('#a4-btn-print');
+  if (printBtn) {
+    printBtn.onclick = () => {
+      window.print();
+    };
+  }
+
+  const refreshBtn = $('#a4-btn-refresh');
+  if (refreshBtn) {
+    refreshBtn.onclick = async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.innerHTML = '<span class="material-icons" style="font-size:16px;animation:spin 1s linear infinite">sync</span> Updating…';
+      try {
+        await renderPujaPriceConfig(true);
+        toast('Puja Price Configuration updated with latest verified pandits & district rates! 🙏');
+      } catch (err) {
+        toast('Sync failed: ' + err.message, true);
+      }
+    };
+  }
 }
 
 /* ---------- booking flow ---------- */
@@ -4340,7 +4977,7 @@ function setupPanditHavanListeners() {
     }
   } else {
     const hash = location.hash.replace('#', '');
-    if (['pandits', 'pujas', 'long', 'about', 'dashboard'].includes(hash)) showView(hash);
+    if (['pandits', 'pujas', 'long', 'about', 'dashboard', 'puja-prices'].includes(hash)) showView(hash);
   }
 })();
 

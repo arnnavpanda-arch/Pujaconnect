@@ -45,6 +45,9 @@
           <a href="#pandits" data-action="nav" data-view="pandits" class="drawer-link">
             <span class="material-icons">badge</span> Verified Pandits
           </a>
+          <a href="#puja-prices" data-action="nav" data-view="puja-prices" class="drawer-link">
+            <span class="material-icons">receipt_long</span> Puja Price Configuration
+          </a>
         </nav>
         <div class="drawer-divider"></div>
         <div id="drawer-nav-actions" class="drawer-nav-actions"></div>
@@ -95,6 +98,21 @@
           </div>
         </div>
 
+        <!-- State & District Puja Price Configuration Rate Card Callout -->
+        <div class="card price-config-banner" style="margin-top: 36px; padding: 22px 26px; background: linear-gradient(135deg, #fffaf2 0%, #fff3e0 100%); border: 1.5px solid #e8cdab; border-radius: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px; box-shadow: 0 8px 24px rgba(53, 22, 5, 0.05);">
+          <div style="flex: 1; min-width: 260px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span class="badge" style="background: var(--mahogany); color: var(--gold); font-size: 11px; padding: 3px 10px; font-weight: 700; border-radius: 20px;">📜 OFFICIAL RATE SCHEDULE</span>
+              <span class="badge green" style="font-size: 11px; padding: 3px 10px;"><span class="material-icons" style="font-size: 13px; vertical-align: middle;">verified</span> 100% Fixed Dakshina</span>
+            </div>
+            <h3 style="margin: 0 0 6px; font-size: 19px; color: var(--mahogany);">Puja Price Configuration (State &amp; District Rates)</h3>
+            <p class="muted" style="margin: 0; font-size: 13.5px; line-height: 1.5;">View the transparent, state-wise and district-wise Vedic Dakshina rate schedule for all verified Pandits. Formatted as an official A4 document ready for download and printing.</p>
+          </div>
+          <a href="#puja-prices" data-action="nav" data-view="puja-prices" class="btn btn-gold" style="white-space: nowrap; padding: 11px 20px;">
+            <span class="material-icons">receipt_long</span> View A4 Price Chart &rarr;
+          </a>
+        </div>
+
         <!-- Our Verified Pandits Section on Front Page -->
         <div class="home-pandits-section" style="margin-top: 50px;">
           <div class="row" style="margin-bottom: 20px; align-items: flex-end; flex-wrap: wrap; gap: 12px;">
@@ -110,6 +128,10 @@
           <div id="home-pandits-grid" class="grid"></div>
         </div>
       </div>
+    </section>
+
+    <section id="view-puja-prices" class="view-section">
+      <div class="container" id="puja-prices-root"></div>
     </section>
 
     <section id="view-pandits" class="view-section">
@@ -158,6 +180,7 @@
   <footer class="footer">
     <div class="footer-links">
       <a href="#about" data-action="nav" data-view="about">About Us</a>
+      <a href="#puja-prices" data-action="nav" data-view="puja-prices">Puja Price Configuration</a>
     </div>
     <p>© <span id="yr"></span> PujaConnect. Vedic Ritual Platform. All rights reserved.</p>
   </footer>

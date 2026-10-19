@@ -1806,5 +1806,574 @@ td .btn { margin: 0 4px 4px 0; }
   }
 }
 
+/* ==========================================================================
+   PUJA PRICE CONFIGURATION & A4 PAPER RATE CHART (UNCOMPACTED & SPACIOUS)
+   ========================================================================== */
+
+.puja-price-page-header {
+  margin-bottom: 24px;
+}
+.puja-price-page-header .header-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.puja-price-page-header h1 {
+  margin: 0;
+  font-size: 30px;
+  color: var(--mahogany);
+}
+.puja-price-page-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* Interactive Control Toolbar */
+.a4-toolbar {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.a4-toolbar-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+.a4-toolbar-filters select,
+.a4-toolbar-filters input {
+  padding: 9px 14px;
+  font-size: 13.5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--cream);
+  color: var(--text);
+  font-family: inherit;
+  font-weight: 500;
+  outline: none;
+}
+.a4-toolbar-filters select:focus,
+.a4-toolbar-filters input:focus {
+  border-color: var(--ochre);
+  box-shadow: 0 0 0 3px rgba(217, 154, 25, 0.15);
+}
+.a4-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Layout Container for Sidebar and A4 Paper */
+.a4-layout-container {
+  display: grid;
+  grid-template-columns: 290px 1fr;
+  gap: 28px;
+  align-items: flex-start;
+}
+@media (max-width: 992px) {
+  .a4-layout-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Sidebar with Live Updates & State Jump */
+.a4-live-sidebar {
+  position: sticky;
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.a4-side-card {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+.a4-side-card h4 {
+  margin: 0 0 14px;
+  font-size: 16px;
+  color: var(--mahogany);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.a4-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.a4-stat-box {
+  background: var(--cream);
+  border: 1px solid #ebd9c2;
+  border-radius: 10px;
+  padding: 12px 10px;
+  text-align: center;
+}
+.a4-stat-num {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--mahogany);
+  line-height: 1.1;
+}
+.a4-stat-lbl {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+/* Live Added Pandit & District Updates Feed */
+.live-updates-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.live-feed-item {
+  padding: 10px 12px;
+  background: #fffdfa;
+  border: 1px solid #ebd9c2;
+  border-left: 3.5px solid var(--ochre);
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+.live-feed-item .feed-title {
+  font-weight: 700;
+  color: var(--mahogany);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.live-feed-item .feed-loc {
+  color: var(--muted);
+  margin-top: 3px;
+  font-size: 12px;
+}
+.live-feed-item .feed-rates {
+  margin-top: 5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.live-dist-tag {
+  background: rgba(217, 154, 25, 0.12);
+  color: #7b4a08;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* A4 Document Paper Sheet Container */
+.a4-paper-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  width: 100%;
+}
+
+.a4-paper-sheet {
+  background: #fffdf9;
+  border: 2px solid #351605;
+  box-shadow: 0 16px 45px rgba(53, 22, 5, 0.14);
+  border-radius: 8px;
+  padding: 48px 44px;
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  font-family: Inter, Georgia, serif, system-ui, sans-serif;
+  color: #2b1406;
+}
+
+/* Vedic Dual Ornate Border on the A4 Sheet */
+.a4-paper-inner-frame {
+  border: 1.5px solid #d99a19;
+  padding: 32px 30px;
+  border-radius: 6px;
+  position: relative;
+}
+
+/* Watermark background on paper */
+.a4-paper-sheet::before {
+  content: "ॐ";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 420px;
+  color: rgba(217, 154, 25, 0.032);
+  font-family: Georgia, serif;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Sheet Sacred Header */
+.a4-doc-header {
+  text-align: center;
+  position: relative;
+  z-index: 1;
+  padding-bottom: 22px;
+  border-bottom: 2px solid #d99a19;
+  margin-bottom: 28px;
+}
+.a4-sanskrit-shloka {
+  font-family: Georgia, serif;
+  font-size: 15px;
+  color: #b85d19;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+.a4-brand-seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-family: Georgia, serif;
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--mahogany);
+  letter-spacing: 0.05em;
+}
+.a4-brand-seal .om {
+  font-size: 34px;
+  color: var(--ochre);
+}
+.a4-doc-title {
+  font-family: Georgia, serif;
+  font-size: 22px;
+  font-weight: 800;
+  color: #1a0802;
+  margin: 10px 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.a4-doc-subtitle {
+  font-size: 13.5px;
+  color: #6d4b34;
+  margin: 0;
+  font-weight: 500;
+}
+.a4-meta-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 8px 14px;
+  background: rgba(217, 154, 25, 0.08);
+  border: 1px solid rgba(217, 154, 25, 0.25);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4a2d19;
+}
+
+/* State Block on A4 Paper (Uncompacted) */
+.a4-state-block {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 36px;
+}
+.a4-state-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 18px;
+  background: linear-gradient(90deg, #351605 0%, #4a2007 100%);
+  color: #ffd88a;
+  border-radius: 8px;
+  margin-bottom: 22px;
+}
+.a4-state-header h3 {
+  margin: 0;
+  font-size: 19px;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.a4-state-badge {
+  background: rgba(255, 216, 138, 0.2);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+
+/* Verified Pandit Detailed List in State (No Compacting) */
+.a4-pandits-section {
+  margin-bottom: 30px;
+}
+.a4-section-heading {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--mahogany);
+  margin: 0 0 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1.5px solid #ebd9c2;
+  padding-bottom: 8px;
+}
+
+.a4-pandit-card {
+  background: #ffffff;
+  border: 1.5px solid #e5d3bc;
+  border-radius: 10px;
+  padding: 22px 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 3px 12px rgba(53, 22, 5, 0.04);
+}
+.a4-pandit-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.a4-pandit-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.a4-pandit-avatar {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--ochre);
+}
+.a4-pandit-name {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--mahogany);
+  margin: 0 0 4px;
+}
+.a4-pandit-meta {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.a4-base-fee-badge {
+  text-align: right;
+  background: #fff8eb;
+  border: 1.5px solid #d99a19;
+  border-radius: 8px;
+  padding: 8px 16px;
+}
+.a4-base-fee-val {
+  font-size: 20px;
+  font-weight: 800;
+  color: #b85d19;
+  line-height: 1;
+}
+.a4-base-fee-lbl {
+  font-size: 11px;
+  color: #7b4a08;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* District-wise Set Dakshina Rates per Pandit */
+.a4-district-rates-panel {
+  background: #fffbf5;
+  border: 1px solid #ebd9c2;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 14px;
+}
+.a4-district-rates-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--mahogany);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.a4-district-rates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.a4-district-price-chip {
+  background: #ffffff;
+  border: 1.5px solid #dcc4a8;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.a4-district-price-chip .dist-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #3b2115;
+}
+.a4-district-price-chip .dist-price {
+  font-size: 15px;
+  font-weight: 800;
+  color: #2e7d32;
+}
+
+/* Spacious District Master Table (Uncompacted) */
+.a4-table-container {
+  overflow-x: auto;
+  margin: 18px 0 28px;
+  border: 1.5px solid #dcc4a8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+.a4-rate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  text-align: left;
+}
+.a4-rate-table th {
+  background: #fbf5ec;
+  color: var(--mahogany);
+  font-weight: 800;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 14px 18px;
+  border-bottom: 2px solid #d99a19;
+}
+.a4-rate-table td {
+  padding: 16px 18px;
+  border-bottom: 1px solid #f0e0cc;
+  vertical-align: middle;
+  color: #3b2115;
+  line-height: 1.5;
+}
+.a4-rate-table tr:last-child td {
+  border-bottom: none;
+}
+.a4-rate-table tr:hover {
+  background: #fffcf8;
+}
+
+/* Official Footer Seal & Signatures on Paper */
+.a4-doc-footer {
+  margin-top: 36px;
+  padding-top: 24px;
+  border-top: 2px solid #d99a19;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  font-size: 12.5px;
+  color: #5d3f2b;
+}
+.a4-sign-box {
+  border: 1px dashed #cfb799;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  background: #fffefb;
+}
+.a4-sign-title {
+  font-weight: 700;
+  color: var(--mahogany);
+  margin-top: 8px;
+  font-size: 13px;
+}
+.a4-sign-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* A4 Print Stylesheet */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 14mm;
+  }
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 12pt !important;
+  }
+  .top-nav-bar,
+  .hamburger-btn,
+  .nav-drawer,
+  .mobile-nav-bar,
+  .footer,
+  .a4-toolbar,
+  .a4-live-sidebar,
+  .price-config-banner,
+  #toast,
+  #modal-root {
+    display: none !important;
+  }
+  .view-section {
+    display: none !important;
+  }
+  #view-puja-prices {
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .container {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .a4-layout-container {
+    display: block !important;
+  }
+  .a4-paper-sheet {
+    box-shadow: none !important;
+    border: 2px solid #000 !important;
+    margin: 0 0 15mm 0 !important;
+    padding: 20mm 18mm !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    page-break-after: always;
+    break-after: page;
+  }
+  .a4-rate-table th {
+    background: #f0f0f0 !important;
+    color: #000 !important;
+    border-bottom: 2px solid #000 !important;
+  }
+  .a4-rate-table td {
+    border-bottom: 1px solid #ccc !important;
+    color: #000 !important;
+  }
+}
+
+
 
 
