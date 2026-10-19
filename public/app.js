@@ -821,7 +821,7 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                         <!-- Services List (Spacious & Uncompacted) -->
                         <div style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:10px;border-top:1px solid #ebd9c2">
                           <span style="font-size:12.5px;font-weight:700;color:var(--muted)">Key Sacred Pujas Performed:</span>
-                          ${servicesList.slice(0, 6).map((s) => `<span class="badge" style="background:#fdf6ec;border:1px solid #ebd9c2;font-size:12px;padding:3px 10px;color:#4a2b16">${esc(s)}</span>`).join('')}
+                          ${servicesList.map((s) => `<span class="badge" style="background:#fdf6ec;border:1px solid #ebd9c2;font-size:12px;padding:3px 10px;color:#4a2b16">${esc(s)}</span>`).join('')}
                         </div>
                       </div>
                     `;
@@ -862,7 +862,7 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                               <div style="font-size:17px;font-weight:800;color:#b85d19">
                                 ${ds.minPrice === ds.maxPrice ? inr(ds.minPrice) : `${inr(ds.minPrice)} – ${inr(ds.maxPrice)}`}
                               </div>
-                              <small class="muted">Dakshina Fee</small>
+                              <small class="muted">Official Rate</small>
                             </td>
                           </tr>
                         `).join('') : `
@@ -886,24 +886,23 @@ async function renderPujaPriceConfig(forceRefresh = false) {
               </div>
             `}
 
-            <!-- Sacred Puja Ceremonies & Reference Dakshina Catalog (Sheet Section 2) -->
+            <!-- Sacred Puja Ceremonies (Sheet Section 2) -->
             <section style="margin-top:40px;padding-top:28px;border-top:2px solid #d99a19">
               <h4 class="a4-section-heading">
                 <span class="material-icons" style="font-size:18px;color:var(--ochre)">temple_hindu</span>
-                Sacred Puja Ceremonies &amp; Reference Dakshina Schedule
+                Sacred Puja Ceremonies
               </h4>
               <div class="a4-table-container">
                 <table class="a4-rate-table">
                   <thead>
                     <tr>
-                      <th style="width:28%">Ceremony / Puja</th>
-                      <th style="width:18%">Category</th>
-                      <th style="width:34%">Shastric Significance &amp; Inclusions</th>
-                      <th style="width:20%">Dakshina Fee (₹)</th>
+                      <th style="width:30%">Ceremony / Puja</th>
+                      <th style="width:22%">Category</th>
+                      <th style="width:48%">Shastric Significance &amp; Inclusions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    ${allPujas.slice(0, 8).map((puja) => `
+                    ${allPujas.map((puja) => `
                       <tr>
                         <td>
                           <b style="font-size:15px;color:var(--mahogany)">${esc(puja.name)}</b>
@@ -915,9 +914,6 @@ async function renderPujaPriceConfig(forceRefresh = false) {
                         </td>
                         <td style="font-size:13.5px;color:#4a2b16">
                           ${esc(puja.desc || 'Conducted according to authentic Vedic Shastras with complete samagri guidance.')}
-                        </td>
-                        <td>
-                          <b style="font-size:15px;color:#b85d19">${puja.type === 'Long' ? esc(puja.price) : 'From ' + inr(puja.baseFee)}</b>
                         </td>
                       </tr>
                     `).join('')}
@@ -1025,6 +1021,9 @@ async function renderPujaPriceConfig(forceRefresh = false) {
   const printBtn = $('#a4-btn-print');
   if (printBtn) {
     printBtn.onclick = () => {
+      const modalRoot = $('#modal-root');
+      if (modalRoot) modalRoot.innerHTML = '';
+      document.body.classList.add('printing-a4-mode');
       toast('Opening official A4 print preview (choose "Save as PDF" to save file)… 🖨️');
       setTimeout(() => {
         try {
@@ -1032,10 +1031,18 @@ async function renderPujaPriceConfig(forceRefresh = false) {
         } catch (err) {
           console.error('[Print error]:', err);
           toast('Unable to trigger print: ' + err.message, true);
+        } finally {
+          setTimeout(() => {
+            document.body.classList.remove('printing-a4-mode');
+          }, 1000);
         }
       }, 200);
     };
   }
+
+  window.addEventListener('afterprint', () => {
+    document.body.classList.remove('printing-a4-mode');
+  });
 
   const refreshBtn = $('#a4-btn-refresh');
   if (refreshBtn) {
