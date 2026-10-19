@@ -362,8 +362,16 @@ function pujaCard(p, withTags) {
   return `<div class="card"><div class="thumb" style="background-image:url('${esc(p.image)}')"></div><div class="body">
     <h3>${esc(p.name)}</h3><p class="muted" style="margin:0 0 8px">${esc(p.desc)}</p>
     ${withTags ? `<p style="font-size:13px;margin:0 0 8px">${esc(p.longDesc)}</p><div>${(p.benefits || []).map((b) => `<span class="badge">✦ ${esc(b)}</span>`).join('')}</div>` : ''}
-    <div class="row"><span class="price">${isLong ? esc(p.price) : 'From ' + inr(p.baseFee)}</span>
-    <button class="btn btn-dark btn-sm" data-action="${isLong ? 'planLong' : 'findFor'}" data-name="${esc(p.name)}">${isLong ? 'Customize' : 'Book Pandit'}</button></div></div></div>`;
+    <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap"><span class="price">${isLong ? esc(p.price) : 'From ' + inr(p.baseFee)}</span>
+    ${isLong ? `
+      <button class="btn btn-dark btn-sm" data-action="planLong" data-name="${esc(p.name)}">Customize</button>
+    ` : `
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-gold btn-sm" data-action="bookDirectPuja" data-name="${esc(p.name)}">Book Puja</button>
+        <button class="btn btn-outline dark btn-sm" data-action="findFor" data-name="${esc(p.name)}">Pandits</button>
+      </div>
+    `}
+    </div></div></div>`;
 }
 function renderHomePujas() {
   const el = $('#home-pujas');
@@ -493,7 +501,17 @@ function panditCard(p) {
         </span>
         <span class="badge">🗣 Sanskrit, Odia, Hindi</span>
       </div>
-      <p style="margin:8px 0 6px;font-size:14px"><strong>${esc(p.specialty)}</strong><br><span class="muted">${esc(p.bio)}</span></p>
+      <div style="margin:8px 0 6px">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <span class="badge" style="background:#fff3e0;border:1.5px solid #ffd8a8;color:#b23b00;font-weight:700;font-size:12px">
+            ⭐ Specialty: ${esc(p.specialty || 'Vedic Rituals')}
+          </span>
+          <span class="badge" style="background:#e8f5e9;border:1px solid #c8e6c9;color:#2e7d32;font-size:11px">
+            ✓ Performs All Pujas
+          </span>
+        </div>
+        <p class="muted" style="margin:0;font-size:13px">${esc(p.bio)}</p>
+      </div>
       <div style="background:#faf5ee;border:1px solid #ebd9be;border-radius:8px;padding:7px 12px;font-size:12.5px;color:#4a2c16;margin-bottom:8px;display:flex;align-items:center;gap:6px">
         <span class="material-icons" style="font-size:16px;color:var(--ochre)">location_on</span>
         <span><strong>Home District:</strong> ${esc(homeDist)} &nbsp;|&nbsp; <strong>State:</strong> ${esc(homeState)}</span>
@@ -550,14 +568,16 @@ async function openBooking(arg) {
   }
   if (loadPromises.length) await Promise.all(loadPromises);
 
+  const allShortPujas = (S.pujas || []).filter(p => p.type === 'Short').map(p => p.name);
   const selectedPandit = targetPanditId ? (S.pandits || []).find((x) => x._id === targetPanditId || (x.email && x.email.toLowerCase() === String(targetPanditId).toLowerCase())) : null;
-  const allShortPujas = (S.pujas || []).filter((x) => x.type === 'Short').map((x) => x.name);
-  const curState = S.filters.state || (selectedPandit && (selectedPandit.workingState || selectedPandit.state)) || u.state || 'Odisha';
+  const lockedDistrict = (u && u.district) ? u.district.trim() : '';
+  const lockedState = (u && u.state) ? u.state.trim() : 'Odisha';
+  const curState = lockedState || S.filters.state || (selectedPandit && (selectedPandit.workingState || selectedPandit.state)) || 'Odisha';
   const availableDistricts = LOCATIONS[curState] || ['Khordha', 'Cuttack', 'Puri', 'Bhadrak', 'Balasore', 'Sambalpur'];
 
   const sel = { date: targetDate || '', time: targetTime || '' };
-  const initialPuja = targetPujaName || (selectedPandit && selectedPandit.services && selectedPandit.services[0]) || S.filters.service || allShortPujas[0] || 'Satyanarayan Puja';
-  const initialDistrict = targetDistrict || (selectedPandit && ((selectedPandit.workingDistricts && selectedPandit.workingDistricts[0]) || selectedPandit.district)) || S.filters.district || u.district || availableDistricts[0];
+  const initialPuja = targetPujaName || S.filters.service || (selectedPandit && selectedPandit.services && selectedPandit.services[0]) || allShortPujas[0] || 'Satyanarayan Puja';
+  const initialDistrict = lockedDistrict || targetDistrict || (selectedPandit && ((selectedPandit.workingDistricts && selectedPandit.workingDistricts[0]) || selectedPandit.district)) || S.filters.district || availableDistricts[0];
 
   const modalTitle = isRebook ? `Rebook Sacred Ritual – ${esc(targetBookingId || 'Edit Details')}` : 'Book a Sacred Ritual';
 
@@ -573,8 +593,17 @@ async function openBooking(arg) {
     </div>
     <div class="form-grid" style="padding:0">
       <div>
-        <label>District *</label>
-        <select id="b-district">${opts(availableDistricts, initialDistrict)}</select>
+        <label>District * ${lockedDistrict ? '<span style="color:var(--ochre);font-weight:600;font-size:12px">(Locked to Account)</span>' : ''}</label>
+        ${lockedDistrict ? `
+          <div style="background:#fcf8f0;border:1.5px solid #ebd9c2;border-radius:8px;padding:9px 12px;display:flex;align-items:center;justify-content:space-between">
+            <span style="font-weight:700;color:var(--mahogany);font-size:14px"><span class="material-icons" style="font-size:16px;vertical-align:middle;color:var(--ochre);margin-right:4px">lock</span> ${esc(lockedDistrict)}${lockedState ? ', ' + esc(lockedState) : ''}</span>
+            <span class="badge" style="background:#fff3e0;color:#e65100;font-size:10px;padding:2px 6px">Locked</span>
+          </div>
+          <input type="hidden" id="b-district" value="${esc(lockedDistrict)}">
+          <small class="muted" style="font-size:11px;margin-top:3px;display:block">Ritual will be conducted at your registered devotee location.</small>
+        ` : `
+          <select id="b-district">${opts(availableDistricts, initialDistrict)}</select>
+        `}
       </div>
       <div>
         <label>Ceremony Date *</label>
@@ -586,8 +615,9 @@ async function openBooking(arg) {
       <select id="b-pandit">
         <option value="">✨ Any Available Verified Pandit (Auto-assigned by PujaConnect Admin)</option>
       </select>
+      <div id="b-pandit-info" style="margin-top:8px"></div>
       <small class="muted" style="display:block;margin-top:4px;font-size:12px">
-        Selecting a Pandit is optional. Our team will verify pandit availability and assign the best verified Pandit who serves your district.
+        All registered verified Pandits can perform all sacred Vedic pujas. Pandit's specialty is shown for your reference.
       </small>
     </div>
     <div>
@@ -634,24 +664,67 @@ async function openBooking(arg) {
     const dateInp = $('#b-date', m);
     const feeEl = $('#b-fee', m);
 
+    const updatePanditInfo = () => {
+      const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
+      const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
+      const box = $('#b-pandit-info', m);
+      if (!box) return;
+      if (p) {
+        box.style.display = 'block';
+        box.innerHTML = `
+          <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:10px;padding:10px 12px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:1.5px solid var(--ochre)">
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px">
+                  <span style="font-weight:700;color:var(--mahogany);font-size:13.5px">Pt. ${esc(p.name)}</span>
+                  <span class="badge" style="background:#fff3e0;border:1px solid #ffe0b2;color:#b23b00;font-size:11px;font-weight:700">⭐ Specialty: ${esc(p.specialty || 'Vedic Rituals')}</span>
+                </div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">
+                  ${esc(p.exp || p.experience + ' Years Exp')} · Home: ${esc(p.district || 'Khordha')}, ${esc(p.state || 'Odisha')}
+                </div>
+              </div>
+            </div>
+            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #ebd9c2;font-size:11.5px;color:#2e7d32;display:flex;align-items:center;gap:5px">
+              <span class="material-icons" style="font-size:14px">check_circle</span>
+              <span><strong>All Registered Pandits Perform All Pujas:</strong> Pt. ${esc(p.name)} is qualified to perform all sacred home rituals.</span>
+            </div>
+          </div>
+        `;
+      } else {
+        box.style.display = 'block';
+        box.innerHTML = `
+          <div style="background:#f4fbf5;border:1px solid #c8e6c9;border-radius:8px;padding:8px 12px;font-size:12px;color:#1b5e20;display:flex;align-items:center;gap:6px">
+            <span class="material-icons" style="font-size:16px;color:#2e7d32">verified</span>
+            <span><strong>All Registered Pandits Perform All Sacred Pujas:</strong> PujaConnect Admin will auto-assign a qualified Pandit for your ritual.</span>
+          </div>
+        `;
+      }
+    };
+
     const updatePanditsDropdown = () => {
       const dist = districtSel ? districtSel.value : initialDistrict;
       const ritual = serviceSel ? serviceSel.value : initialPuja;
-      const eligible = (S.pandits || []).filter((p) => {
-        if (!p.verified) return false;
-        return (p.workingDistricts && p.workingDistricts.includes(dist)) || p.district === dist;
-      });
+
+      // All registered pandits can perform all pujas
+      const verified = (S.pandits || []).filter((p) => p.verified || p.status === 'Verified');
+      const inDist = verified.filter((p) => (p.workingDistricts && p.workingDistricts.includes(dist)) || p.district === dist);
+      const other = verified.filter((p) => !inDist.includes(p));
+      const allPandits = [...inDist, ...other];
 
       const pujaDoc = (S.pujas || []).find((x) => (x.name || '').trim().toLowerCase() === (ritual || '').trim().toLowerCase());
       const baseDakshina = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
 
-      let optionsHtml = `<option value="">✨ Any Available Verified Pandit (Auto-assigned by PujaConnect Admin) — Estimated Dakshina: ${inr(baseDakshina)}</option>`;
-      eligible.forEach((p) => {
-        const isSelected = selectedPandit && selectedPandit.email.toLowerCase() === p.email.toLowerCase();
+      let optionsHtml = `<option value="">✨ Any Available Verified Pandit (Auto-assigned by Admin) — Base Dakshina: ${inr(baseDakshina)}</option>`;
+      allPandits.forEach((p) => {
+        const isSelected = (selectedPandit && selectedPandit.email.toLowerCase() === p.email.toLowerCase()) || (targetPanditId && (p._id === targetPanditId || p.email.toLowerCase() === String(targetPanditId).toLowerCase()));
         const pFee = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || baseDakshina;
-        optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''}>Pandit ${esc(p.name)} (${esc(p.district)}) — Dakshina: ${inr(pFee)} (${esc(p.exp || p.experience + ' Yrs')})</option>`;
+        const servesTag = (p.workingDistricts && p.workingDistricts.includes(dist)) || p.district === dist ? `Serves ${dist}` : p.district;
+        const spec = p.specialty || 'Vedic Rituals';
+        optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''}>Pt. ${esc(p.name)} [Specialty: ${esc(spec)}] · ${esc(servesTag)} — Dakshina: ${inr(pFee)}</option>`;
       });
       panditSel.innerHTML = optionsHtml;
+      updatePanditInfo();
       paintFee();
     };
 
@@ -710,7 +783,7 @@ async function openBooking(arg) {
 
     serviceSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
     districtSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
-    panditSel.onchange = () => { paintFee(); };
+    panditSel.onchange = () => { updatePanditInfo(); paintFee(); };
     dateInp.onchange = drawSlots;
 
     $('#b-slots', m).onclick = (e) => {
@@ -748,7 +821,7 @@ async function openBooking(arg) {
             userName: u.name,
             phone,
             service: serviceSel.value,
-            district: districtSel.value,
+            district: lockedDistrict || districtSel.value,
             date,
             time: sel.time,
             address,
@@ -926,8 +999,12 @@ function openAuth(mode = 'login') {
       <div><label style="font-weight:600">Email Address (used for login)</label><input id="r-email" type="email" placeholder="devotee@example.com"></div>
       <div><label style="font-weight:600">Phone Number</label><input id="r-phone" type="tel" placeholder="10-digit mobile number"></div>
       <div class="form-grid" style="padding:0">
-        <div><label style="font-weight:600">State</label><select id="r-state">${opts(Object.keys(LOCATIONS), 'Odisha')}</select></div>
-        <div><label style="font-weight:600">District</label><select id="r-district"></select></div>
+        <div><label style="font-weight:600">State *</label><select id="r-state">${opts(Object.keys(LOCATIONS), 'Odisha')}</select></div>
+        <div><label style="font-weight:600">District *</label><select id="r-district"></select></div>
+      </div>
+      <div style="background:#fff8ed;border:1px dashed var(--ochre);border-radius:8px;padding:9px 12px;margin:8px 0 4px;font-size:12px;color:var(--mahogany);display:flex;align-items:flex-start;gap:8px">
+        <span class="material-icons" style="font-size:16px;color:var(--ochre);flex-shrink:0;margin-top:1px">lock</span>
+        <span><b>Permanent Account Location:</b> Your State &amp; District are locked upon registration for both short &amp; long puja ceremonies. No district change is permitted after account creation.</span>
       </div>
       <button class="btn btn-gold" id="r-submit" style="margin-top:10px;width:100%"><span class="material-icons" style="font-size:18px;vertical-align:middle;margin-right:4px">person_add</span> Create Account &amp; Login</button>
       <p class="muted" style="text-align:center;margin:8px 0 0">Already registered? <a href="#" data-action="showLogin" style="color:var(--ochre);font-weight:600">Login here</a></p>`, (m) => {
@@ -1082,44 +1159,58 @@ function openPanditRegister() {
 function renderLongForm() {
   const longs = S.pujas.filter((p) => p.type === 'Long');
   const f = $('#long-form');
+  if (!f) return;
   const pre = S.longPreset || (longs[0] && longs[0].name);
+  const u = S.user;
+  const lockedDistrict = (u && u.district) ? u.district.trim() : '';
+  const lockedState = (u && u.state) ? u.state.trim() : 'Odisha';
+
   f.innerHTML = `
     <div class="full"><label>Puja / Mahayajna</label><select id="l-puja">${opts(longs.map((p) => p.name), pre)}</select></div>
     <div><label>Start Date</label><input type="date" id="l-from" min="${today()}" required></div>
     <div><label>End Date</label><input type="date" id="l-to" min="${today()}" required></div>
     <div><label>Daily Duration (hours)</label><input type="number" id="l-hours" min="1" max="12" value="4"></div>
     <div><label>Pandits Required</label><input type="number" id="l-count" min="1" max="21" value="1"></div>
-    <div><label>State</label><select id="l-state">${opts(Object.keys(LOCATIONS), 'Odisha')}</select></div>
-    <div><label>District</label><select id="l-district"></select></div>
-    <div class="full cost-box"><div class="row"><span id="l-breakdown" class="muted">Pick your dates to see the estimate.</span><b id="l-cost">₹0</b></div>
-      <label class="check" style="margin-top:10px"><input type="checkbox" id="l-adv"> Pay 25% advance deposit now (demo – no real payment is taken)</label></div>
+    ${lockedDistrict ? `
+      <div>
+        <label>State (Locked)</label>
+        <input type="text" id="l-state" value="${esc(lockedState)}" readonly style="background:#fcf8f0;cursor:not-allowed;font-weight:600">
+      </div>
+      <div>
+        <label>District (Locked)</label>
+        <input type="text" id="l-district" value="${esc(lockedDistrict)}" readonly style="background:#fcf8f0;cursor:not-allowed;font-weight:600">
+        <small class="muted" style="font-size:11px;color:var(--ochre);display:block;margin-top:2px"><span class="material-icons" style="font-size:12px;vertical-align:middle">lock</span> Locked to your registered account location</small>
+      </div>
+    ` : `
+      <div><label>State</label><select id="l-state">${opts(Object.keys(LOCATIONS), 'Odisha')}</select></div>
+      <div><label>District</label><select id="l-district"></select></div>
+    `}
     <div class="full"><button class="btn btn-gold" type="submit">Submit Request</button></div>`;
-  const calc = () => {
-    const p = longs.find((x) => x.name === $('#l-puja').value);
-    const from = $('#l-from').value, to = $('#l-to').value;
-    if (!p || !from || !to || to < from) { $('#l-cost').textContent = inr(0); return null; }
-    const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
-    const hrs = Math.max(1, +$('#l-hours').value || 1), n = Math.max(1, +$('#l-count').value || 1);
-    const total = days * hrs * n * (p.perHourFee || 500);
-    $('#l-breakdown').textContent = `${days} day(s) × ${hrs} hr × ${n} Pandit(s) × ${inr(p.perHourFee || 500)}/hr`;
-    $('#l-cost').textContent = inr(total);
-    return total;
-  };
-  const fillD = () => ($('#l-district').innerHTML = opts(LOCATIONS[$('#l-state').value] || []));
-  fillD();
-  ['l-puja', 'l-from', 'l-to', 'l-hours', 'l-count'].forEach((id) => ($('#' + id).oninput = calc));
-  $('#l-state').onchange = fillD;
+
+  const stateSel = $('#l-state');
+  const distSel = $('#l-district');
+  if (stateSel && stateSel.tagName === 'SELECT') {
+    const fillD = () => {
+      if (distSel && distSel.tagName === 'SELECT') {
+        distSel.innerHTML = opts(LOCATIONS[stateSel.value] || []);
+      }
+    };
+    fillD();
+    stateSel.onchange = fillD;
+  }
+
   f.onsubmit = async (e) => {
     e.preventDefault();
-    if (!requireLogin(() => f.requestSubmit())) return;
-    const total = calc();
-    if (total === null) return toast('Please choose valid start and end dates', true);
+    if (!requireLogin(() => { renderLongForm(); f.requestSubmit(); })) return;
+    const from = $('#l-from').value, to = $('#l-to').value;
+    if (!from || !to || to < from) return toast('Please choose valid start and end dates', true);
+    const finalDistrict = (S.user && S.user.district) ? S.user.district : $('#l-district').value;
     try {
       const r = await api('/long-puja-requests', { method: 'POST', body: {
         userEmail: S.user.email, userName: S.user.name, phone: S.user.phone, pujaName: $('#l-puja').value,
-        district: $('#l-district').value, fromDate: $('#l-from').value, toDate: $('#l-to').value,
+        district: finalDistrict, fromDate: from, toDate: to,
         dailyHours: +$('#l-hours').value, requiredPandits: +$('#l-count').value,
-        advanceAmount: $('#l-adv').checked ? Math.round(total * 0.25) : 0
+        advanceAmount: 0
       } });
       toast(`Request ${r.id} submitted. Confirmation email sent.`);
       showView('dashboard');
@@ -1161,6 +1252,112 @@ function isBookingRejected(b) {
     b.panditApproval === 'Rejected' ||
     (b.status === 'Cancelled' && (b.slotUnavailable || (b.rejectionReason && b.rejectionReason.length > 0)))
   );
+}
+
+function renderPanditCoverageSection(verifiedList, devoteeDistrict, devoteeState) {
+  const coverageMap = {};
+  (verifiedList || []).forEach((p) => {
+    if (!p.verified && p.status !== 'Verified') return;
+    const st = (p.workingState || p.state || 'Odisha').trim() || 'Odisha';
+    if (!coverageMap[st]) coverageMap[st] = { pandits: new Set(), districts: {} };
+    const pId = (p.email || p._id || p.name).toLowerCase();
+    coverageMap[st].pandits.add(pId);
+
+    const served = new Set();
+    if (p.district) served.add(p.district.trim());
+    if (Array.isArray(p.workingDistricts)) {
+      p.workingDistricts.forEach((d) => { if (d && String(d).trim()) served.add(String(d).trim()); });
+    }
+    if (p.districtPrices && typeof p.districtPrices === 'object') {
+      Object.keys(p.districtPrices).forEach((d) => {
+        if (d && Number(p.districtPrices[d]) > 0) served.add(d.trim());
+      });
+    }
+
+    served.forEach((dist) => {
+      if (!coverageMap[st].districts[dist]) coverageMap[st].districts[dist] = new Set();
+      coverageMap[st].districts[dist].add(pId);
+    });
+  });
+
+  const stateNames = Object.keys(coverageMap).sort();
+  const dLower = (devoteeDistrict || '').trim().toLowerCase();
+
+  let myDistPanditCount = 0;
+  Object.keys(coverageMap).forEach((st) => {
+    Object.keys(coverageMap[st].districts).forEach((dist) => {
+      if (dist.toLowerCase() === dLower) {
+        myDistPanditCount = Math.max(myDistPanditCount, coverageMap[st].districts[dist].size);
+      }
+    });
+  });
+
+  return `
+    <div class="dash-coverage-card">
+      <div class="dash-coverage-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="dash-coverage-icon">
+            <span class="material-icons">travel_explore</span>
+          </div>
+          <div>
+            <h3 style="margin:0;color:var(--mahogany);font-size:18px">Active Pandit Availability by State &amp; District</h3>
+            <p class="muted" style="margin:2px 0 0;font-size:13px">Verified Vedic Pandits currently serving devotees across India</p>
+          </div>
+        </div>
+        <div class="devotee-locked-badge">
+          <span class="material-icons" style="font-size:15px;color:var(--ochre)">lock</span>
+          <span>Your Location (Locked): <b>${esc(devoteeDistrict || 'Not Set')}${devoteeState ? ', ' + esc(devoteeState) : ''}</b></span>
+          ${myDistPanditCount > 0 ? `<span class="badge green" style="margin:0;font-size:11px">Available (${myDistPanditCount})</span>` : `<span class="badge amber" style="margin:0;font-size:11px">Awaiting Pandits</span>`}
+        </div>
+      </div>
+
+      ${myDistPanditCount > 0 ? `
+        <div class="coverage-loc-alert success">
+          <span class="material-icons" style="color:var(--green);font-size:22px">verified</span>
+          <div>
+            <b>Vedic Pandits Active in Your District:</b> ${myDistPanditCount} verified Pandit(s) are actively serving <b>${esc(devoteeDistrict)}</b>. All short and long puja ceremonies are locked to your registered district.
+          </div>
+        </div>
+      ` : `
+        <div class="coverage-loc-alert warning">
+          <span class="material-icons" style="color:var(--amber);font-size:22px">notifications_active</span>
+          <div>
+            <b>Your District Status:</b> Currently 0 Pandits registered in <b>${esc(devoteeDistrict || 'your district')}${devoteeState ? ', ' + esc(devoteeState) : ''}</b>. You will receive an automated email as soon as verified Pandits become available. See active locations below:
+          </div>
+        </div>
+      `}
+
+      <div class="coverage-states-list">
+        ${stateNames.length ? stateNames.map((st) => {
+          const sData = coverageMap[st];
+          const distNames = Object.keys(sData.districts).sort();
+          return `
+            <div class="coverage-state-row">
+              <div class="coverage-state-head">
+                <span class="material-icons" style="color:var(--ochre);font-size:16px">account_balance</span>
+                <span class="coverage-state-name">${esc(st)}</span>
+                <span class="badge gold" style="font-size:11px;padding:2px 8px">${sData.pandits.size} Verified Pandit${sData.pandits.size > 1 ? 's' : ''}</span>
+              </div>
+              <div class="coverage-districts-wrap">
+                ${distNames.map((dName) => {
+                  const cnt = sData.districts[dName].size;
+                  const isMine = dName.toLowerCase() === dLower;
+                  return `
+                    <span class="coverage-district-pill ${isMine ? 'active-user-dist' : ''}">
+                      <span class="material-icons" style="font-size:12px;color:var(--ochre)">place</span>
+                      <b>${esc(dName)}</b>
+                      <span class="dist-count">${cnt} Pandit${cnt > 1 ? 's' : ''}</span>
+                      ${isMine ? '<span class="mine-tag">🔒 Your District</span>' : ''}
+                    </span>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }).join('') : '<div class="empty">No verified Pandits listed in the directory yet.</div>'}
+      </div>
+    </div>
+  `;
 }
 
 async function userDash(root) {
@@ -1234,55 +1431,50 @@ async function userDash(root) {
         <div class="dash-avatar">${initial}</div>
         <div class="dash-title-wrap">
           <h2>Namaste, ${esc(S.user.name)} 🙏</h2>
-          <p>${esc(S.user.email)} · ${esc(S.user.phone || 'No phone')} · <span class="badge green" style="margin:0">Devotee Account</span></p>
+          <p>${esc(S.user.email)} · ${esc(S.user.phone || 'No phone')} · <span class="badge green" style="margin:0">Devotee Account</span> · <span class="badge gold" style="margin:0"><span class="material-icons" style="font-size:12px;vertical-align:middle">lock</span> ${esc(devoteeDistrict || 'District Not Set')}${devoteeState ? ', ' + esc(devoteeState) : ''} (Locked)</span></p>
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        ${isRegionUnavailable ? `
-          <button class="btn btn-outline btn-sm" disabled style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region">
-            <span class="material-icons" style="font-size:15px">lock</span> Explore All Pujas (Locked)
-          </button>
-        ` : `
-          <button class="btn btn-gold btn-sm" data-action="dashTab" data-tab="explore"><span class="material-icons">spa</span> Explore All Pujas</button>
-        `}
+        <button class="btn btn-gold btn-sm" data-action="dashTab" data-tab="explore"><span class="material-icons">spa</span> Explore All Pujas</button>
         <button class="btn btn-outline btn-sm" data-action="nav" data-view="home"><span class="material-icons">home</span> Home</button>
         <button class="btn btn-outline btn-sm" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>
       </div>
     </div>
+
+    <!-- Active Pandit Availability by State & District -->
+    ${renderPanditCoverageSection(verifiedList, devoteeDistrict, devoteeState)}
 
     ${isRegionUnavailable ? `
       <div class="dash-404-banner" style="background:linear-gradient(135deg, #fff5f5 0%, #fffbf0 100%);border:2px solid #ffab91;border-left:8px solid #d32f2f;border-radius:14px;padding:22px;margin-bottom:20px;box-shadow:0 4px 18px rgba(211,47,47,0.08)">
         <div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap">
           <div style="background:#ffebee;border:2px solid #ef5350;border-radius:12px;width:72px;height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#c62828;flex-shrink:0;box-shadow:0 3px 10px rgba(211,47,47,0.12)">
             <span style="font-size:24px;font-weight:900;line-height:1;letter-spacing:-0.5px">404</span>
-            <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;margin-top:2px">Error</span>
+            <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;margin-top:2px">Region</span>
           </div>
           <div style="flex:1;min-width:280px">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <span class="badge" style="background:#d32f2f;color:#fff;font-weight:700;font-size:11px;padding:3px 8px;letter-spacing:0.5px">404 ERROR</span>
-              <span class="badge" style="background:#fff3e0;color:#e65100;border:1px solid #ffb74d;font-weight:600">Selected Location: ${esc(devoteeDistrict || 'Not Set')}${devoteeState ? ', ' + esc(devoteeState) : ''}</span>
+              <span class="badge" style="background:#d32f2f;color:#fff;font-weight:700;font-size:11px;padding:3px 8px;letter-spacing:0.5px">SERVICE PENDING</span>
+              <span class="badge" style="background:#fff3e0;color:#e65100;border:1px solid #ffb74d;font-weight:600">Locked Location: ${esc(devoteeDistrict || 'Not Set')}${devoteeState ? ', ' + esc(devoteeState) : ''}</span>
             </div>
             <h3 style="margin:8px 0 6px;color:#b71c1c;font-size:20px;font-weight:800">
-              404 – No Service Available at Your Region
+              No Pandits Currently Available in Your District
             </h3>
             <p style="margin:0 0 12px;color:#5d2800;font-size:14.5px;line-height:1.6">
-              No service available at your region (<strong>${esc(devoteeDistrict || 'your district')}${devoteeState ? ', ' + esc(devoteeState) : ''}</strong>). Currently, no verified Vedic Pandits are available for this district or state. <strong>If any service is available, then our team will notify you.</strong> All dashboard features are currently locked.
+              No verified Vedic Pandits are currently available in your registered district (<strong>${esc(devoteeDistrict || 'your district')}${devoteeState ? ', ' + esc(devoteeState) : ''}</strong>). Your location is permanently locked to your account. <strong>Our team will notify you automatically when Pandits become available here.</strong> You can explore rituals and view your profile below.
             </p>
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px dashed #ffccbc">
               <div style="display:inline-flex;align-items:center;gap:8px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:7px 14px;font-size:13px;color:#1b5e20;font-weight:600">
                 <span class="material-icons" style="font-size:18px;color:#2e7d32">notifications_active</span>
                 <span>✓ Auto-Notification Subscribed: We will notify <b>${esc(S.user.email)}</b> as soon as Pandits become available in ${esc(devoteeDistrict || devoteeState || 'Location')}.</span>
               </div>
-              <button class="btn btn-outline dark btn-sm" data-action="changeDevoteeLocation" style="background:#fff;border-color:#d32f2f;color:#b71c1c;font-weight:700;padding:7px 14px">
-                <span class="material-icons" style="font-size:16px;vertical-align:middle;margin-right:4px">edit_location</span> Change Selected Location
-              </button>
+              <span class="badge" style="background:#fff3e0;border:1px solid #ffcc80;color:#bf360c;font-weight:600;padding:6px 12px"><span class="material-icons" style="font-size:14px;vertical-align:middle">lock</span> Location Locked to Account</span>
             </div>
           </div>
         </div>
       </div>
     ` : ''}
 
-    ${rebookNeeded > 0 && !isRegionUnavailable ? `
+    ${rebookNeeded > 0 ? `
       <div style="background:#fff3e0;border:1.5px solid #ffcc80;border-left:5px solid #e65100;border-radius:12px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:12px">
           <span class="material-icons" style="font-size:32px;color:#e65100">event_busy</span>
@@ -1301,109 +1493,72 @@ async function userDash(root) {
 
     <!-- Quick Stat Cards (Tappable on both Mobile & Desktop) -->
     <div class="stats">
-      <div class="stat" ${isRegionUnavailable ? 'style="cursor:not-allowed;opacity:0.75" title="Locked: Service unavailable in your region"' : 'data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view all bookings"'}>
+      <div class="stat" data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view all bookings">
         <b>${bookings.length}</b>
-        <span>Total Bookings ${isRegionUnavailable ? '🔒' : ''}</span>
+        <span>Total Bookings</span>
       </div>
-      <div class="stat" ${isRegionUnavailable ? 'style="cursor:not-allowed;opacity:0.75" title="Locked: Service unavailable in your region"' : 'data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view upcoming rituals"'}>
+      <div class="stat" data-action="dashTab" data-tab="bookings" style="cursor:pointer" title="Click to view upcoming rituals">
         <b style="color:var(--ochre)">${upcoming}</b>
-        <span>Upcoming Rituals ${isRegionUnavailable ? '🔒' : ''}</span>
+        <span>Upcoming Rituals</span>
       </div>
-      <div class="stat" ${isRegionUnavailable ? 'style="cursor:not-allowed;opacity:0.75" title="Locked: Service unavailable in your region"' : 'data-action="dashTab" data-tab="long" style="cursor:pointer" title="Click to view multi-day requests"'}>
+      <div class="stat" data-action="dashTab" data-tab="long" style="cursor:pointer" title="Click to view multi-day requests">
         <b>${longs.length}</b>
-        <span>Multi-Day Requests ${isRegionUnavailable ? '🔒' : ''}</span>
+        <span>Multi-Day Requests</span>
       </div>
     </div>
 
     <!-- Devotee Navigation: Button Cards Grid on Mobile & Clean Bar on Desktop -->
     <div class="dash-subtabs">
-      <button class="subtab ${tab === 'bookings' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="bookings" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
+      <button class="subtab ${tab === 'bookings' ? 'active' : ''}" data-action="dashTab" data-tab="bookings">
         <span class="subtab-icon-wrap"><span class="material-icons">event</span></span>
         <div class="subtab-info">
           <span class="subtab-title">My Bookings</span>
-          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : (rebookNeeded > 0 ? `${rebookNeeded} To Rebook` : `${bookings.length} Registered`)}</span>
+          <span class="subtab-sub">${rebookNeeded > 0 ? `${rebookNeeded} To Rebook` : `${bookings.length} Registered`}</span>
         </div>
-        ${isRegionUnavailable ? `
-          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
-        ` : (rebookNeeded > 0 ? `<span class="subtab-badge alert" style="background:#e65100;color:#fff">${rebookNeeded}</span>` : `<span class="subtab-badge">${bookings.length}</span>`)}
+        ${rebookNeeded > 0 ? `<span class="subtab-badge alert" style="background:#e65100;color:#fff">${rebookNeeded}</span>` : `<span class="subtab-badge">${bookings.length}</span>`}
       </button>
 
-      <button class="subtab ${tab === 'payments' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="payments" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
+      <button class="subtab ${tab === 'payments' ? 'active' : ''}" data-action="dashTab" data-tab="payments">
         <span class="subtab-icon-wrap"><span class="material-icons">payments</span></span>
         <div class="subtab-info">
           <span class="subtab-title">Payment Tracking</span>
-          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : (pendingPayments > 0 ? `${pendingPayments} To Pay` : 'All Clear')}</span>
+          <span class="subtab-sub">${pendingPayments > 0 ? `${pendingPayments} To Pay` : 'All Clear'}</span>
         </div>
-        ${isRegionUnavailable ? `
-          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
-        ` : (pendingPayments > 0 ? `<span class="subtab-badge alert">${pendingPayments}</span>` : '')}
+        ${pendingPayments > 0 ? `<span class="subtab-badge alert">${pendingPayments}</span>` : ''}
       </button>
 
-      <button class="subtab ${tab === 'explore' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="explore" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
+      <button class="subtab ${tab === 'explore' ? 'active' : ''}" data-action="dashTab" data-tab="explore">
         <span class="subtab-icon-wrap"><span class="material-icons">spa</span></span>
         <div class="subtab-info">
           <span class="subtab-title">Explore All Pujas</span>
-          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : 'Browse Rituals'}</span>
+          <span class="subtab-sub">Browse Rituals</span>
         </div>
-        ${isRegionUnavailable ? `
-          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
-        ` : ''}
       </button>
 
-      <button class="subtab ${tab === 'long' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="long" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
+      <button class="subtab ${tab === 'long' ? 'active' : ''}" data-action="dashTab" data-tab="long">
         <span class="subtab-icon-wrap"><span class="material-icons">local_fire_department</span></span>
         <div class="subtab-info">
           <span class="subtab-title">Multi-Day Yajnas</span>
-          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : `${longs.length} Requests`}</span>
+          <span class="subtab-sub">${longs.length} Requests</span>
         </div>
-        ${isRegionUnavailable ? `
-          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
-        ` : `<span class="subtab-badge">${longs.length}</span>`}
+        <span class="subtab-badge">${longs.length}</span>
       </button>
 
-      <button class="subtab ${tab === 'profile' ? 'active' : ''} ${isRegionUnavailable ? 'locked' : ''}" data-action="dashTab" data-tab="profile" ${isRegionUnavailable ? 'style="opacity:0.65;cursor:not-allowed" title="Locked: Service unavailable in your region"' : ''}>
+      <button class="subtab ${tab === 'profile' ? 'active' : ''}" data-action="dashTab" data-tab="profile">
         <span class="subtab-icon-wrap"><span class="material-icons">account_circle</span></span>
         <div class="subtab-info">
           <span class="subtab-title">My Profile</span>
-          <span class="subtab-sub">${isRegionUnavailable ? '🔒 Locked' : 'Account Details'}</span>
+          <span class="subtab-sub">Account Details</span>
         </div>
-        ${isRegionUnavailable ? `
-          <span class="subtab-badge" style="background:#d32f2f;color:#fff;font-size:10px;padding:2px 6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span>
-        ` : ''}
       </button>
     </div>
 
     <div id="dash-tab-content">
-      ${isRegionUnavailable ? `
-        <div class="panel" style="padding:44px 24px;text-align:center;background:#fffcf7;border:2px dashed #ffab91;border-radius:14px;box-shadow:0 4px 18px rgba(0,0,0,0.03);margin-top:14px">
-          <div style="background:#ffebee;width:72px;height:72px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px;border:2px solid #ef5350">
-            <span class="material-icons" style="font-size:38px;color:#c62828">lock</span>
-          </div>
-          <h3 style="margin:0 0 10px;font-size:22px;color:#b71c1c;font-weight:800">
-            Dashboard Features Locked – Region Unavailable
-          </h3>
-          <p style="max-width:580px;margin:0 auto 18px;color:#5d2800;font-size:14.5px;line-height:1.6">
-            <strong>My Bookings</strong>, <strong>Payment Tracking</strong>, <strong>Explore All Pujas</strong>, <strong>Multi-Day Yajnas</strong>, and <strong>My Profile</strong> are locked until authentic Vedic Pandits are available in your selected location (<strong>${esc(devoteeDistrict || 'your district')}${devoteeState ? ', ' + esc(devoteeState) : ''}</strong>).
-          </p>
-
-          <div style="display:inline-flex;align-items:center;gap:10px;background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:10px;padding:10px 18px;font-size:13.5px;color:#1b5e20;font-weight:600;margin-bottom:20px;text-align:left;box-shadow:0 2px 8px rgba(46,125,50,0.08)">
-            <span class="material-icons" style="font-size:22px;color:#2e7d32">notifications_active</span>
-            <span>✓ Auto-Notification Subscribed: We will notify <b>${esc(S.user.email)}</b> as soon as Pandits become available in ${esc(devoteeDistrict || devoteeState || 'Location')}.</span>
-          </div>
-
-          <div>
-            <button class="btn btn-gold btn-md" data-action="changeDevoteeLocation" style="padding:10px 24px;font-weight:700">
-              <span class="material-icons" style="font-size:18px;vertical-align:middle;margin-right:6px">edit_location</span> Change Selected Location
-            </button>
-          </div>
-        </div>
-      ` : `
-        ${tab === 'bookings' ? renderDevoteeBookingsTab(bookings) : ''}
-        ${tab === 'payments' ? renderDevoteePaymentTrackingTab(bookings) : ''}
-        ${tab === 'explore' ? renderDevoteeExploreTab() : ''}
-        ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
-        ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
-      `}
+      ${tab === 'bookings' ? renderDevoteeBookingsTab(bookings) : ''}
+      ${tab === 'payments' ? renderDevoteePaymentTrackingTab(bookings) : ''}
+      ${tab === 'explore' ? renderDevoteeExploreTab() : ''}
+      ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
+      ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
     </div>
   `;
 }
@@ -1925,9 +2080,12 @@ function renderDevoteeExploreTab() {
             <h3>${esc(p.name)}</h3>
             <p class="muted" style="margin:0 0 8px;font-size:13.5px">${esc(p.desc)}</p>
             <div>${(p.benefits || []).map((b) => `<span class="badge">✦ ${esc(b)}</span>`).join('')}</div>
-            <div class="row" style="margin-top:14px">
+            <div class="row" style="margin-top:14px;gap:6px;flex-wrap:wrap">
               <span class="price">${inr(p.baseFee)}</span>
-              <button class="btn btn-dark btn-sm" data-action="findFor" data-name="${esc(p.name)}">Book Pandit</button>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-gold btn-sm" data-action="bookDirectPuja" data-name="${esc(p.name)}">Book Puja</button>
+                <button class="btn btn-outline dark btn-sm" data-action="findFor" data-name="${esc(p.name)}">Pandits</button>
+              </div>
             </div>
           </div>
         </div>
@@ -2028,8 +2186,8 @@ function renderDevoteeProfileTab(totalBookings) {
           <div class="profile-field-value">${esc(u.phone || 'Not set')}</div>
         </div>
         <div class="profile-field">
-          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">map</span> State &amp; District</div>
-          <div class="profile-field-value">${esc(u.district || '')}${u.state ? ', ' + esc(u.state) : (u.district ? '' : 'Not set')}</div>
+          <div class="profile-field-label"><span class="material-icons" style="font-size:14px">map</span> State &amp; District (Locked)</div>
+          <div class="profile-field-value">${esc(u.district || '')}${u.state ? ', ' + esc(u.state) : (u.district ? '' : 'Not set')} <span class="badge" style="background:#fff3e0;border:1px solid #ffcc80;color:#bf360c;font-size:10.5px;padding:2px 6px;margin-left:6px"><span class="material-icons" style="font-size:11px;vertical-align:middle">lock</span> Locked</span></div>
         </div>
         <div class="profile-field">
           <div class="profile-field-label"><span class="material-icons" style="font-size:14px">location_city</span> City / Town</div>
@@ -2934,22 +3092,106 @@ function openAssign(id) {
 }
 
 function openPujaEditor(id) {
-  const p = S.pujas.find((x) => x._id === id) || { type: 'Short', baseFee: 1199, perHourFee: 500, benefits: [] };
-  openModal(id ? 'Edit Puja' : 'Add Puja', `
-    <div><label>Name</label><input id="e-name" value="${esc(p.name || '')}" ${id ? 'readonly' : ''}></div>
-    <div><label>Type</label><select id="e-type">${opts(['Short', 'Long'], p.type)}</select></div>
-    <div><label>Short description</label><input id="e-desc" value="${esc(p.desc || '')}"></div>
-    <div><label>Detailed description</label><textarea id="e-long" rows="2">${esc(p.longDesc || '')}</textarea></div>
-    <div><label>Benefits (comma separated)</label><input id="e-ben" value="${esc((p.benefits || []).join(', '))}"></div>
-    <div><label>Image URL</label><input id="e-img" value="${esc(p.image || '')}"></div>
-    <div class="form-grid" style="padding:0"><div><label>Base fee (₹)</label><input id="e-base" type="number" value="${p.baseFee}"></div><div><label>Per-hour fee (₹)</label><input id="e-hr" type="number" value="${p.perHourFee}"></div></div>
-    <button class="btn btn-gold" id="e-save">Save</button>`, (m) => {
+  const p = id ? S.pujas.find((x) => x._id === id) : null;
+  const initialType = p ? p.type : 'Short';
+  openModal(id ? 'Edit Puja Service' : 'Add New Puja Service', `
+    <div><label style="font-weight:600">Puja Name *</label><input id="e-name" value="${esc(p ? p.name : '')}" ${id ? 'readonly' : ''} placeholder="e.g. Satyanarayan Puja"></div>
+    <div>
+      <label style="font-weight:600">Type</label>
+      <select id="e-type">
+        <option value="Short" ${initialType === 'Short' ? 'selected' : ''}>Short (Single-session home puja)</option>
+        <option value="Long" ${initialType === 'Long' ? 'selected' : ''}>Long (Multi-day Mahayajna)</option>
+      </select>
+    </div>
+    <div id="e-base-wrap" style="${initialType === 'Long' ? 'display:none' : 'display:block'}">
+      <label style="font-weight:600">Base Fee (₹) *</label>
+      <input id="e-base" type="number" min="0" value="${p ? p.baseFee || 0 : 1199}">
+      <small class="muted" style="font-size:11px;display:block;margin-top:2px">Fixed starting dakshina for single-session short puja.</small>
+    </div>
+    <div id="e-hr-wrap" style="${initialType === 'Long' ? 'display:block' : 'display:none'}">
+      <label style="font-weight:600">Per Hour Fee for Multi-Day (₹) *</label>
+      <input id="e-hr" type="number" min="0" value="${p ? p.perHourFee || 0 : 500}">
+      <small class="muted" style="font-size:11px;display:block;margin-top:2px">Hourly rate per pandit for multi-day custom rituals.</small>
+    </div>
+    <div><label style="font-weight:600">Short description *</label><input id="e-desc" value="${esc(p ? p.desc : '')}" placeholder="Brief overview of ritual"></div>
+    <div><label style="font-weight:600">Detailed description</label><textarea id="e-long" rows="2" placeholder="Significance, vidhi details...">${esc(p ? p.longDesc : '')}</textarea></div>
+    <div><label style="font-weight:600">Benefits (comma separated)</label><input id="e-ben" value="${esc((p && p.benefits || []).join(', '))}" placeholder="Peace, Prosperity, Health"></div>
+    <div>
+      <label style="font-weight:600">Upload Puja Image</label>
+      <input type="file" id="e-file" accept="image/*" style="margin-top:4px;padding:6px;background:#fcf8f0;border:1px dashed #ebd9be;width:100%">
+      <div id="e-img-preview" style="margin-top:8px;display:${p && p.image ? 'block' : 'none'}">
+        <img id="e-preview-tag" src="${esc(p ? p.image : '')}" alt="Puja Preview" style="max-height:140px;max-width:100%;border-radius:8px;border:1px solid #ebd9be;object-fit:cover;display:block">
+        <button type="button" class="btn btn-outline red btn-sm" id="e-remove-img" style="margin-top:6px;padding:2px 8px;font-size:11px">Remove Image</button>
+      </div>
+      <small class="muted" style="font-size:12px;margin-top:4px;display:block">Upload an image file (PNG, JPG, WEBP). Image will be saved directly in the database.</small>
+    </div>
+    <button class="btn btn-gold" id="e-save" style="margin-top:14px;width:100%"><span class="material-icons" style="font-size:18px;vertical-align:middle;margin-right:4px">save</span> Save Puja Service</button>`, (m) => {
+    const typeSel = $('#e-type', m);
+    const baseWrap = $('#e-base-wrap', m);
+    const hrWrap = $('#e-hr-wrap', m);
+    const updateTypeFields = () => {
+      const isLong = typeSel.value === 'Long';
+      baseWrap.style.display = isLong ? 'none' : 'block';
+      hrWrap.style.display = isLong ? 'block' : 'none';
+    };
+    typeSel.onchange = updateTypeFields;
+
+    let uploadedImageData = p ? p.image : '';
+    const fileInp = $('#e-file', m);
+    const removeBtn = $('#e-remove-img', m);
+    if (removeBtn) {
+      removeBtn.onclick = () => {
+        uploadedImageData = '';
+        fileInp.value = '';
+        const preview = $('#e-img-preview', m);
+        if (preview) preview.style.display = 'none';
+        const previewTag = $('#e-preview-tag', m);
+        if (previewTag) previewTag.src = '';
+      };
+    }
+
+    fileInp.onchange = (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      if (file.size > 8 * 1024 * 1024) return toast('Image size exceeds 8MB. Please choose a smaller image.', true);
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        uploadedImageData = evt.target.result;
+        const preview = $('#e-img-preview', m);
+        const previewTag = $('#e-preview-tag', m);
+        if (previewTag && preview) {
+          previewTag.src = uploadedImageData;
+          preview.style.display = 'block';
+        }
+      };
+      reader.readAsDataURL(file);
+    };
+
     $('#e-save', m).onclick = async () => {
-      const type = $('#e-type', m).value, base = +$('#e-base', m).value, hr = +$('#e-hr', m).value;
-      const body = { name: $('#e-name', m).value.trim(), type, desc: $('#e-desc', m).value, longDesc: $('#e-long', m).value, benefits: $('#e-ben', m).value.split(',').map((s) => s.trim()).filter(Boolean), baseFee: base, perHourFee: hr, price: type === 'Long' ? `From ${inr(hr)}/hr` : inr(base) };
-      if ($('#e-img', m).value) body.image = $('#e-img', m).value;
-      if (!body.name || !body.desc) return toast('Name and description are required', true);
-      try { await api('/pujas', { method: 'POST', body }); closeModal(); toast('Catalog updated'); renderDashboard(); } catch (e) { toast(e.message, true); }
+      const type = typeSel.value;
+      const base = type === 'Short' ? +$('#e-base', m).value || 1199 : 0;
+      const hr = type === 'Long' ? +$('#e-hr', m).value || 500 : 0;
+      const name = $('#e-name', m).value.trim();
+      const desc = $('#e-desc', m).value.trim();
+      if (!name || !desc) return toast('Name and description are required', true);
+
+      const body = {
+        name,
+        type,
+        desc,
+        longDesc: $('#e-long', m).value.trim(),
+        benefits: $('#e-ben', m).value.split(',').map((s) => s.trim()).filter(Boolean),
+        baseFee: base,
+        perHourFee: hr,
+        price: type === 'Long' ? `From ${inr(hr)}/hr` : inr(base)
+      };
+      if (uploadedImageData) body.image = uploadedImageData;
+      try {
+        await api('/pujas', { method: 'POST', body });
+        closeModal();
+        toast('Puja service updated and saved to database! 🙏');
+        renderDashboard();
+      } catch (e) { toast(e.message, true); }
     };
   });
 }
@@ -2994,6 +3236,7 @@ const ACTIONS = {
   },
   pujaTab: (d) => { S.pujaTab = d.type; renderPujas(); },
   findFor: (d) => { S.filters.service = d.name; showView('pandits'); },
+  bookDirectPuja: (d) => openBooking({ pujaName: d.name }),
   planLong: (d) => { S.longPreset = d.name; showView('long'); },
   bookPandit: (d) => openBooking(d.id),
   viewTimeline: (d) => openBookingTimeline(d.id),
@@ -3207,10 +3450,6 @@ const ACTIONS = {
     }
   },
   dashTab: (d) => {
-    if (S.user && S.user.role !== 'pandit' && S._isRegionUnavailable) {
-      toast(`🔒 Dashboard features (My Bookings, Payment Tracking, Explore All Pujas, Multi-Day Yajnas, My Profile) are locked because no verified Pandits are currently available in ${S.user.district || S.user.state || 'your region'}. We will automatically notify you at ${S.user.email} as soon as service is launched.`, true);
-      return;
-    }
     S.dashTab = d.tab;
     if (S.user && S.user.role === 'pandit' && document.getElementById('dash-tab-content')) {
       switchPanditSubtab(d.tab);
@@ -3224,11 +3463,6 @@ const ACTIONS = {
       toast('Please log in to view your profile 🙏');
       return;
     }
-    if (S.user.role !== 'pandit' && S._isRegionUnavailable) {
-      toast(`🔒 Profile and dashboard features are locked because no verified Pandits are currently available in your region (${S.user.district || S.user.state}).`, true);
-      showView('dashboard');
-      return;
-    }
     S.dashTab = 'profile';
     showView('dashboard');
   },
@@ -3236,91 +3470,45 @@ const ACTIONS = {
   changeDevoteeLocation: () => {
     const u = S.user;
     if (!u) return openAuth('login');
-    const currentState = u.state || 'Odisha';
-    openModal('Change Selected Location', `
-      <div style="background:#fffcf5;border:1px solid #ebd9be;border-radius:10px;padding:12px;margin-bottom:14px">
-        <span class="muted" style="font-size:13px">Select your State and District to check Vedic Pandit availability in your region.</span>
+    openModal('Account Location Locked', `
+      <div style="background:#fffcf5;border:1.5px solid #ebd9be;border-radius:12px;padding:22px 18px;text-align:center">
+        <span class="material-icons" style="font-size:46px;color:var(--ochre)">lock</span>
+        <h3 style="margin:12px 0 6px;color:var(--mahogany);font-size:20px">Location Locked to Account</h3>
+        <p style="color:var(--muted);font-size:14px;line-height:1.6;max-width:440px;margin:0 auto 16px">
+          Your devotee account location was set during registration and is permanently locked to <b>${esc(u.district || 'District')}${u.state ? ', ' + esc(u.state) : ''}</b>. Both short and long puja ceremonies are fixed to this location and no district will change.
+        </p>
+        <button class="btn btn-gold" onclick="closeModal()">Understood</button>
       </div>
-      <div class="form-grid" style="padding:0">
-        <div>
-          <label style="font-weight:600">State *</label>
-          <select id="ch-loc-state">${opts(Object.keys(LOCATIONS), currentState)}</select>
-        </div>
-        <div>
-          <label style="font-weight:600">District *</label>
-          <select id="ch-loc-district"></select>
-        </div>
-      </div>
-      <div style="margin-top:10px">
-        <label style="font-weight:600">City / Town</label>
-        <input id="ch-loc-city" value="${esc(u.city || '')}" placeholder="e.g. Bhubaneswar">
-      </div>
-      <button class="btn btn-gold" id="btn-save-loc" style="margin-top:16px;width:100%"><span class="material-icons">check_circle</span> Update Location &amp; Check Availability</button>
-    `, (m) => {
-      const stateSel = $('#ch-loc-state', m);
-      const distSel = $('#ch-loc-district', m);
-      const updateDist = () => {
-        const ds = LOCATIONS[stateSel.value] || [];
-        distSel.innerHTML = opts(ds, u.district || ds[0] || '', 'Select District');
-      };
-      updateDist();
-      stateSel.onchange = updateDist;
-
-      $('#btn-save-loc', m).onclick = async () => {
-        const state = stateSel.value;
-        const district = distSel.value;
-        const city = $('#ch-loc-city', m).value.trim();
-        if (!district) return toast('Please select your district', true);
-        try {
-          const updated = await api('/users/profile', {
-            method: 'PUT',
-            body: { name: u.name, phone: u.phone, state, district, city }
-          });
-          saveSession(updated, S.token);
-          closeModal();
-          toast('Location updated to ' + district + ', ' + state + '! 🙏');
-          renderDashboard();
-        } catch (e) { toast(e.message, true); }
-      };
-    });
+    `);
   },
   editDevoteeProfile: () => {
     const u = S.user;
-    const currentState = u.state || 'Odisha';
     openModal('Edit Devotee Profile', `
       <div><label style="font-weight:600">Full Name</label><input id="ep-dev-name" value="${esc(u.name || '')}"></div>
       <div><label style="font-weight:600">Phone Number</label><input id="ep-dev-phone" value="${esc(u.phone || '')}"></div>
       <div class="form-grid" style="padding:0">
         <div>
-          <label style="font-weight:600">State</label>
-          <select id="ep-dev-state">${opts(Object.keys(LOCATIONS), currentState)}</select>
+          <label style="font-weight:600">State (Locked)</label>
+          <input value="${esc(u.state || 'Odisha')}" readonly disabled style="background:#fcf8f0;cursor:not-allowed;font-weight:600">
         </div>
         <div>
-          <label style="font-weight:600">District</label>
-          <select id="ep-dev-dist"></select>
+          <label style="font-weight:600">District (Locked)</label>
+          <input value="${esc(u.district || 'Not Set')}" readonly disabled style="background:#fcf8f0;cursor:not-allowed;font-weight:600">
         </div>
       </div>
-      <div><label style="font-weight:600">City / Town</label><input id="ep-dev-city" value="${esc(u.city || '')}"></div>
+      <small class="muted" style="color:var(--ochre);display:block;margin:4px 0 10px;font-size:12px">
+        <span class="material-icons" style="font-size:13px;vertical-align:middle">lock</span> State and District are permanently locked to your devotee account.
+      </small>
+      <div><label style="font-weight:600">City / Town / Locality</label><input id="ep-dev-city" value="${esc(u.city || '')}"></div>
       <button class="btn btn-gold" id="btn-save-dev-prof" style="margin-top:14px;width:100%"><span class="material-icons">save</span> Save Profile</button>
     `, (m) => {
-      const stateSel = $('#ep-dev-state', m);
-      const distSel = $('#ep-dev-dist', m);
-      const updateDist = () => {
-        const ds = LOCATIONS[stateSel.value] || [];
-        distSel.innerHTML = opts(ds, u.district || ds[0] || '', 'Select District');
-      };
-      updateDist();
-      stateSel.onchange = updateDist;
-
       $('#btn-save-dev-prof', m).onclick = async () => {
         const name = $('#ep-dev-name', m).value.trim();
         const phone = $('#ep-dev-phone', m).value.trim();
-        const state = stateSel.value;
-        const district = distSel.value;
         const city = $('#ep-dev-city', m).value.trim();
         if (!name || !phone) return toast('Name and phone are required', true);
         try {
-          const updated = await api('/users/profile', { method: 'PUT', body: { name, phone, state, district, city } });
+          const updated = await api('/users/profile', { method: 'PUT', body: { name, phone, city } });
           saveSession(updated, S.token);
           closeModal();
           toast('Profile updated successfully! 🙏');

@@ -117,8 +117,9 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   } else {
     user.name = name || user.name;
     user.phone = phone || user.phone;
-    if (state) user.state = state;
-    if (district) user.district = district;
+    // Lock state and district: once set, cannot be changed
+    if (!user.state && state) user.state = state;
+    if (!user.district && district) user.district = district;
     if (city) user.city = city;
     await user.save();
   }
@@ -305,8 +306,14 @@ app.put('/api/users/profile', auth, wrap(async (req, res) => {
   if (!user) return res.status(404).json({ error: 'Devotee profile not found' });
   if (name) user.name = name;
   if (phone) user.phone = phone;
-  if (state !== undefined) user.state = state;
-  if (district !== undefined) user.district = district;
+  // If user is a devotee ('user'), state and district are locked once set
+  if (user.role === 'user') {
+    if (!user.state && state) user.state = state;
+    if (!user.district && district) user.district = district;
+  } else {
+    if (state !== undefined) user.state = state;
+    if (district !== undefined) user.district = district;
+  }
   if (city !== undefined) user.city = city;
 
   const targetDist = (user.district || user.city || user.state || '').trim();
@@ -378,7 +385,7 @@ app.get('/api/pandits', wrap(async (req, res) => {
   if (req.query.email) q.email = new RegExp('^' + req.query.email.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
   if (req.query.district) q.$or = [{ district: req.query.district }, { workingDistricts: req.query.district }];
   if (req.query.state) q.$and = [{ $or: [{ state: req.query.state }, { workingState: req.query.state }] }];
-  if (req.query.service) q.services = req.query.service;
+  // All registered pandits can perform all pujas; pandits are not excluded by service
   res.json(await Pandit.find(q).sort({ experience: -1 }).lean());
 }));
 
@@ -956,6 +963,12 @@ app.post('/api/bookings', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Missing required booking fields (userEmail, service, date, district)' });
   }
 
+  // Enforce devotee locked district: devotee cannot change district
+  const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
+  if (devoteeUser && devoteeUser.district) {
+    b.district = devoteeUser.district;
+  }
+
   let preferredPandit = null;
   if (b.panditEmail && lc(b.panditEmail) !== 'any' && lc(b.panditEmail) !== '') {
     preferredPandit = await Pandit.findOne({ email: lc(b.panditEmail), verified: true });
@@ -1481,6 +1494,12 @@ app.get('/api/long-puja-requests', wrap(async (req, res) => {
 app.post('/api/long-puja-requests', wrap(async (req, res) => {
   const b = req.body;
   if (!b.userEmail || !b.pujaName || !b.district || !b.fromDate || !b.toDate) return res.status(400).json({ error: 'Missing required fields' });
+
+  // Enforce devotee locked district: devotee cannot change district
+  const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
+  if (devoteeUser && devoteeUser.district) {
+    b.district = devoteeUser.district;
+  }
   const days = Math.max(1, Math.round((new Date(b.toDate) - new Date(b.fromDate)) / 86400000) + 1);
   const dailyHours = Math.max(1, Number(b.dailyHours) || 4);
   const requiredPandits = Math.max(1, Number(b.requiredPandits) || 1);
