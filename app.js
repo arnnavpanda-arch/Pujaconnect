@@ -1319,9 +1319,9 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
   const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
   const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
   const baseUrl = process.env.APP_URL || origin;
-  const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Accept&token=${encodeURIComponent(panditToken)}`;
-  const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}`;
-  const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}`;
+  const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Accept&token=${encodeURIComponent(panditToken)}#dashboard`;
+  const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}#dashboard`;
+  const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}#dashboard`;
 
   // Send assignment offer alert to Pandit with uncompacted fee, breakdown, and direct Accept/Reject action links
   const targetEmail = lc(pandit.email);
@@ -1375,9 +1375,9 @@ app.get('/api/bookings/:id/pandit-offer-link', adminOnly, wrap(async (req, res) 
   const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
   const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
   const baseUrl = process.env.APP_URL || origin;
-  const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.panditEmail)}&decision=Accept&token=${encodeURIComponent(panditToken)}`;
-  const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.panditEmail)}&decision=Reject&token=${encodeURIComponent(panditToken)}`;
-  const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.panditEmail)}&token=${encodeURIComponent(panditToken)}`;
+  const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.panditEmail)}&decision=Accept&token=${encodeURIComponent(panditToken)}#dashboard`;
+  const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.panditEmail)}&decision=Reject&token=${encodeURIComponent(panditToken)}#dashboard`;
+  const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(b.panditEmail)}&token=${encodeURIComponent(panditToken)}#dashboard`;
 
   res.json({
     ok: true,
@@ -1414,9 +1414,9 @@ app.post('/api/bookings/:id/resend-pandit-offer', adminOnly, wrap(async (req, re
   const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
   const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
   const baseUrl = process.env.APP_URL || origin;
-  const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Accept&token=${encodeURIComponent(panditToken)}`;
-  const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}`;
-  const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}`;
+  const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Accept&token=${encodeURIComponent(panditToken)}#dashboard`;
+  const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}#dashboard`;
+  const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}#dashboard`;
 
   const targetEmail = lc(req.body && req.body.alternateEmail ? req.body.alternateEmail : pandit.email);
   const emailRes = await sendSafe('PANDIT_NEW_BOOKING', targetEmail, {

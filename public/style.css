@@ -812,6 +812,8 @@ td .btn { margin: 0 4px 4px 0; }
 
 .view-section { display: none; }
 .view-section.active { display: block; animation: fade .3s ease; }
+html.direct-dashboard-mode #view-home { display: none !important; }
+html.direct-dashboard-mode #view-dashboard { display: block !important; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
 
 /* KYC Stage Tracker */

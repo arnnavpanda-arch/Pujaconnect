@@ -5353,13 +5353,8 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
 (async function init() {
   const yrEl = $('#yr');
   if (yrEl) yrEl.textContent = new Date().getFullYear();
-  renderNav();
-  await loadPujas();
-  renderHomePujas();
-  renderHomePandits();
-  setupHeroFilter();
 
-  // Check for direct email action links (Pandit Decision OR Devotee Rebook)
+  // Check for direct email action links (Pandit Decision OR Devotee Rebook) FIRST
   const urlParams = new URLSearchParams(window.location.search);
   const actionParam = urlParams.get('action');
   const rebookId = urlParams.get('bookingId') || urlParams.get('rebook');
@@ -5370,6 +5365,8 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
     const bookingId = urlParams.get('bookingId') || rebookId;
     const decisionParam = urlParams.get('decision') || urlParams.get('response') || '';
 
+    // Immediately switch to dashboard view so front page is NEVER rendered
+    showView('dashboard');
     try {
       window.history.replaceState({}, document.title, window.location.pathname + '#dashboard');
     } catch (e) {}
@@ -5389,13 +5386,25 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
       console.warn('Pandit magic decision auth error:', err);
     }
 
-    showView('dashboard');
     await renderDashboard();
+    openPanditDecisionModal(authBooking || bookingId, decisionParam, emailParam, tokenParam);
 
-    setTimeout(() => {
-      openPanditDecisionModal(authBooking || bookingId, decisionParam, emailParam, tokenParam);
-    }, 350);
-  } else if (actionParam === 'rebook' || (rebookId && emailParam)) {
+    // Load background catalogue silently without blocking dashboard
+    loadPujas().then(() => {
+      renderHomePujas();
+      renderHomePandits();
+      setupHeroFilter();
+    }).catch(() => {});
+    return;
+  }
+
+  renderNav();
+  await loadPujas();
+  renderHomePujas();
+  renderHomePandits();
+  setupHeroFilter();
+
+  if (actionParam === 'rebook' || (rebookId && emailParam)) {
     // Clean search params from URL so refresh stays clean
     try {
       window.history.replaceState({}, document.title, window.location.pathname + '#dashboard');
