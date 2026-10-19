@@ -1151,7 +1151,7 @@ app.put('/api/bookings/:id/pandit-response', wrap(async (req, res) => {
 }));
 
 app.put('/api/bookings/:id/status', wrap(async (req, res) => {
-  const { status, reason } = req.body;
+  const { status, reason, havanConducted, havanNotes } = req.body;
   if (!['Pending Assignment', 'Pending Pandit Confirmation', 'Confirmed', 'Completed', 'Cancelled', 'Rejected', 'In Progress'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
@@ -1160,6 +1160,8 @@ app.put('/api/bookings/:id/status', wrap(async (req, res) => {
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
   b.status = status;
+  if (havanConducted !== undefined) b.havanConducted = Boolean(havanConducted);
+  if (havanNotes) b.havanNotes = String(havanNotes).trim();
   b.panditApproval = isApproved ? 'Approved' : (status === 'Cancelled' || status === 'Rejected') ? 'Rejected' : 'Pending';
 
   if (status === 'Rejected') {

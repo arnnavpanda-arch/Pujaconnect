@@ -2274,6 +2274,9 @@ async function panditDash(root) {
       <button class="subtab ${tab === 'ceremonies' ? 'active' : ''}" data-action="dashTab" data-tab="ceremonies">
         <span class="material-icons">notifications</span> Ceremony Requests <span class="subtab-badge">${bookings.length}</span>
       </button>
+      <button class="subtab ${tab === 'havan' ? 'active' : ''}" data-action="dashTab" data-tab="havan">
+        <span class="material-icons" style="color:#e65100">local_fire_department</span> Conduct Havan
+      </button>
       <button class="subtab ${tab === 'long' ? 'active' : ''}" data-action="dashTab" data-tab="long">
         <span class="material-icons">event_note</span> Multi-Day Assignments <span class="subtab-badge">${longs.length}</span>
       </button>
@@ -2290,6 +2293,7 @@ async function panditDash(root) {
 
     <div id="dash-tab-content">
       ${tab === 'ceremonies' ? renderPanditCeremoniesTab(bookings) : ''}
+      ${tab === 'havan' ? renderPanditHavanTab(bookings, me) : ''}
       ${tab === 'long' ? renderPanditLongTab(longs, email) : ''}
       ${tab === 'avail' ? renderPanditAvailTab(me) : ''}
       ${tab === 'bank' ? renderPanditBankTab(me) : ''}
@@ -2298,10 +2302,12 @@ async function panditDash(root) {
   `;
   if (tab === 'avail') {
     setupAvailTabListeners(me);
+  } else if (tab === 'havan') {
+    setupPanditHavanListeners();
   }
 }
 
-function switchPanditSubtab(tab) {
+function switchPanditSubtab(tab, bookingId) {
   S.dashTab = tab;
   const subtabs = document.querySelectorAll('.dash-subtabs .subtab');
   subtabs.forEach((st) => {
@@ -2314,6 +2320,10 @@ function switchPanditSubtab(tab) {
     const me = S.me || {};
     const email = (S.user && S.user.email) || '';
     if (tab === 'ceremonies') container.innerHTML = renderPanditCeremoniesTab(bookings);
+    else if (tab === 'havan') {
+      container.innerHTML = renderPanditHavanTab(bookings, me, bookingId);
+      setupPanditHavanListeners();
+    }
     else if (tab === 'long') container.innerHTML = renderPanditLongTab(longs, email);
     else if (tab === 'avail') {
       container.innerHTML = renderPanditAvailTab(me);
@@ -2463,6 +2473,9 @@ function renderPanditCeremoniesTab(bookings) {
                   <span class="material-icons">receipt_long</span> View Ritual Bill
                 </button>
               ` : ''}
+              <button class="btn btn-gold btn-sm" data-action="openPanditHavan" data-id="${esc(b.bookingId)}">
+                <span class="material-icons" style="font-size:15px;vertical-align:middle">local_fire_department</span> Conduct Havan
+              </button>
               <button class="btn btn-outline dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}">
                 <span class="material-icons">print</span> Ritual Slip
               </button>
@@ -3239,6 +3252,15 @@ const ACTIONS = {
   bookDirectPuja: (d) => openBooking({ pujaName: d.name }),
   planLong: (d) => { S.longPreset = d.name; showView('long'); },
   bookPandit: (d) => openBooking(d.id),
+  openPanditHavan: (d) => {
+    if (!S.user || S.user.role !== 'pandit') {
+      toast('Only verified Vedic Pandits can conduct Havan ceremonies.', true);
+      return;
+    }
+    S.dashTab = 'havan';
+    showView('dashboard');
+    setTimeout(() => switchPanditSubtab('havan', d.id), 50);
+  },
   viewTimeline: (d) => openBookingTimeline(d.id),
   rebookBooking: async (d) => {
     let b = (S.bookings || []).find((x) => x.bookingId === d.id);
@@ -4009,416 +4031,222 @@ document.addEventListener('keydown', (ev) => {
 });
 
 /* ==========================================================================
-   SACRED VIRTUAL HAVAN & AGNIHOTRA ENGINE
+   PANDIT CONDUCT HAVAN & YAJNA RITUAL ENGINE (Pandit Dashboard Exclusive)
    ========================================================================== */
-function initVirtualHavan() {
-  const havanSec = document.getElementById('havan-section');
-  if (!havanSec) return;
+function renderPanditHavanTab(bookings, me, activeBookingId) {
+  const confirmedBookings = (bookings || []).filter(
+    (b) => b.status === 'Confirmed' || b.status === 'Accepted' || b.status === 'Completed' || b.paymentStatus === 'Paid'
+  );
+  const activeBooking = activeBookingId ? (bookings || []).find((b) => b.bookingId === activeBookingId) : (confirmedBookings[0] || (bookings && bookings[0]) || null);
 
-  // 1. Time of Day Sandhya Phase Updater
-  function updateSandhyaPhase() {
-    const el = document.getElementById('havan-live-time');
-    if (!el) return;
-    const hour = new Date().getHours();
-    if (hour >= 4 && hour < 12) {
-      el.textContent = 'Pratah Sandhya & Agnihotra';
-    } else if (hour >= 12 && hour < 16) {
-      el.textContent = 'Madhyahna Vedic Havan';
-    } else if (hour >= 16 && hour < 20) {
-      el.textContent = 'Sayam Sandhya & Mahayajna';
-    } else {
-      el.textContent = 'Ratri Akhanda Agnihotra';
-    }
-  }
-  updateSandhyaPhase();
-  setInterval(updateSandhyaPhase, 60000);
+  const devoteeName = activeBooking ? (activeBooking.userName || 'Devotee') : 'Respected Devotee';
+  const ceremonyName = activeBooking ? (activeBooking.service || 'Sacred Havan & Puja') : 'Vedic Havan & Yajna';
+  const devoteeDistrict = activeBooking ? (activeBooking.district || 'Odisha') : ((me && me.district) || 'Odisha');
+  const devoteeDate = activeBooking ? (activeBooking.date || 'Today') : 'Auspicious Muhurat';
+  const devoteeTime = activeBooking ? (activeBooking.time || '10:00 AM') : 'Pratah Kaal';
 
-  // 2. Rising Ember Sparks Animation
-  const emberContainer = document.getElementById('ember-particles');
-  if (emberContainer) {
-    function spawnEmber() {
-      if (!document.getElementById('havan-section')) return;
-      const ember = document.createElement('div');
-      ember.className = 'ember-particle';
-      const size = Math.random() * 3 + 2;
-      const left = 38 + Math.random() * 24; // center cluster around fire
-      const drift = (Math.random() - 0.5) * 60;
-      const duration = 2.2 + Math.random() * 2.5;
-      ember.style.width = size + 'px';
-      ember.style.height = size + 'px';
-      ember.style.left = left + '%';
-      ember.style.bottom = '80px';
-      ember.style.setProperty('--drift', drift + 'px');
-      ember.style.animationDuration = duration + 's';
-      emberContainer.appendChild(ember);
-      setTimeout(() => ember.remove(), duration * 1000);
-    }
-    for (let i = 0; i < 8; i++) setTimeout(spawnEmber, i * 250);
-    setInterval(spawnEmber, 450);
-  }
-
-  // 3. Vedic Mantras Data & Rotator
-  const MANTRAS = [
-    {
-      title: 'Gayatri Mahamantra',
-      sanskrit: 'ॐ भूर्भुवः स्वः तत्सवितुर्वरेण्यं भर्गो देवस्य धीमहि धियो यो नः प्रचोदयात् ॥',
-      translit: 'Om Bhur Bhuvah Svah, Tat Savitur Varenyam, Bhargo Devasya Dhimahi, Dhiyo Yo Nah Prachodayat ॥',
-      meaning: '<strong>Sacred Blessing:</strong> We meditate upon the divine brilliant radiance of Savita (the Sun). May that illuminate our intellect and dispel all ignorance and sorrow.'
-    },
-    {
-      title: 'Maha Mrityunjaya Mantra',
-      sanskrit: 'ॐ त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् । उर्वारुकमिव बन्धनान्मृत्य pushyeya मामृतात् ॥',
-      translit: 'Om Tryambakam Yajamahe Sugandhim Pushti-Vardhanam, Urvarukamiva Bandhanan Mrityor Mukshiya Mamritat ॥',
-      meaning: '<strong>Sacred Blessing:</strong> We worship the Three-Eyed Lord Shiva, who nourishes and perfumes all lives. May He liberate us from sickness, fear of mortality, and grant divine longevity.'
-    },
-    {
-      title: 'Rigvedic Agni Suktam',
-      sanskrit: 'ॐ अग्निमीळे पुरोहितं यज्ञस्य देवमृत्विजम् । होतारं रत्नधातमम् ॥ स्वाहा ॥',
-      translit: 'Om Agnimile Purohitam Yajnasya Devamritvijam, Hotaram Ratnadhatamam ॥ Svaha ॥',
-      meaning: '<strong>Sacred Blessing:</strong> We praise Agni, the Divine Priest of the Yajna, the bearer of offerings, who bestows supreme spiritual and worldly treasures.'
-    },
-    {
-      title: 'Surya Gayatri Mantra',
-      sanskrit: 'ॐ आदित्याय विद्महे भास्कराय धीमहि तन्नः सूर्यः प्रचोदयात् ॥ स्वाहा ॥',
-      translit: 'Om Adityaya Vidmahe Bhaskaraya Dhimahi, Tannah Suryah Prachodayat ॥ Svaha ॥',
-      meaning: '<strong>Sacred Blessing:</strong> May the glorious Sun God Aditya inspire our wisdom, grant radiant health (Arogya), vitality, and dispel all shadows.'
-    },
-    {
-      title: 'Sri Suktam Mahalakshmi Mantra',
-      sanskrit: 'ॐ श्रीं ह्रीं श्रीं कमले कमलालये प्रसीद प्रसीद श्रीं ह्रीं श्रीं महालक्ष्म्यै नमः स्वाहा ॥',
-      translit: 'Om Shreem Hreem Shreem Kamale Kamalalaye Praseeda Praseeda Shreem Hreem Shreem Mahalakshmyai Namah Svaha ॥',
-      meaning: '<strong>Sacred Blessing:</strong> Salutations to Supreme Goddess Mahalakshmi, residing upon the lotus. Bestow divine grace, auspicious wealth, and lasting family peace.'
-    },
-    {
-      title: 'Vedic Shanti Patha',
-      sanskrit: 'ॐ द्यौः शान्तिरन्तरिक्षं शान्तिः पृथिवी शान्तिरापः शान्तिरोषधयः शान्तिः ॥ ॐ शान्तिः शान्तिः शान्तिः ॥',
-      translit: 'Om Dyauh Shantir-Antariksham Shantih, Prithivi Shantir-Apah Shantir-Oshadhayah Shantih ॥ Om Shantih Shantih Shantih ॥',
-      meaning: '<strong>Sacred Blessing:</strong> May peace reign in the heavens, in the sky, upon the earth, in the waters, herbs, and trees. Universal peace everywhere.'
-    }
-  ];
-
-  let currentMantraIdx = 0;
-  const mantraDeityEl = document.getElementById('mantra-deity-pill');
-  const mantraSanskritEl = document.getElementById('active-mantra-sanskrit');
-  const mantraTranslitEl = document.getElementById('active-mantra-translit');
-  const mantraMeaningEl = document.getElementById('active-mantra-meaning');
-  const mantraProgressFill = document.getElementById('mantra-progress-fill');
-
-  function renderMantra(idx) {
-    const m = MANTRAS[idx];
-    if (!m || !mantraSanskritEl) return;
-    
-    mantraSanskritEl.style.opacity = '0';
-    mantraTranslitEl.style.opacity = '0';
-    mantraMeaningEl.style.opacity = '0';
-
-    setTimeout(() => {
-      if (mantraDeityEl) mantraDeityEl.textContent = m.title;
-      mantraSanskritEl.textContent = m.sanskrit;
-      mantraTranslitEl.textContent = m.translit;
-      mantraMeaningEl.innerHTML = m.meaning;
-      mantraSanskritEl.style.opacity = '1';
-      mantraTranslitEl.style.opacity = '1';
-      mantraMeaningEl.style.opacity = '1';
-    }, 280);
-  }
-
-  const MANTRA_CYCLE_MS = 14000;
-  let mantraStartTime = Date.now();
-
-  function tickMantraProgress() {
-    const elapsed = Date.now() - mantraStartTime;
-    const pct = Math.min(100, (elapsed / MANTRA_CYCLE_MS) * 100);
-    if (mantraProgressFill) mantraProgressFill.style.width = pct + '%';
-
-    if (elapsed >= MANTRA_CYCLE_MS) {
-      mantraStartTime = Date.now();
-      currentMantraIdx = (currentMantraIdx + 1) % MANTRAS.length;
-      renderMantra(currentMantraIdx);
-    }
-    requestAnimationFrame(tickMantraProgress);
-  }
-  renderMantra(0);
-  requestAnimationFrame(tickMantraProgress);
-
-  // 4. Ahuti Counters & Devotee Stats
-  let ahutiCount = parseInt(localStorage.getItem('pc_ahuti_count') || '1084', 10);
-  let devoteeCount = 362;
-  const ahutiCountEl = document.getElementById('ahuti-count-today');
-  const devoteesCountEl = document.getElementById('active-devotees-count');
-
-  function updateCountersUI() {
-    if (ahutiCountEl) ahutiCountEl.textContent = ahutiCount.toLocaleString('en-IN');
-    if (devoteesCountEl) devoteesCountEl.textContent = devoteeCount.toLocaleString('en-IN');
-    localStorage.setItem('pc_ahuti_count', ahutiCount.toString());
-  }
-  updateCountersUI();
-
-  // 5. Live Devotee Feed ("Recent Blessings")
-  const streamList = document.getElementById('havan-stream-list');
-  const DEVOTEES_SEEDS = [
-    { name: 'Pooja & Ramesh Sharma', city: 'Varanasi, UP', offering: 'Shuddha Ghee', icon: '🪔', time: '1m ago' },
-    { name: 'Dr. Suresh Acharya', city: 'Haridwar, UK', offering: 'Havan Samagri', icon: '🌾', time: '3m ago' },
-    { name: 'Ananya Raghavan', city: 'Bengaluru, KA', offering: 'Pushpa & Bilva', icon: '🌺', time: '5m ago' },
-    { name: 'Mukesh Chandra Joshi', city: 'Ujjain, MP', offering: 'Samidha & Kapur', icon: '🪵', time: '8m ago' },
-    { name: 'Aditi & Alok Deshmukh', city: 'Pune, MH', offering: 'Purna Ahuti', icon: '🥥', time: '12m ago' }
-  ];
-
-  function createStreamItemHTML(item, isUser = false) {
-    return `<div class="stream-item ${isUser ? 'user-offered' : ''}">
-      <div class="stream-item-left">
-        <span class="stream-item-icon">${item.icon}</span>
-        <div class="stream-item-info">
-          <strong>${esc(item.name)} <span style="font-weight:normal;opacity:0.8">(${esc(item.city)})</span></strong>
-          <span>Offered <em>${esc(item.offering)}</em> into Agni</span>
+  return `
+    <div class="pandit-havan-container">
+      <div class="pandit-havan-hero">
+        <div>
+          <h3><span class="material-icons">local_fire_department</span> Pandit Havan &amp; Yajna Ritual Tool</h3>
+          <p>
+            Perform and manage authentic Vedic Havan ceremonies for your assigned devotees. Follow traditional Shastric rites, verify sacred samagri, recite consecrated mantras, and bestow divine blessings.
+          </p>
+        </div>
+        <div>
+          <span class="badge green" style="font-size:12.5px;padding:6px 14px;background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7">
+            <span class="material-icons" style="font-size:15px;vertical-align:middle">verified</span> Verified Vedic Scholar
+          </span>
         </div>
       </div>
-      <span class="stream-item-time">${item.time}</span>
-    </div>`;
-  }
 
-  if (streamList) {
-    streamList.innerHTML = DEVOTEES_SEEDS.map((s) => createStreamItemHTML(s)).join('');
-  }
+      <div class="pandit-havan-card">
+        <!-- Ceremony Selector -->
+        <div class="pandit-havan-selector-row">
+          <label for="pandit-havan-booking-select">
+            <span class="material-icons" style="color:var(--ochre)">assignment</span> Select Devotee Ceremony:
+          </label>
+          <select id="pandit-havan-booking-select">
+            ${bookings && bookings.length ? bookings.map((b) => `
+              <option value="${esc(b.bookingId)}" ${(activeBooking && activeBooking.bookingId === b.bookingId) ? 'selected' : ''}>
+                ${esc(b.service)} — ${esc(b.userName)} (${esc(b.district || 'N/A')}, ${esc(b.date || '')}) [${esc(b.status)}]
+              </option>
+            `).join('') : `
+              <option value="">No assigned bookings yet — General Vedic Havan Ritual Mode</option>
+            `}
+          </select>
+        </div>
 
-  // Periodic simulated live offerings from devotees across sacred cities
-  const RANDOM_NAMES = ['Kavita Sundaram', 'Gopal Krishna Dave', 'Smt. Gayatri Devi', 'Vikramaditya Roy', 'Naveen Bhatt', 'Priya & Rahul Verma', 'Deepak Tiwari', 'Meenakshi Iyer', 'Harish Chandra Patra', 'Sunita & Arvind Saxena'];
-  const RANDOM_CITIES = ['Ayodhya, UP', 'Rishikesh, UK', 'Mathura, UP', 'Prayagraj, UP', 'Nashik, MH', 'Kolkata, WB', 'Jaipur, RJ', 'Hyderabad, TS', 'Ahmedabad, GJ', 'Bhubaneswar, OD'];
-  const RANDOM_OFFERINGS = [
-    { offering: 'Shuddha Ghee', icon: '🪔' },
-    { offering: 'Havan Samagri', icon: '🌾' },
-    { offering: 'Pushpa & Bilva', icon: '🌺' },
-    { offering: 'Samidha & Kapur', icon: '🪵' },
-    { offering: 'Purna Ahuti', icon: '🥥' }
-  ];
+        <!-- Step 1: Devotee Sankalpa -->
+        <div class="pandit-havan-step-card">
+          <div class="pandit-havan-step-header">
+            <span class="step-number-badge">१</span>
+            <span class="step-title">Devotee Sankalpa &amp; Avahan (संकल्प एवं आवाहन)</span>
+          </div>
+          <div class="pandit-havan-step-body">
+            <div class="sankalpa-guidance-box">
+              <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <span class="badge green">Devotee: <strong>${esc(devoteeName)}</strong></span>
+                <span class="badge amber">Ritual: <strong>${esc(ceremonyName)}</strong></span>
+                <span class="muted" style="font-size:12px">Location: <b>${esc(devoteeDistrict)}</b> · Slot: <b>${esc(devoteeDate)} (${esc(devoteeTime)})</b></span>
+              </div>
+              <div class="sankalpa-sanskrit">
+                ॐ विष्णुर्विष्णुर्विष्णुः श्रीमद्भगवतो महापुरुषस्य विष्णोराज्ञया प्रवर्तमानस्य... अद्य श्री <u>${esc(devoteeName)}</u> सपरिवारस्य आयुर्-आरोग्य-ऐश्वर्य-अभिवृद्ध्यर्थं श्री ${esc(ceremonyName)} निमित्तं हवनाख्यं कर्म करिष्ये ॥
+              </div>
+              <p class="muted" style="font-size:12px;margin:0">
+                Chant the formal Sankalpa holding water, akshata, and flowers, invoking Agni Dev and Devatas for the devotee family.
+              </p>
+            </div>
+          </div>
+        </div>
 
-  setInterval(() => {
-    if (!document.getElementById('havan-section')) return;
-    const rName = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
-    const rCity = RANDOM_CITIES[Math.floor(Math.random() * RANDOM_CITIES.length)];
-    const rOff = RANDOM_OFFERINGS[Math.floor(Math.random() * RANDOM_OFFERINGS.length)];
-    
-    if (streamList) {
-      const itemEl = document.createElement('div');
-      itemEl.innerHTML = createStreamItemHTML({
-        name: rName,
-        city: rCity,
-        offering: rOff.offering,
-        icon: rOff.icon,
-        time: 'Just now'
-      });
-      const firstChild = itemEl.firstElementChild;
-      streamList.insertBefore(firstChild, streamList.firstChild);
-      while (streamList.children.length > 8) {
-        streamList.removeChild(streamList.lastChild);
+        <!-- Step 2: Samagri Checklist -->
+        <div class="pandit-havan-step-card">
+          <div class="pandit-havan-step-header">
+            <span class="step-number-badge">२</span>
+            <span class="step-title">Sacred Samagri Verification (हवन सामग्री पुष्टि)</span>
+          </div>
+          <div class="pandit-havan-step-body">
+            <p class="muted" style="margin:0 0 4px;font-size:13px">Verify all consecrated samagri is ready before igniting Agni:</p>
+            <div class="samagri-checklist-grid">
+              <label class="samagri-checkbox-item">
+                <input type="checkbox" checked /> <span>🪔 Shuddha Desi Cow Ghee (शुद्ध गोघृत)</span>
+              </label>
+              <label class="samagri-checkbox-item">
+                <input type="checkbox" checked /> <span>🪵 Mango Wood Samidha (आम्र समिधा)</span>
+              </label>
+              <label class="samagri-checkbox-item">
+                <input type="checkbox" checked /> <span>🔥 Havan Kund &amp; Sruk-Sruva (हवन कुण्ड)</span>
+              </label>
+              <label class="samagri-checkbox-item">
+                <input type="checkbox" checked /> <span>🌿 32-Herb Havan Samagri &amp; Guggul</span>
+              </label>
+              <label class="samagri-checkbox-item">
+                <input type="checkbox" checked /> <span>🌾 Navadhanya, Black Til &amp; Jau (जौ)</span>
+              </label>
+              <label class="samagri-checkbox-item">
+                <input type="checkbox" checked /> <span>🌺 Bilva Patra &amp; Auspicious Flowers</span>
+              </label>
+              <label class="samagri-checkbox-item">
+                <input type="checkbox" checked /> <span>🕯️ Bhimseni Camphor (कपूर)</span>
+              </label>
+              <label class="samagri-checkbox-item">
+                <input type="checkbox" checked /> <span>🥥 Purna Ahuti Coconut, Supari &amp; Cloth</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: Vedic Mantras & Ahuti Procedure -->
+        <div class="pandit-havan-step-card">
+          <div class="pandit-havan-step-header">
+            <span class="step-number-badge">३</span>
+            <span class="step-title">Vedic Ahuti Mantras Protocol (मंत्रोच्चार एवं आहुति क्रम)</span>
+          </div>
+          <div class="pandit-havan-step-body" style="gap:12px">
+            <div class="mantra-recitation-guide">
+              <span class="mantra-label">1. Agni Pratishtapana &amp; Pradhana Ahuti</span>
+              <div class="mantra-verse">ॐ अग्नये स्वाहा । अग्नये इदं न मम ॥ ॐ सोमाय स्वाहा । सोमाय इदं न मम ॥</div>
+            </div>
+
+            <div class="mantra-recitation-guide">
+              <span class="mantra-label">2. Gayatri Mahamantra Ahuti (11/21/108 Ahutis)</span>
+              <div class="mantra-verse">ॐ भूर्भुवः स्वः तत्सवितुर्वरेण्यं भर्गो देवस्य धीमहि धियो यो नः प्रचोदयात् स्वाहा ॥</div>
+            </div>
+
+            <div class="mantra-recitation-guide">
+              <span class="mantra-label">3. Maha Mrityunjaya Sanjeevani Ahuti</span>
+              <div class="mantra-verse">ॐ त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् । उर्वारुकमिव बन्धनान्मृत्य pushyeya मामृतात् स्वाहा ॥</div>
+            </div>
+
+            <div class="mantra-recitation-guide">
+              <span class="mantra-label">4. Navagraha &amp; Vastu Shanti Ahutis</span>
+              <div class="mantra-verse">ॐ सूर्यादि नवग्रहेभ्यो नमः स्वाहा ॥ ॐ वास्तुपुरुषाय नमः स्वाहा ॥</div>
+            </div>
+
+            <div class="mantra-recitation-guide" style="border-left-color:#2e7d32">
+              <span class="mantra-label" style="color:#2e7d32">5. Purna Ahuti (Supreme Concluding Offering)</span>
+              <div class="mantra-verse">ॐ पूर्णमदः पूर्णमिदं पूर्णात् पूर्णमुदच्यते । पूर्णस्य पूर्णमादाय पूर्णमेवावशिष्यते ॥ ॐ शान्तिः शान्तिः शान्तिः स्वाहा ॥</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 4: Completion & Devotee Blessing Confirmation -->
+        <div class="pandit-havan-complete-box">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="material-icons" style="color:#2e7d32">check_circle</span>
+            <strong style="color:var(--mahogany);font-size:15px">Havan Ceremony Completion &amp; Devotee Blessing</strong>
+          </div>
+          <p class="muted" style="margin:0;font-size:13px">
+            Upon completing the sacred Havan, enter any ritual notes or blessings for the devotee. Pressing confirm will record the ceremony completion.
+          </p>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12.5px;font-weight:700">Pandit Ritual Notes / Ashirwad Message:</label>
+            <input type="text" id="pandit-havan-notes" class="input" style="background:#fff;border:1.5px solid var(--border);border-radius:8px;padding:9px 12px;font-size:13px" placeholder="e.g. Completed with 108 Gayatri ahutis, Navagraha homa and Purnahuti. Devotee blessed." value="Sacred Havan performed according to Vedic Shastras with Purna Ahuti. Blessings of Ayur, Arogya & Soubhagya." />
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:6px">
+            <button class="btn btn-green btn-lg" id="btn-complete-pandit-havan" data-id="${activeBooking ? esc(activeBooking.bookingId) : ''}">
+              <span class="material-icons">local_fire_department</span> Complete Havan &amp; Bestow Blessings
+            </button>
+            ${activeBooking ? `
+              <button class="btn btn-outline dark btn-sm" data-action="slip" data-id="${esc(activeBooking.bookingId)}">
+                <span class="material-icons">receipt</span> View Ritual Slip
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function setupPanditHavanListeners() {
+  const sel = document.getElementById('pandit-havan-booking-select');
+  if (sel) {
+    sel.addEventListener('change', (e) => {
+      const bId = e.target.value;
+      const container = document.getElementById('dash-tab-content');
+      if (container) {
+        container.innerHTML = renderPanditHavanTab(S._panditBookings, S.me, bId);
+        setupPanditHavanListeners();
       }
-    }
-
-    ahutiCount += 1;
-    if (Math.random() > 0.6) devoteeCount += (Math.random() > 0.5 ? 1 : -1);
-    updateCountersUI();
-  }, 7500);
-
-  // 6. Web Audio Synthesizer (Vedic Temple Bells & Om Tanpura Drone)
-  let audioCtx = null;
-  let isSoundActive = false;
-  let ambientOsc1 = null;
-  let ambientOsc2 = null;
-  let ambientGain = null;
-
-  function getAudioContext() {
-    if (!audioCtx) {
-      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtxClass) audioCtx = new AudioCtxClass();
-    }
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-    return audioCtx;
-  }
-
-  function playTempleBellChime() {
-    try {
-      const ctx = getAudioContext();
-      if (!ctx) return;
-      const now = ctx.currentTime;
-      
-      const freqs = [528, 1056, 1584, 2112];
-      const gains = [0.35, 0.18, 0.12, 0.05];
-
-      freqs.forEach((freq, i) => {
-        const osc = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now);
-        
-        gainNode.gain.setValueAtTime(gains[i], now);
-        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 2.8);
-
-        osc.connect(gainNode);
-        gainNode.connect(ctx.destination);
-
-        osc.start(now);
-        osc.stop(now + 2.9);
-      });
-    } catch (e) {
-      console.warn('Audio chime notice:', e);
-    }
-  }
-
-  function toggleAmbientSound() {
-    try {
-      const ctx = getAudioContext();
-      if (!ctx) return;
-      const btn = document.getElementById('havan-sound-toggle');
-      const soundIcon = document.getElementById('sound-icon');
-      const soundText = document.getElementById('sound-text');
-
-      if (isSoundActive) {
-        if (ambientGain) {
-          ambientGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
-          setTimeout(() => {
-            if (ambientOsc1) ambientOsc1.stop();
-            if (ambientOsc2) ambientOsc2.stop();
-            ambientOsc1 = null;
-            ambientOsc2 = null;
-            ambientGain = null;
-          }, 600);
-        }
-        isSoundActive = false;
-        if (btn) btn.classList.remove('active');
-        if (soundIcon) soundIcon.textContent = 'volume_off';
-        if (soundText) soundText.textContent = 'Vedic Sound';
-      } else {
-        const now = ctx.currentTime;
-        ambientOsc1 = ctx.createOscillator();
-        ambientOsc2 = ctx.createOscillator();
-        ambientGain = ctx.createGain();
-
-        ambientOsc1.type = 'sine';
-        ambientOsc1.frequency.setValueAtTime(136.1, now);
-        ambientOsc2.type = 'triangle';
-        ambientOsc2.frequency.setValueAtTime(272.2, now);
-
-        ambientGain.gain.setValueAtTime(0.0001, now);
-        ambientGain.gain.exponentialRampToValueAtTime(0.08, now + 1.2);
-
-        ambientOsc1.connect(ambientGain);
-        ambientOsc2.connect(ambientGain);
-        ambientGain.connect(ctx.destination);
-
-        ambientOsc1.start(now);
-        ambientOsc2.start(now);
-
-        isSoundActive = true;
-        if (btn) btn.classList.add('active');
-        if (soundIcon) soundIcon.textContent = 'volume_up';
-        if (soundText) soundText.textContent = 'Vedic Chanting ON';
-        playTempleBellChime();
-        toast('🕉️ Sacred Vedic ambient drone & chanting activated.');
-      }
-    } catch (err) {
-      console.warn('Sound toggle error:', err);
-    }
-  }
-
-  const soundBtn = document.getElementById('havan-sound-toggle');
-  if (soundBtn) {
-    soundBtn.addEventListener('click', toggleAmbientSound);
-  }
-
-  // 7. Ahuti Offering Execution
-  const flameWrapper = document.getElementById('flame-wrapper');
-  const flyLayer = document.getElementById('offering-fly-layer');
-  const burstBanner = document.getElementById('ahuti-burst-banner');
-  const burstText = document.getElementById('burst-text');
-
-  function triggerAhutiOffering(type, name, icon, mantraText, customName, customCity) {
-    ahutiCount += 1;
-    updateCountersUI();
-    playTempleBellChime();
-
-    if (flameWrapper) {
-      flameWrapper.classList.add('flare');
-      setTimeout(() => flameWrapper.classList.remove('flare'), 1300);
-    }
-
-    if (flyLayer) {
-      const p = document.createElement('div');
-      p.className = 'fly-offering-particle';
-      p.textContent = icon;
-      p.style.left = '50%';
-      p.style.bottom = '10px';
-      p.style.transform = 'translate(-50%, 0) scale(1.6)';
-      flyLayer.appendChild(p);
-
-      setTimeout(() => {
-        p.style.bottom = '140px';
-        p.style.transform = 'translate(-50%, 0) scale(0.3)';
-        p.style.opacity = '0';
-      }, 50);
-
-      setTimeout(() => p.remove(), 800);
-    }
-
-    if (burstBanner && burstText) {
-      burstText.textContent = `🔥 स्वाहा! ${name} offered into holy Agni`;
-      burstBanner.style.display = 'block';
-      setTimeout(() => {
-        burstBanner.style.display = 'none';
-      }, 2400);
-    }
-
-    if (streamList) {
-      const devoteeName = customName || (S.user ? S.user.name : 'You (Devotee)');
-      const devoteeCity = customCity || (S.user && S.user.district ? S.user.district : 'Online Devotee');
-      const itemEl = document.createElement('div');
-      itemEl.innerHTML = createStreamItemHTML({
-        name: devoteeName,
-        city: devoteeCity,
-        offering: name,
-        icon: icon,
-        time: 'Just now'
-      }, true);
-      streamList.insertBefore(itemEl.firstElementChild, streamList.firstChild);
-      while (streamList.children.length > 8) {
-        streamList.removeChild(streamList.lastChild);
-      }
-    }
-
-    toast(`स्वाहा! ${name} offered into Agni Dev. "${mantraText.split('।')[0]}" 🙏`, false);
-  }
-
-  // Attach click listeners to Ahuti buttons
-  document.querySelectorAll('.ahuti-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const type = btn.dataset.ahuti;
-      const name = btn.dataset.name || btn.querySelector('.ahuti-title')?.textContent || 'Sacred Ahuti';
-      const icon = btn.querySelector('.ahuti-btn-icon')?.textContent || '🪔';
-      const mantra = btn.dataset.mantra || 'ॐ अग्नये स्वाहा';
-      
-      const customNameInput = document.getElementById('sankalpa-name');
-      const customGotraInput = document.getElementById('sankalpa-gotra');
-      const customName = customNameInput ? customNameInput.value.trim() : '';
-      const customCity = customGotraInput ? customGotraInput.value.trim() : '';
-
-      triggerAhutiOffering(type, name, icon, mantra, customName, customCity);
     });
-  });
+  }
 
-  // Sankalpa dedicated submit button
-  const sankalpaBtn = document.getElementById('sankalpa-submit-btn');
-  if (sankalpaBtn) {
-    sankalpaBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const nameInput = document.getElementById('sankalpa-name');
-      const gotraInput = document.getElementById('sankalpa-gotra');
-      const name = nameInput && nameInput.value.trim() ? nameInput.value.trim() : (S.user ? S.user.name : 'Vedic Devotee');
-      const gotra = gotraInput && gotraInput.value.trim() ? gotraInput.value.trim() : 'Sankalpa Prayer';
+  const completeBtn = document.getElementById('btn-complete-pandit-havan');
+  if (completeBtn) {
+    completeBtn.addEventListener('click', async () => {
+      const bId = completeBtn.dataset.id;
+      const notesEl = document.getElementById('pandit-havan-notes');
+      const notes = notesEl ? notesEl.value.trim() : '';
 
-      triggerAhutiOffering('purna', 'Purna Ahuti & Sankalpa', '🥥', 'ॐ पूर्णमदः पूर्णमिदम् स्वाहा', name, gotra);
-      toast(`🕉️ Sacred Sankalpa registered for ${name} (${gotra}). Agni Dev bless you with peace and prosperity!`);
+      if (bId) {
+        try {
+          completeBtn.disabled = true;
+          completeBtn.textContent = 'Recording Havan Completion…';
+          await api('/bookings/' + encodeURIComponent(bId) + '/status', {
+            method: 'PUT',
+            body: {
+              status: 'Completed',
+              havanConducted: true,
+              havanNotes: notes,
+              completedAt: new Date().toISOString()
+            }
+          });
+          if (S.user && S.user.email) {
+            S._panditBookings = await api('/bookings?panditEmail=' + encodeURIComponent(S.user.email)).catch(() => S._panditBookings);
+          }
+          toast('🔥 Sacred Havan successfully completed and recorded! Blessings sent to devotee. 🙏');
+          switchPanditSubtab('ceremonies');
+        } catch (err) {
+          toast(err.message || 'Error recording Havan completion', true);
+          completeBtn.disabled = false;
+          completeBtn.innerHTML = '<span class="material-icons">local_fire_department</span> Complete Havan &amp; Bestow Blessings';
+        }
+      } else {
+        toast('🔥 Vedic Havan ritual mantras and protocol concluded. May Agni Dev bestow divine blessings! 🙏');
+      }
     });
   }
 }
@@ -4432,7 +4260,6 @@ function initVirtualHavan() {
   renderHomePujas();
   renderHomePandits();
   setupHeroFilter();
-  initVirtualHavan();
 
   // Check for direct email "Click Here to Rebook" link
   const urlParams = new URLSearchParams(window.location.search);
