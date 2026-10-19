@@ -1280,7 +1280,8 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
-  const pandit = (await Pandit.findOne({ email: lc(panditEmail), $or: [{ verified: true }, { status: 'Verified' }] })) || (await Pandit.findOne({ email: lc(panditEmail) }));
+  const pRegex = new RegExp('^' + lc(panditEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+  const pandit = (await Pandit.findOne({ email: pRegex, $or: [{ verified: true }, { status: 'Verified' }] })) || (await Pandit.findOne({ email: pRegex }));
   if (!pandit) return res.status(404).json({ error: 'Selected Pandit does not exist' });
 
   // Slot clash check
@@ -1314,7 +1315,10 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
 
   // Sign authorization token and build one-click decision URLs for Pandit email
   const panditToken = sign({ email: pandit.email, role: 'pandit', bookingId: b.bookingId, purpose: 'pandit_offer_response' });
-  const baseUrl = 'https://pujaconnect-one.vercel.app';
+  const reqHost = req.get('host') || '';
+  const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+  const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
+  const baseUrl = process.env.APP_URL || origin;
   const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Accept&token=${encodeURIComponent(panditToken)}`;
   const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}`;
   const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}`;
@@ -1363,8 +1367,8 @@ app.post('/api/bookings/:id/resend-pandit-offer', adminOnly, wrap(async (req, re
   if (!b) return res.status(404).json({ error: 'Booking not found' });
   if (!b.panditEmail) return res.status(400).json({ error: 'No Pandit assigned to this ceremony yet' });
 
-  const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
-  if (!pandit) return res.status(404).json({ error: 'Assigned Pandit record not found' });
+  const pRegex = new RegExp('^' + lc(b.panditEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+  const pandit = (await Pandit.findOne({ email: pRegex })) || { name: b.panditName || 'Pandit ji', email: b.panditEmail };
 
   const fee = b.fee || (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || 1500;
   const commPct = b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION;
@@ -1372,7 +1376,10 @@ app.post('/api/bookings/:id/resend-pandit-offer', adminOnly, wrap(async (req, re
   const panditNetPayout = b.panditNetPayout || Math.max(0, fee - adminFeeAmount);
 
   const panditToken = sign({ email: pandit.email, role: 'pandit', bookingId: b.bookingId, purpose: 'pandit_offer_response' });
-  const baseUrl = 'https://pujaconnect-one.vercel.app';
+  const reqHost = req.get('host') || '';
+  const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+  const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
+  const baseUrl = process.env.APP_URL || origin;
   const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Accept&token=${encodeURIComponent(panditToken)}`;
   const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}`;
   const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}`;
@@ -1863,6 +1870,16 @@ app.put('/api/long-puja-requests/:id/assign', adminOnly, wrap(async (req, res) =
   emails.forEach((e) => { statuses[e] = 'Assigned'; });
   const r = await LongPujaRequest.findOneAndUpdate({ id: req.params.id }, { assignedPandits: emails, panditStatuses: statuses, status: 'Assigned' }, { new: true });
   if (!r) return res.status(404).json({ error: 'Request not found' });
+
+  // Send assignment offer notification email to each assigned Pandit
+  for (const pandit of found) {
+    await sendSafe('LONG_PUJA_ASSIGNED_PANDIT', lc(pandit.email), {
+      ...r.toObject(),
+      panditName: pandit.name,
+      panditEmail: pandit.email
+    });
+  }
+
   res.json(r);
 }));
 
