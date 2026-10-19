@@ -796,6 +796,11 @@
                         <td>
                           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                             ${assignBtnHtml}
+                            ${b.status === 'Pending Pandit Confirmation' ? `
+                              <button class="btn btn-outline dark btn-sm" onclick="resendPanditOfferEmail('${esc(b.bookingId)}')" title="Resend ceremony offer email to Pandit ji (${esc(b.panditEmail)})">
+                                <span class="material-icons" style="font-size:13px;vertical-align:middle">forward_to_inbox</span> Resend Mail
+                              </button>
+                            ` : ''}
                             ${rejectSlotBtnHtml}
                             ${deleteBtnHtml}
                           </div>
@@ -891,12 +896,16 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="material-icons spin">sync</span> Assigning Pandit...';
             try {
-              await api(`/bookings/${b.bookingId}/assign-pandit`, {
+              const res = await api(`/bookings/${b.bookingId}/assign-pandit`, {
                 method: 'PUT',
                 body: { panditEmail: checked.value }
               });
               closeModal();
-              toast('Pandit assigned successfully! Notification sent to Pandit ji.');
+              if (res && res.emailSent === false) {
+                toast(`⚠️ Pandit assigned, but notification email delivery issue: ${res.emailError || 'SMTP Delivery Issue'}. You can use "Resend Mail" anytime.`, true);
+              } else {
+                toast(`✅ Pandit assigned & ceremony offer email sent to ${checked.value}! 🙏`);
+              }
               loadData();
             } catch (err) {
               toast(err.message, true);
@@ -906,6 +915,16 @@
           };
         }
       });
+    }
+
+    async function resendPanditOfferEmail(bookingId) {
+      try {
+        toast('Sending ceremony offer email to Pandit ji...');
+        const res = await api(`/bookings/${encodeURIComponent(bookingId)}/resend-pandit-offer`, { method: 'POST' });
+        toast(res.message || 'Ceremony offer email successfully sent to Pandit ji! 🙏');
+      } catch (e) {
+        toast(e.message || 'Failed to deliver offer email to Pandit ji', true);
+      }
     }
 
     async function rejectBookingSlotClash(id) {

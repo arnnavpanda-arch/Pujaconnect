@@ -1263,8 +1263,8 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
-  const pandit = await Pandit.findOne({ email: lc(panditEmail), verified: true });
-  if (!pandit) return res.status(400).json({ error: 'Selected Pandit is not verified or does not exist' });
+  const pandit = (await Pandit.findOne({ email: lc(panditEmail), $or: [{ verified: true }, { status: 'Verified' }] })) || (await Pandit.findOne({ email: lc(panditEmail) }));
+  if (!pandit) return res.status(404).json({ error: 'Selected Pandit does not exist' });
 
   // Slot clash check
   const clash = await Booking.findOne({
@@ -1303,13 +1303,14 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
   const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}`;
 
   // Send assignment offer alert to Pandit with uncompacted fee, breakdown, and direct Accept/Reject action links
-  await sendSafe('PANDIT_NEW_BOOKING', pandit.email, {
+  const targetEmail = lc(pandit.email);
+  const emailRes = await sendSafe('PANDIT_NEW_BOOKING', targetEmail, {
     ...b.toObject(),
     userName: b.userName,
     userEmail: b.userEmail,
     phone: b.phone || b.userPhone,
     panditName: pandit.name,
-    panditEmail: pandit.email,
+    panditEmail: targetEmail,
     district: b.district,
     address: b.address || b.district,
     date: b.date,
@@ -1328,7 +1329,68 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
     baseUrl
   });
 
-  res.json({ ok: true, booking: b });
+  res.json({
+    ok: true,
+    booking: b,
+    emailSent: emailRes.ok,
+    emailError: emailRes.ok ? null : emailRes.error,
+    message: emailRes.ok
+      ? `Ceremony offered and notification email successfully sent to ${pandit.name} (${targetEmail})`
+      : `Pandit assigned, but email notification failed: ${emailRes.error}`
+  });
+}));
+
+// Admin can resend offer email to the assigned Pandit at any time
+app.post('/api/bookings/:id/resend-pandit-offer', adminOnly, wrap(async (req, res) => {
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  if (!b.panditEmail) return res.status(400).json({ error: 'No Pandit assigned to this ceremony yet' });
+
+  const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
+  if (!pandit) return res.status(404).json({ error: 'Assigned Pandit record not found' });
+
+  const fee = b.fee || (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || 1500;
+  const commPct = b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION;
+  const adminFeeAmount = b.adminFeeAmount || Math.round((fee * commPct) / 100);
+  const panditNetPayout = b.panditNetPayout || Math.max(0, fee - adminFeeAmount);
+
+  const panditToken = sign({ email: pandit.email, role: 'pandit', bookingId: b.bookingId, purpose: 'pandit_offer_response' });
+  const baseUrl = 'https://pujaconnect-one.vercel.app';
+  const acceptUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Accept&token=${encodeURIComponent(panditToken)}`;
+  const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}`;
+  const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}`;
+
+  const targetEmail = lc(pandit.email);
+  const emailRes = await sendSafe('PANDIT_NEW_BOOKING', targetEmail, {
+    ...b.toObject(),
+    userName: b.userName,
+    userEmail: b.userEmail,
+    phone: b.phone || b.userPhone,
+    panditName: pandit.name,
+    panditEmail: targetEmail,
+    district: b.district,
+    address: b.address || b.district,
+    date: b.date,
+    time: b.time,
+    fee,
+    totalPujaCost: fee,
+    adminFeePercent: commPct,
+    adminFeeAmount,
+    adminFee: adminFeeAmount,
+    netDakshina: panditNetPayout,
+    panditFee: panditNetPayout,
+    panditToken,
+    acceptUrl,
+    rejectUrl,
+    reviewUrl,
+    baseUrl
+  });
+
+  if (!emailRes.ok) {
+    return res.status(500).json({ error: `Failed to deliver email to ${targetEmail}: ${emailRes.error}` });
+  }
+
+  res.json({ ok: true, message: `Ceremony offer email successfully sent to ${pandit.name} (${targetEmail})! 🙏` });
 }));
 
 // Pandit accepts or rejects the ceremony assignment
