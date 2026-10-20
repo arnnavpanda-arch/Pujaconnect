@@ -1216,10 +1216,30 @@ app.post('/api/bookings', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Missing required booking fields (userEmail, service, date, district)' });
   }
 
+  if (b.termsAccepted === false) {
+    return res.status(400).json({ error: 'You must accept the Cancellation & Refund Policy terms to book a ceremony.' });
+  }
+
   // Enforce devotee locked district: devotee cannot change district
   const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
   if (devoteeUser && devoteeUser.district) {
     b.district = devoteeUser.district;
+  }
+
+  // Require refund payout destination (UPI ID or Bank Account) for booking
+  const upiId = (b.upiId || (devoteeUser ? devoteeUser.upiId : '') || '').trim();
+  const bankAccount = (b.bankAccount || (devoteeUser ? devoteeUser.bankAccount : '') || '').trim();
+  if (!upiId && !bankAccount) {
+    return res.status(400).json({ error: 'Please submit your UPI ID / Number or Bank Account for refund processing before booking.' });
+  }
+
+  // Enforce minimum 48 hours advance notice requirement
+  const ceremonyStartDt = parsePujaStartDateTime(b.date, b.time);
+  const hoursUntilCeremony = (ceremonyStartDt.getTime() - Date.now()) / (1000 * 60 * 60);
+  if (hoursUntilCeremony < 48) {
+    return res.status(400).json({
+      error: 'Ceremony bookings must be scheduled at least 48 hours in advance to allow verified Vedic Pandits to prepare and confirm. Please choose a slot at least 48 hours from now.'
+    });
   }
 
   let preferredPandit = null;
@@ -1819,8 +1839,8 @@ app.post('/api/bookings/:id/cancel', wrap(async (req, res) => {
       refundAccountSummary: refundDestSummary
     });
 
-    // 2. Notify confirmed pandit if assigned
-    if (b.panditEmail && (b.status === 'Confirmed' || b.panditApproval === 'Approved' || terms.panditCompensation > 0)) {
+    // 2. Notify assigned pandit if present
+    if (b.panditEmail) {
       await sendSafe('USER_CANCELLED_PANDIT', b.panditEmail, {
         ...b.toObject(),
         hoursBefore: terms.hoursBefore,
@@ -1828,6 +1848,7 @@ app.post('/api/bookings/:id/cancel', wrap(async (req, res) => {
         cancellationReason: reason
       });
     }
+  } else {
     // Cancelled by Pandit -> 100% full refund guarantee to devotee within 24 hours
     await sendSafe('PANDIT_CANCELLED_DEVOTEE', b.userEmail, {
       ...b.toObject(),
@@ -1905,14 +1926,30 @@ app.post('/api/bookings/:id/settle-pandit-compensation', adminOnly, wrap(async (
   if (compensationAmount !== undefined) {
     b.panditCompensationAmount = Number(compensationAmount);
   }
+  const method = req.body.compensationMethod || 'Direct Bank / UPI Transfer';
   b.panditCompensationStatus = 'Paid';
   b.panditCompensationTxnId = String(compensationTxnId).trim();
+  b.panditCompensationMethod = method;
+  b.panditCompensationDate = new Date();
   await b.save();
+
+  if (b.panditEmail) {
+    const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
+    const pDest = (pandit && pandit.upiId) ? `UPI: ${pandit.upiId}` : ((pandit && pandit.bankAccount) ? `Bank A/c: ${pandit.bankAccount} (${pandit.ifscCode || ''})` : 'Registered Pandit Bank Account');
+    await sendSafe('PANDIT_COMPENSATION_CREDITED', b.panditEmail, {
+      ...b.toObject(),
+      amount: b.panditCompensationAmount,
+      compensationTxnId: b.panditCompensationTxnId,
+      compensationMethod: method,
+      payoutAccountSummary: pDest,
+      settlementDate: b.panditCompensationDate.toLocaleString('en-IN')
+    });
+  }
 
   res.json({
     ok: true,
     booking: b,
-    message: `Pandit cancellation compensation of ₹${b.panditCompensationAmount} marked as settled.`
+    message: `Pandit cancellation compensation of ₹${b.panditCompensationAmount} marked as settled and confirmation email sent.`
   });
 }));
 
@@ -1963,6 +2000,10 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
   if (!paymentProof) return res.status(400).json({ error: 'Payment Transaction Ref / ID is required' });
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  if (b.status !== 'Confirmed' && b.panditApproval !== 'Approved') {
+    return res.status(400).json({ error: 'Dakshina payment is accepted only after the assigned Pandit confirms your ceremony.' });
+  }
 
   // When devotee submits payment, status is 'Under Processing'.
   // Do NOT prematurely mark ceremony as 'Completed' or 'Paid' yet!
@@ -2151,6 +2192,13 @@ app.put('/api/bookings/:id/reschedule', wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
   if (!['Confirmed', 'In Progress'].includes(b.status)) return res.status(400).json({ error: 'Only active bookings can be rescheduled' });
+
+  const ceremonyStartDt = parsePujaStartDateTime(date, time);
+  const hoursUntilCeremony = (ceremonyStartDt.getTime() - Date.now()) / (1000 * 60 * 60);
+  if (hoursUntilCeremony < 48) {
+    return res.status(400).json({ error: 'Rescheduled ceremony must be scheduled at least 48 hours in advance.' });
+  }
+
   const clash = await Booking.findOne({ bookingId: { $ne: b.bookingId }, panditEmail: b.panditEmail, date, time, status: { $in: ['Confirmed', 'In Progress'] } });
   if (clash) return res.status(409).json({ error: 'That slot is already booked.' });
   b.date = date; b.time = time; b.status = 'Confirmed';
@@ -2195,6 +2243,12 @@ app.put('/api/bookings/:id/rebook', wrap(async (req, res) => {
 
   const { date, time, address, service, district, phone, panditEmail, fee } = req.body || {};
   if (!date || !time) return res.status(400).json({ error: 'Ceremony date and time slot are required' });
+
+  const ceremonyStartDt = parsePujaStartDateTime(date, time);
+  const hoursUntilCeremony = (ceremonyStartDt.getTime() - Date.now()) / (1000 * 60 * 60);
+  if (hoursUntilCeremony < 48) {
+    return res.status(400).json({ error: 'Ceremony bookings must be scheduled at least 48 hours in advance. Please choose a slot at least 48 hours from now.' });
+  }
 
   if (service) b.service = service;
   if (district) b.district = district;

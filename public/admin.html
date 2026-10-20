@@ -2392,6 +2392,15 @@
                                     <span class="material-icons" style="font-size:14px">receipt</span> View Slip
                                   </button>
                                 ` : ''}
+                                ${panditComp > 0 ? (b.panditCompensationStatus === 'Paid' ? `
+                                  <button class="btn btn-outline dark btn-sm" onclick="openPanditCompensationModal('${esc(b.bookingId)}', true)" title="View Pandit Compensation Slip">
+                                    <span class="material-icons" style="font-size:14px">verified</span> Pandit Paid (${inr(panditComp)})
+                                  </button>
+                                ` : `
+                                  <button class="btn btn-green btn-sm" onclick="openPanditCompensationModal('${esc(b.bookingId)}')" title="Transfer 40% Retained Fee Share to Confirmed Pandit">
+                                    <span class="material-icons" style="font-size:14px">account_balance_wallet</span> Pay Pandit (${inr(panditComp)})
+                                  </button>
+                                `) : ''}
                                 <button class="btn btn-red btn-sm" onclick="deleteBookingPayment('${esc(b.bookingId)}')" title="Delete Record">
                                   <span class="material-icons" style="font-size:14px">delete</span>
                                 </button>
@@ -3653,6 +3662,29 @@
             </div>
           </div>
 
+          ${panditComp > 0 ? `
+            <div style="background:#fff8ed;border:1.5px solid #d99a19;border-radius:10px;padding:14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+              <div>
+                <b style="color:var(--admin-dark);font-size:13.5px">Confirmed Pandit Slot Reservation Share (40% of retained fee):</b>
+                <div style="font-size:12.5px;color:#7a553e;margin-top:2px">
+                  Assigned Pandit: <strong>Pt. ${esc(b.panditName)}</strong> · Amount: <strong style="color:#1b5e20">${inr(panditComp)}</strong>
+                  (${b.panditCompensationStatus === 'Paid' ? 'Paid &amp; Settled ✅' : 'Pending Settlement'})
+                </div>
+              </div>
+              <div>
+                ${b.panditCompensationStatus === 'Paid' ? `
+                  <button type="button" class="btn btn-outline dark btn-sm" onclick="closeModal();openPanditCompensationModal('${esc(b.bookingId)}', true)">
+                    <span class="material-icons" style="font-size:14px">receipt</span> View Pandit Slip
+                  </button>
+                ` : `
+                  <button type="button" class="btn btn-green btn-sm" onclick="closeModal();openPanditCompensationModal('${esc(b.bookingId)}')">
+                    <span class="material-icons" style="font-size:14px">account_balance_wallet</span> Settle Pandit Share (${inr(panditComp)})
+                  </button>
+                `}
+              </div>
+            </div>
+          ` : ''}
+
           <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
             <button type="button" class="btn btn-outline" onclick="closeModal()">Close</button>
             ${!viewOnly ? `
@@ -3798,8 +3830,20 @@
                 <input type="number" id="admin-comp-amt" class="input" style="width:100%" value="${compAmt}" ${viewOnly ? 'disabled' : ''}>
               </div>
               <div>
-                <label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">Transaction Reference ID (UTR) *</label>
-                <input type="text" id="admin-comp-txnid" class="input" style="width:100%;font-family:monospace;font-weight:700" placeholder="e.g. UTR-COMP-491823" value="${esc(b.panditCompensationTxnId || '')}" ${viewOnly ? 'disabled' : ''}>
+                <label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">Payment Transfer Mode *</label>
+                <select id="admin-comp-method" class="input" style="width:100%" ${viewOnly ? 'disabled' : ''}>
+                  <option value="UPI Direct Transfer" ${(b.panditCompensationMethod || '').includes('UPI') ? 'selected' : ''}>UPI Direct Transfer (GPay / PhonePe / Paytm)</option>
+                  <option value="Direct Bank Transfer (IMPS)" ${(b.panditCompensationMethod || '').includes('IMPS') ? 'selected' : ''}>IMPS (Instant Bank Transfer)</option>
+                  <option value="NEFT / RTGS" ${(b.panditCompensationMethod || '').includes('NEFT') ? 'selected' : ''}>NEFT / RTGS</option>
+                  <option value="NetBanking Direct Transfer" ${(b.panditCompensationMethod || '').includes('NetBanking') ? 'selected' : ''}>NetBanking Direct Transfer</option>
+                </select>
+              </div>
+              <div style="grid-column:1 / -1">
+                <label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">Transaction Reference ID (UTR / UPI Ref ID) *</label>
+                <input type="text" id="admin-comp-txnid" class="input" style="width:100%;font-family:monospace;font-weight:700" placeholder="e.g. UTR-COMP-491823 or UPI/592819" value="${esc(b.panditCompensationTxnId || '')}" ${viewOnly ? 'disabled' : ''}>
+                <small class="muted" style="font-size:11px;display:block;margin-top:3px">
+                  An automated confirmation email will be sent to Pandit ${esc(b.panditName)} (${esc(b.panditEmail)}) with this UTR ref.
+                </small>
               </div>
             </div>
           </div>
@@ -3823,17 +3867,19 @@
           submitBtn.onclick = async () => {
             const txnId = (document.getElementById('admin-comp-txnid').value || '').trim();
             if (!txnId) return toast('Transaction Reference ID is required', true);
+            const method = document.getElementById('admin-comp-method').value;
             const amount = Number(document.getElementById('admin-comp-amt').value) || 0;
 
             submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Settling...';
+            submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Settling &amp; Sending Mail...';
 
             try {
               const res = await api('/bookings/' + encodeURIComponent(b.bookingId) + '/settle-pandit-compensation', {
                 method: 'POST',
                 body: {
                   compensationTxnId: txnId,
-                  compensationAmount: amount
+                  compensationAmount: amount,
+                  compensationMethod: method
                 }
               });
               closeModal();

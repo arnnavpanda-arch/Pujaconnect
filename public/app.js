@@ -187,6 +187,63 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 const today = () => new Date().toISOString().slice(0, 10);
+const minBookingDate = () => {
+  const d = new Date(Date.now() + 48 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+};
+
+function parsePujaStartDateTime(dateStr, timeStr) {
+  if (!dateStr) return new Date();
+  let year, month, day;
+  const str = String(dateStr).trim();
+  const sep = str.includes('/') ? '/' : str.includes('.') ? '.' : '-';
+  const parts = str.split(sep);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    } else if (parts[2].length === 4) {
+      day = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      year = parseInt(parts[2], 10);
+    } else {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    }
+  } else {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      year = d.getFullYear();
+      month = d.getMonth() + 1;
+      day = d.getDate();
+    } else {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth() + 1;
+      day = now.getDate();
+    }
+  }
+  let hour = 8;
+  let minute = 0;
+
+  if (timeStr) {
+    const startPart = String(timeStr).split('-')[0].trim();
+    const match = startPart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (match) {
+      let h = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10);
+      const ampm = (match[3] || '').toUpperCase();
+      if (ampm === 'PM' && h < 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      hour = h;
+      minute = m;
+    }
+  }
+
+  return new Date(year, month - 1, day, hour, minute, 0);
+}
 const dayName = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
 const opts = (arr, sel, ph) => (ph !== undefined ? `<option value="">${esc(ph)}</option>` : '') + arr.map((a) => `<option ${a === sel ? 'selected' : ''}>${esc(a)}</option>`).join('');
 
@@ -1384,8 +1441,11 @@ async function openBooking(arg) {
         `}
       </div>
       <div>
-        <label>Ceremony Date *</label>
-        <input type="date" id="b-date" min="${today()}" value="${esc(targetDate || '')}">
+        <label>Ceremony Date (Min. 48 Hours in Advance) *</label>
+        <input type="date" id="b-date" min="${minBookingDate()}" value="${esc(targetDate || '')}">
+        <small class="muted" style="font-size:11px;margin-top:3px;display:block;color:#8d2800">
+          ⏱️ Bookings must be scheduled at least 48 hours in advance
+        </small>
       </div>
     </div>
     <div>
@@ -1451,7 +1511,25 @@ async function openBooking(arg) {
           <input id="b-acc-holder" value="${esc(u.accountHolder || u.name || '')}" placeholder="Name as per bank records">
         </div>
       </div>
-      <small class="muted" style="font-size:11.5px;display:block;margin-top:4px">
+      <div style="margin-top:8px">
+        <label style="font-size:12px;font-weight:600">Bank Name &amp; Branch</label>
+        <input id="b-bank-name" value="${esc(u.bankName || '')}" placeholder="e.g. State Bank of India">
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #ebd9c2">
+        <label style="font-size:12px;font-weight:600">UPI QR Code (Optional – Scan &amp; Pay Instant Refund)</label>
+        <input type="file" id="b-qr-file" accept="image/*" style="display:none">
+        <input id="b-qr-val" type="hidden" value="${esc(u.qrCode || '')}">
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap">
+          <button type="button" class="btn btn-outline dark btn-sm" id="btn-upload-b-qr">
+            <span class="material-icons" style="font-size:15px">qr_code_scanner</span> ${u.qrCode ? 'Change QR Image' : 'Upload UPI QR Screenshot'}
+          </button>
+          <div id="b-qr-preview-box" style="display:${u.qrCode ? 'flex' : 'none'};align-items:center;gap:8px">
+            <img id="b-qr-preview-img" src="${esc(u.qrCode || '')}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1.5px solid #d99a19;padding:2px;background:#fff;cursor:pointer" alt="Devotee UPI QR" onclick="if(window.openQrViewModal) openQrViewModal(this.src, 'Devotee UPI QR Code')">
+            <button type="button" class="btn btn-red btn-sm" id="btn-remove-b-qr" style="padding:2px 8px;font-size:11px">Remove</button>
+          </div>
+        </div>
+      </div>
+      <small class="muted" style="font-size:11.5px;display:block;margin-top:6px">
         Used directly by administration to disburse your refund if the ceremony is cancelled.
       </small>
     </div>
@@ -1601,9 +1679,28 @@ async function openBooking(arg) {
         sel.time = '';
         return;
       }
-      box.innerHTML = standardSlots.map((s) => `
-        <button type="button" class="slot ${sel.time === s ? 'selected' : ''}" data-slot="${esc(s)}">${esc(s)}</button>
-      `).join('');
+      const now = Date.now();
+      box.innerHTML = standardSlots.map((s) => {
+        const dt = parsePujaStartDateTime(d, s);
+        const diffHours = (dt.getTime() - now) / (1000 * 60 * 60);
+        const isLocked = diffHours < 48;
+        if (isLocked) {
+          return `
+            <button type="button" class="slot locked" disabled style="opacity:0.45;cursor:not-allowed;border-style:dashed" title="Bookings require minimum 48 hours notice. This slot is ${diffHours > 0 ? `${Math.round(diffHours * 10) / 10}h away` : 'past'}">
+              ${esc(s)} <small style="display:block;font-size:9.5px;color:#c62828">&lt; 48h Notice</small>
+            </button>
+          `;
+        }
+        return `
+          <button type="button" class="slot ${sel.time === s ? 'selected' : ''}" data-slot="${esc(s)}">${esc(s)}</button>
+        `;
+      }).join('');
+      if (sel.time) {
+        const dt = parsePujaStartDateTime(d, sel.time);
+        if ((dt.getTime() - now) / (1000 * 60 * 60) < 48) {
+          sel.time = '';
+        }
+      }
     };
 
     updatePanditsDropdown();
@@ -1633,11 +1730,49 @@ async function openBooking(arg) {
 
     $('#b-slots', m).onclick = (e) => {
       const b = e.target.closest('.slot');
-      if (!b) return;
+      if (!b || b.disabled || b.classList.contains('locked')) return;
       m.querySelectorAll('.slot').forEach((x) => x.classList.remove('selected'));
       b.classList.add('selected');
       sel.time = b.dataset.slot;
     };
+
+    const bQrFile = $('#b-qr-file', m);
+    const btnUploadBQr = $('#btn-upload-b-qr', m);
+    const btnRemoveBQr = $('#btn-remove-b-qr', m);
+    const bQrVal = $('#b-qr-val', m);
+    const bQrPreviewBox = $('#b-qr-preview-box', m);
+    const bQrPreviewImg = $('#b-qr-preview-img', m);
+
+    if (btnUploadBQr && bQrFile) {
+      btnUploadBQr.onclick = () => bQrFile.click();
+      bQrFile.onchange = (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) return toast('Please select an image file (PNG / JPG / WEBP)', true);
+        if (file.size > 5 * 1024 * 1024) return toast('Image size exceeds 5MB limit', true);
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const dataUrl = ev.target.result;
+          if (bQrVal) bQrVal.value = dataUrl;
+          if (bQrPreviewImg) bQrPreviewImg.src = dataUrl;
+          if (bQrPreviewBox) bQrPreviewBox.style.display = 'flex';
+          btnUploadBQr.innerHTML = '<span class="material-icons" style="font-size:15px">qr_code_scanner</span> Change QR Image';
+          toast('UPI QR Code uploaded for refund processing! 🙏');
+        };
+        reader.readAsDataURL(file);
+      };
+    }
+
+    if (btnRemoveBQr) {
+      btnRemoveBQr.onclick = () => {
+        if (bQrVal) bQrVal.value = '';
+        if (bQrPreviewImg) bQrPreviewImg.src = '';
+        if (bQrPreviewBox) bQrPreviewBox.style.display = 'none';
+        if (bQrFile) bQrFile.value = '';
+        if (btnUploadBQr) btnUploadBQr.innerHTML = '<span class="material-icons" style="font-size:15px">qr_code_scanner</span> Upload UPI QR Screenshot';
+        toast('QR Code removed.');
+      };
+    }
 
     $('#b-submit', m).onclick = async (e) => {
       const agreePolicy = $('#b-agree-cancellation-policy', m);
@@ -1648,6 +1783,12 @@ async function openBooking(arg) {
       const date = dateInp.value;
       if (!date) return toast('Please choose a ceremony date', true);
       if (!sel.time) return toast('Please choose a time slot', true);
+
+      const startDt = parsePujaStartDateTime(date, sel.time);
+      const hoursUntil = (startDt.getTime() - Date.now()) / (1000 * 60 * 60);
+      if (hoursUntil < 48) {
+        return toast('Puja ceremony must be scheduled at least 48 hours in advance to allow verified Vedic Pandits to prepare and confirm 🙏', true);
+      }
       const address = $('#b-address', m).value.trim();
       if (!address) return toast('Please enter your ceremony venue / address', true);
       const phone = $('#b-phone', m).value.trim();
@@ -1657,6 +1798,12 @@ async function openBooking(arg) {
       const bankAccount = ($('#b-bank-acc', m) ? $('#b-bank-acc', m).value : '').trim();
       const ifscCode = ($('#b-ifsc', m) ? $('#b-ifsc', m).value : '').trim().toUpperCase();
       const accountHolder = ($('#b-acc-holder', m) ? $('#b-acc-holder', m).value : '').trim();
+      const bankName = ($('#b-bank-name', m) ? $('#b-bank-name', m).value : '').trim();
+      const qrCode = (bQrVal ? bQrVal.value : '').trim();
+
+      if (!upiId && !bankAccount && !(u && (u.upiId || u.bankAccount))) {
+        return toast('Please enter your UPI ID / Number or Bank Account for instant refund processing before booking 🙏', true);
+      }
 
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
       const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
@@ -1692,6 +1839,8 @@ async function openBooking(arg) {
             bankAccount,
             ifscCode,
             accountHolder,
+            bankName,
+            qrCode,
             termsAccepted: true
           }
         });
@@ -1701,6 +1850,8 @@ async function openBooking(arg) {
           if (bankAccount) S.user.bankAccount = bankAccount;
           if (ifscCode) S.user.ifscCode = ifscCode;
           if (accountHolder) S.user.accountHolder = accountHolder;
+          if (bankName) S.user.bankName = bankName;
+          if (qrCode) S.user.qrCode = qrCode;
         }
 
         closeModal();
@@ -3686,10 +3837,15 @@ function renderPanditCeremoniesTab(bookings) {
               <button class="btn btn-outline dark btn-sm" data-action="slip" data-id="${esc(b.bookingId)}">
                 <span class="material-icons">print</span> Ritual Slip
               </button>
+              ${['Confirmed', 'In Progress'].includes(b.status) ? `
+                <button class="btn btn-outline dark btn-sm" style="color:#c62828;border-color:#ef9a9a" data-action="panditCancelBooking" data-id="${esc(b.bookingId)}" title="Emergency cancellation (triggers 100% full refund to devotee)">
+                  <span class="material-icons" style="font-size:14px;vertical-align:middle">event_busy</span> Cancel Assignment
+                </button>
+              ` : ''}
               ${isCeremonyEnded ? `
                 <span class="badge green" style="margin-left:auto;font-size:11.5px"><span class="material-icons" style="font-size:13px;vertical-align:middle">done_all</span> Ceremony Ended</span>
               ` : (b.status === 'Confirmed' ? `
-                <small class="muted" style="margin-left:auto">Awaiting Devotee Payment</small>
+                <small class="muted" style="margin-left:auto">${isUserPaid ? 'Devotee Paid ✅' : 'Awaiting Devotee Payment'}</small>
               ` : ['Cancelled'].includes(b.status) ? `
                 <small class="muted" style="margin-left:auto">Ceremony Cancelled</small>
               ` : '')}
@@ -4706,8 +4862,11 @@ const ACTIONS = {
     if (!b) return toast('Booking record not found', true);
     openModal('Reschedule Ceremony Slot', `
       <div>
-        <label style="font-weight:600">Select New Ceremony Date *</label>
-        <input type="date" id="resched-date" min="${today()}" value="${esc(b.date || '')}">
+        <label style="font-weight:600">Select New Ceremony Date (Min. 48h Advance) *</label>
+        <input type="date" id="resched-date" min="${minBookingDate()}" value="${esc(b.date || '')}">
+        <small class="muted" style="font-size:11px;display:block;margin-top:3px;color:#8d2800">
+          ⏱️ Rescheduled slot must be at least 48 hours in advance
+        </small>
       </div>
       <div style="margin-top:12px">
         <label style="font-weight:600">Select New Time Slot *</label>
@@ -4725,6 +4884,13 @@ const ACTIONS = {
         const time = $('#resched-time', m).value;
         if (!date) return toast('Please select a ceremony date', true);
         if (!time) return toast('Please select a time slot', true);
+
+        const startDt = parsePujaStartDateTime(date, time);
+        const hoursUntil = (startDt.getTime() - Date.now()) / (1000 * 60 * 60);
+        if (hoursUntil < 48) {
+          return toast('Rescheduled slot must be at least 48 hours in advance to allow Pandit preparation 🙏', true);
+        }
+
         try {
           await api(`/bookings/${d.id}/reschedule`, { method: 'PUT', body: { date, time } });
           closeModal();
@@ -5091,6 +5257,10 @@ const ACTIONS = {
         } catch {}
       }
       if (!b) return toast('Booking record not found for ' + bId, true);
+
+      if (b.status !== 'Confirmed' && b.panditApproval !== 'Approved') {
+        return toast('Dakshina payment is accepted only after your ceremony is confirmed by the assigned Pandit 🙏', true);
+      }
 
       // Fetch centralized Platform Bank Details (managed exclusively by Admin)
       let platformBank = {
