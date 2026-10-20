@@ -4852,7 +4852,8 @@ const ACTIONS = {
       phone: b.phone || (S.user ? S.user.phone : ''),
       panditEmail: b.preferredPanditEmail || '',
       preferredPanditEmail: b.preferredPanditEmail || '',
-      fee: b.fee,
+      fee: b.fee
+    });
   },
   slip: (d) => printSlip(S.bookings.find((b) => b.bookingId === d.id)),
   cancelBooking: (d) => openDevoteeCancellationModal(d.id),
