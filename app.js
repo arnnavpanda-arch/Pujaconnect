@@ -62,8 +62,24 @@ app.use('/api', wrap(async (req, res, next) => {
   }
 }));
 
-// ---- Auth helpers ----
-const publicUser = (u) => ({ _id: u._id, name: u.name, email: u.email, phone: u.phone, state: u.state, district: u.district, city: u.city, role: u.role, status: u.status || 'Active', createdAt: u.createdAt });
+const publicUser = (u) => ({
+  _id: u._id,
+  name: u.name,
+  email: u.email,
+  phone: u.phone,
+  state: u.state,
+  district: u.district,
+  city: u.city,
+  role: u.role,
+  status: u.status || 'Active',
+  bankAccount: u.bankAccount || '',
+  ifscCode: u.ifscCode || '',
+  upiId: u.upiId || '',
+  bankName: u.bankName || '',
+  accountHolder: u.accountHolder || '',
+  qrCode: u.qrCode || '',
+  createdAt: u.createdAt
+});
 const sign = (payload) => jwt.sign(payload, JWT_SECRET(), { expiresIn: '7d' });
 function auth(req, res, next) {
   const h = req.headers.authorization || '';
@@ -383,11 +399,17 @@ app.get('/api/users/profile', auth, wrap(async (req, res) => {
 }));
 
 app.put('/api/users/profile', auth, wrap(async (req, res) => {
-  const { name, phone, state, district, city } = req.body;
+  const { name, phone, state, district, city, bankAccount, ifscCode, upiId, bankName, accountHolder, qrCode } = req.body;
   const user = await User.findOne({ email: lc(req.auth.email) });
   if (!user) return res.status(404).json({ error: 'Devotee profile not found' });
   if (name) user.name = name;
   if (phone) user.phone = phone;
+  if (bankAccount !== undefined) user.bankAccount = String(bankAccount).trim();
+  if (ifscCode !== undefined) user.ifscCode = String(ifscCode).trim().toUpperCase();
+  if (upiId !== undefined) user.upiId = String(upiId).trim();
+  if (bankName !== undefined) user.bankName = String(bankName).trim();
+  if (accountHolder !== undefined) user.accountHolder = String(accountHolder).trim();
+  if (qrCode !== undefined) user.qrCode = String(qrCode).trim();
   // If user is a devotee ('user'), state and district are locked once set
   if (user.role === 'user') {
     if (!user.state && state) user.state = state;
@@ -1245,8 +1267,28 @@ app.post('/api/bookings', wrap(async (req, res) => {
     advanceAmount,
     advancePaid: advanceAmount > 0,
     paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= fee ? 'Paid' : 'Partial',
-    bookingType: b.bookingType || 'Standard'
+    bookingType: b.bookingType || 'Standard',
+    termsAccepted: Boolean(b.termsAccepted !== undefined ? b.termsAccepted : true),
+    refundAccountDetails: {
+      upiId: (b.upiId || (devoteeUser ? devoteeUser.upiId : '') || '').trim(),
+      bankAccount: (b.bankAccount || (devoteeUser ? devoteeUser.bankAccount : '') || '').trim(),
+      ifscCode: (b.ifscCode || (devoteeUser ? devoteeUser.ifscCode : '') || '').trim().toUpperCase(),
+      accountHolder: (b.accountHolder || (devoteeUser ? devoteeUser.accountHolder : '') || b.userName || '').trim(),
+      bankName: (b.bankName || (devoteeUser ? devoteeUser.bankName : '') || '').trim(),
+      qrCode: (b.qrCode || (devoteeUser ? devoteeUser.qrCode : '') || '').trim()
+    }
   });
+
+  if (devoteeUser) {
+    let changed = false;
+    if (b.upiId && !devoteeUser.upiId) { devoteeUser.upiId = String(b.upiId).trim(); changed = true; }
+    if (b.bankAccount && !devoteeUser.bankAccount) { devoteeUser.bankAccount = String(b.bankAccount).trim(); changed = true; }
+    if (b.ifscCode && !devoteeUser.ifscCode) { devoteeUser.ifscCode = String(b.ifscCode).trim().toUpperCase(); changed = true; }
+    if (b.accountHolder && !devoteeUser.accountHolder) { devoteeUser.accountHolder = String(b.accountHolder).trim(); changed = true; }
+    if (b.bankName && !devoteeUser.bankName) { devoteeUser.bankName = String(b.bankName).trim(); changed = true; }
+    if (b.qrCode && !devoteeUser.qrCode) { devoteeUser.qrCode = String(b.qrCode).trim(); changed = true; }
+    if (changed) await devoteeUser.save();
+  }
 
   // Prepare uncompacted location report for the devotee's registered account district
   const devoteeLocDistrict = (devoteeUser && devoteeUser.district) ? devoteeUser.district.trim() : booking.district;
@@ -1530,6 +1572,348 @@ app.put('/api/bookings/:id/pandit-response', wrap(async (req, res) => {
   }
 
   res.json({ ok: true, booking: b });
+}));
+
+// Parse ceremony start date & time into Date object
+function parsePujaStartDateTime(dateStr, timeStr) {
+  if (!dateStr) return new Date();
+  let year, month, day;
+  const str = String(dateStr).trim();
+  const sep = str.includes('/') ? '/' : str.includes('.') ? '.' : '-';
+  const parts = str.split(sep);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    } else if (parts[2].length === 4) {
+      day = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      year = parseInt(parts[2], 10);
+    } else {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    }
+  } else {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      year = d.getFullYear();
+      month = d.getMonth() + 1;
+      day = d.getDate();
+    } else {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth() + 1;
+      day = now.getDate();
+    }
+  }
+  let hour = 8;
+  let minute = 0;
+
+  if (timeStr) {
+    const startPart = String(timeStr).split('-')[0].trim();
+    const match = startPart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (match) {
+      let h = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10);
+      const ampm = (match[3] || '').toUpperCase();
+      if (ampm === 'PM' && h < 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      hour = h;
+      minute = m;
+    }
+  }
+
+  return new Date(year, month - 1, day, hour, minute, 0);
+}
+
+// Calculate Cancellation & Refund terms according to platform rules:
+// 1. Pandit cancels anytime -> 100% full refund to devotee.
+// 2. Devotee cancels > 18h before start -> 100% full refund (₹0 fee). If unpaid, no payment required.
+// 3. Devotee cancels 18h to 1h before start -> 40% refund, 60% cancellation fee.
+//    Of the retained 60% fee, 40% goes to confirmed Pandit as compensation.
+// 4. Devotee cancels < 1h before start -> 0% refund, 100% retained cancellation fee.
+//    Of the retained fee, 40% goes to confirmed Pandit.
+function calculateCancellationTerms(booking, cancelledBy = 'user') {
+  const fee = Number(booking.fee) || 0;
+  const isPaid = booking.paymentStatus === 'Paid' || booking.paymentStatus === 'Paid & Verified';
+  const startDt = parsePujaStartDateTime(booking.date, booking.time);
+  const now = new Date();
+  const diffMs = startDt.getTime() - now.getTime();
+  const rawHours = diffMs / (1000 * 60 * 60);
+  const hoursBefore = Math.round(rawHours * 10) / 10;
+
+  if (cancelledBy === 'pandit') {
+    return {
+      cancelledBy: 'pandit',
+      hoursBefore,
+      tier: 'pandit_cancelled',
+      tierLabel: 'Cancelled by Pandit (100% Full Refund Guarantee)',
+      refundPercent: 100,
+      cancellationFeePercent: 0,
+      refundAmount: isPaid ? fee : 0,
+      cancellationFee: 0,
+      panditCompensation: 0,
+      adminRetained: 0,
+      isPaid
+    };
+  }
+
+  if (hoursBefore >= 18) {
+    return {
+      cancelledBy: 'user',
+      hoursBefore,
+      tier: 'more_than_18h',
+      tierLabel: 'More than 18 hours before ceremony (100% Full Refund / ₹0 Fee)',
+      refundPercent: 100,
+      cancellationFeePercent: 0,
+      refundAmount: isPaid ? fee : 0,
+      cancellationFee: 0,
+      panditCompensation: 0,
+      adminRetained: 0,
+      isPaid
+    };
+  }
+
+  if (hoursBefore >= 1 && hoursBefore < 18) {
+    const cancelFee = Math.round((fee * 60) / 100);
+    const refundAmt = Math.round((fee * 40) / 100);
+    const panditComp = Math.round((cancelFee * 40) / 100); // 40% of retained fee
+    const adminShare = cancelFee - panditComp;
+
+    return {
+      cancelledBy: 'user',
+      hoursBefore,
+      tier: '18h_to_1h',
+      tierLabel: 'Between 18 hours and 1 hour before ceremony (40% Refund, 60% Fee)',
+      refundPercent: 40,
+      cancellationFeePercent: 60,
+      refundAmount: isPaid ? refundAmt : 0,
+      cancellationFee: cancelFee,
+      panditCompensation: panditComp,
+      adminRetained: adminShare,
+      isPaid,
+      payableIfUnpaid: isPaid ? 0 : cancelFee
+    };
+  }
+
+  const cancelFee = fee;
+  const panditComp = Math.round((fee * 40) / 100);
+  const adminShare = fee - panditComp;
+
+  return {
+    cancelledBy: 'user',
+    hoursBefore,
+    tier: 'less_than_1h',
+    tierLabel: 'Less than 1 hour before ceremony (0% Refund, 100% Retained Fee)',
+    refundPercent: 0,
+    cancellationFeePercent: 100,
+    refundAmount: 0,
+    cancellationFee: cancelFee,
+    panditCompensation: panditComp,
+    adminRetained: adminShare,
+    isPaid,
+    payableIfUnpaid: isPaid ? 0 : cancelFee
+  };
+}
+
+// Live Cancellation Preview (calculates hours left and applicable policy)
+app.get('/api/bookings/:id/cancellation-preview', wrap(async (req, res) => {
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  const cancelledBy = req.query.cancelledBy === 'pandit' ? 'pandit' : 'user';
+  const terms = calculateCancellationTerms(b, cancelledBy);
+  const devoteeUser = await User.findOne({ email: lc(b.userEmail) }).lean();
+  res.json({
+    ok: true,
+    bookingId: b.bookingId,
+    service: b.service,
+    date: b.date,
+    time: b.time,
+    fee: b.fee,
+    paymentStatus: b.paymentStatus,
+    panditName: b.panditName,
+    terms,
+    userPayoutDetails: {
+      upiId: (devoteeUser && devoteeUser.upiId) || (b.refundAccountDetails && b.refundAccountDetails.upiId) || '',
+      bankAccount: (devoteeUser && devoteeUser.bankAccount) || (b.refundAccountDetails && b.refundAccountDetails.bankAccount) || '',
+      ifscCode: (devoteeUser && devoteeUser.ifscCode) || (b.refundAccountDetails && b.refundAccountDetails.ifscCode) || '',
+      accountHolder: (devoteeUser && devoteeUser.accountHolder) || (b.refundAccountDetails && b.refundAccountDetails.accountHolder) || b.userName,
+      bankName: (devoteeUser && devoteeUser.bankName) || (b.refundAccountDetails && b.refundAccountDetails.bankName) || '',
+      qrCode: (devoteeUser && devoteeUser.qrCode) || (b.refundAccountDetails && b.refundAccountDetails.qrCode) || ''
+    }
+  });
+}));
+
+// Process Ceremony Cancellation (Devotee or Pandit)
+app.post('/api/bookings/:id/cancel', wrap(async (req, res) => {
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  if (b.status === 'Cancelled') return res.status(400).json({ error: 'This ceremony booking is already cancelled' });
+  if (b.status === 'Completed') return res.status(400).json({ error: 'Completed ceremonies cannot be cancelled' });
+
+  const cancelledBy = (req.body && req.body.cancelledBy) === 'pandit' ? 'pandit' : 'user';
+  const reason = (req.body && req.body.reason ? String(req.body.reason).trim() : '') || (cancelledBy === 'pandit' ? 'Cancelled by assigned Pandit' : 'Cancelled by Devotee');
+  const terms = calculateCancellationTerms(b, cancelledBy);
+
+  // Retrieve or update devotee refund payout details
+  const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
+  let payout = req.body && req.body.refundAccountDetails ? req.body.refundAccountDetails : (b.refundAccountDetails || {});
+  if (!payout || (!payout.upiId && !payout.bankAccount)) {
+    if (devoteeUser) {
+      payout = {
+        upiId: devoteeUser.upiId || '',
+        bankAccount: devoteeUser.bankAccount || '',
+        ifscCode: devoteeUser.ifscCode || '',
+        accountHolder: devoteeUser.accountHolder || devoteeUser.name || b.userName,
+        bankName: devoteeUser.bankName || '',
+        qrCode: devoteeUser.qrCode || ''
+      };
+    }
+  }
+
+  // If user passed new bank details, also save to devotee user profile
+  if (req.body && req.body.refundAccountDetails && devoteeUser) {
+    const r = req.body.refundAccountDetails;
+    if (r.upiId) devoteeUser.upiId = String(r.upiId).trim();
+    if (r.bankAccount) devoteeUser.bankAccount = String(r.bankAccount).trim();
+    if (r.ifscCode) devoteeUser.ifscCode = String(r.ifscCode).trim().toUpperCase();
+    if (r.accountHolder) devoteeUser.accountHolder = String(r.accountHolder).trim();
+    if (r.bankName) devoteeUser.bankName = String(r.bankName).trim();
+    if (r.qrCode) devoteeUser.qrCode = String(r.qrCode).trim();
+    await devoteeUser.save();
+  }
+
+  b.status = 'Cancelled';
+  b.cancelledBy = cancelledBy;
+  b.cancelledAt = new Date();
+  b.cancellationReason = reason;
+  b.cancellationHoursBefore = terms.hoursBefore;
+  b.cancellationFeePercent = terms.cancellationFeePercent;
+  b.cancellationFeeAmount = terms.cancellationFee;
+  b.refundEligiblePercent = terms.refundPercent;
+  b.refundAmount = terms.refundAmount;
+  b.refundStatus = terms.refundAmount > 0 ? 'Pending Refund' : 'N/A';
+  b.refundAccountDetails = payout;
+  b.panditCompensationAmount = terms.panditCompensation;
+  b.panditCompensationStatus = terms.panditCompensation > 0 ? 'Pending' : 'N/A';
+  if (cancelledBy === 'pandit') {
+    b.panditApproval = 'Rejected';
+  }
+  await b.save();
+
+  const refundDestSummary = payout.upiId ? `UPI: ${payout.upiId}` : (payout.bankAccount ? `Bank A/c: ${payout.bankAccount} (${payout.ifscCode || ''}, ${payout.accountHolder || ''})` : 'Devotee Registered Account');
+
+  // Trigger Notifications:
+  if (cancelledBy === 'user') {
+    // 1. Notify devotee
+    await sendSafe('USER_CANCELLED_DEVOTEE', b.userEmail, {
+      ...b.toObject(),
+      hoursBefore: terms.hoursBefore,
+      tierLabel: terms.tierLabel,
+      cancellationFee: terms.cancellationFee,
+      cancellationFeePercent: terms.cancellationFeePercent,
+      refundAmount: terms.refundAmount,
+      refundPercent: terms.refundPercent,
+      refundAccountSummary: refundDestSummary
+    });
+
+    // 2. Notify confirmed pandit if assigned
+    if (b.panditEmail && (b.status === 'Confirmed' || b.panditApproval === 'Approved' || terms.panditCompensation > 0)) {
+      await sendSafe('USER_CANCELLED_PANDIT', b.panditEmail, {
+        ...b.toObject(),
+        hoursBefore: terms.hoursBefore,
+        panditCompensation: terms.panditCompensation,
+        cancellationReason: reason
+      });
+    }
+    // Cancelled by Pandit -> 100% full refund guarantee to devotee within 24 hours
+    await sendSafe('PANDIT_CANCELLED_DEVOTEE', b.userEmail, {
+      ...b.toObject(),
+      fee: b.fee,
+      refundAmount: b.fee,
+      refundAccountSummary: refundDestSummary,
+      cancellationReason: reason
+    });
+
+    // Send dedicated 24-hour direct refund confirmation mail to user registered email address
+    await sendSafe('PANDIT_CANCEL_REFUND_24H', b.userEmail, {
+      ...b.toObject(),
+      fee: b.fee,
+      refundAmount: b.fee,
+      refundAccountSummary: refundDestSummary,
+      cancellationReason: reason
+    });
+  }
+
+  res.json({
+    ok: true,
+    booking: b,
+    terms,
+    message: cancelledBy === 'pandit'
+      ? 'Ceremony cancelled. Devotee has been notified of 100% full refund guarantee.'
+      : `Ceremony cancelled successfully (${terms.tierLabel}).`
+  });
+}));
+
+// Admin Process Refund: Disburse funds to devotee and record transaction reference
+app.post('/api/bookings/:id/process-refund', adminOnly, wrap(async (req, res) => {
+  const { refundTxnId, refundMethod, refundAmount } = req.body;
+  if (!refundTxnId) return res.status(400).json({ error: 'Transaction Reference ID (UTR / UPI Ref) is required' });
+
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  if (b.status !== 'Cancelled') return res.status(400).json({ error: 'Refunds can only be processed for cancelled bookings' });
+
+  const finalRefundAmt = refundAmount !== undefined ? Number(refundAmount) : (b.refundAmount || 0);
+  b.refundStatus = 'Refunded';
+  b.refundTxnId = String(refundTxnId).trim();
+  b.refundMethod = refundMethod || 'Direct Bank / UPI Transfer';
+  b.refundDate = new Date();
+  b.refundAmount = finalRefundAmt;
+  await b.save();
+
+  const payout = b.refundAccountDetails || {};
+  const refundDestSummary = payout.upiId ? `UPI: ${payout.upiId}` : (payout.bankAccount ? `Bank A/c: ${payout.bankAccount} (${payout.ifscCode || ''}, ${payout.accountHolder || ''})` : 'Devotee Registered Account');
+
+  // Trigger REFUND_PROCESSED email to Devotee
+  await sendSafe('REFUND_PROCESSED', b.userEmail, {
+    ...b.toObject(),
+    refundAmount: finalRefundAmt,
+    refundTxnId: b.refundTxnId,
+    refundMethod: b.refundMethod,
+    refundAccountSummary: refundDestSummary,
+    refundDateFormatted: b.refundDate.toLocaleString('en-IN')
+  });
+
+  res.json({
+    ok: true,
+    booking: b,
+    message: `Refund of ₹${finalRefundAmt} marked as completed and notification email sent to devotee.`
+  });
+}));
+
+// Admin Settle Pandit Cancellation Compensation
+app.post('/api/bookings/:id/settle-pandit-compensation', adminOnly, wrap(async (req, res) => {
+  const { compensationTxnId, compensationAmount } = req.body;
+  if (!compensationTxnId) return res.status(400).json({ error: 'Transaction Reference ID is required' });
+
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+
+  if (compensationAmount !== undefined) {
+    b.panditCompensationAmount = Number(compensationAmount);
+  }
+  b.panditCompensationStatus = 'Paid';
+  b.panditCompensationTxnId = String(compensationTxnId).trim();
+  await b.save();
+
+  res.json({
+    ok: true,
+    booking: b,
+    message: `Pandit cancellation compensation of ₹${b.panditCompensationAmount} marked as settled.`
+  });
 }));
 
 app.put('/api/bookings/:id/status', wrap(async (req, res) => {

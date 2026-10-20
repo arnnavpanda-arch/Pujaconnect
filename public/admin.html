@@ -602,6 +602,7 @@
       const pendKyc = S.adminPandits.filter(p => p.status === 'Pending Review').length;
       const pendLong = S.adminLongs.filter(l => l.status === 'Pending Admin').length;
       const pendPayments = (S.bookings || []).filter(b => b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending').length;
+      const pendRefunds = (S.bookings || []).filter(b => b.status === 'Cancelled' && (b.refundStatus === 'Pending Refund' || ((b.refundAmount || 0) > 0 && b.refundStatus !== 'Refunded'))).length;
 
       const eligiblePayoutBookings = (S.bookings || []).filter(b => b.panditEmail && (b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' || ['Completed', 'Confirmed', 'In Progress'].includes(b.status)));
       const pendPanditPayouts = eligiblePayoutBookings.filter(b => b.panditPayoutStatus !== 'Paid').length;
@@ -616,13 +617,13 @@
       const payoutBadge = document.getElementById('badge-pandit-payouts-count');
       if (payoutBadge) payoutBadge.textContent = pendPanditPayouts;
       const paymentsBadge = document.getElementById('badge-payments-count');
-      if (paymentsBadge) paymentsBadge.textContent = pendPayments;
+      if (paymentsBadge) paymentsBadge.textContent = (pendPayments + pendRefunds);
 
       const kpis = [
         { label: 'Pending Pandit Assignment', val: pendBookings, icon: 'person_search', alert: pendBookings > 0 },
         { label: 'Registered Devotees', val: s.users || 0, icon: 'people' },
         { label: 'Verified Pandits', val: s.verifiedPandits || 0, icon: 'verified' },
-        { label: 'Pending KYC Review', val: pendKyc, icon: 'pending_actions', alert: pendKyc > 0 },
+        { label: 'Pending Devotee Refunds', val: pendRefunds, icon: 'currency_exchange', alert: pendRefunds > 0 },
         { label: 'Pending Devotee Payments', val: pendPayments, icon: 'receipt_long', alert: pendPayments > 0 },
         { label: 'Pending Pandit Payouts', val: pendPanditPayouts, icon: 'account_balance_wallet', alert: pendPanditPayouts > 0 },
         { label: 'Total Ceremonies', val: s.bookings || 0, icon: 'event' },
@@ -2211,23 +2212,33 @@
       const pending = allBookings.filter(b => b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending');
       const paid = allBookings.filter(b => b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified');
       const rejected = allBookings.filter(b => b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected');
+      const cancelled = allBookings.filter(b => b.status === 'Cancelled' || b.refundStatus === 'Pending Refund' || b.refundStatus === 'Refunded');
+      const pendingRefunds = cancelled.filter(b => b.refundStatus === 'Pending Refund' || (b.refundAmount > 0 && b.refundStatus !== 'Refunded'));
 
       root.innerHTML = `
         <div class="admin-panel">
           <div class="admin-panel-head">
-            <h3><span class="material-icons" style="color:var(--admin-gold)">payments</span> Devotee Payment Verifications &amp; Billing</h3>
-            <div style="display:flex;gap:8px;align-items:center">
+            <div>
+              <h3 style="margin:0"><span class="material-icons" style="color:var(--admin-gold)">payments</span> Devotee Payment Verifications &amp; Refund Ledger</h3>
+              <p class="muted" style="margin:4px 0 0;font-size:12.5px">Verify incoming devotee payments and disburse instant refunds for cancelled ceremonies as per platform policy</p>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               ${pending.length ? `<span class="badge red">${pending.length} under processing</span>` : '<span class="badge green">All payments verified</span>'}
-              ${rejected.length ? `<span class="badge" style="background:#ffebee;color:#c62828;border:1px solid #ffcdd2">${rejected.length} rejected</span>` : ''}
+              ${pendingRefunds.length ? `<span class="badge" style="background:#ffebee;color:#c62828;border:1px solid #ffcdd2">${pendingRefunds.length} refunds due</span>` : ''}
+              ${rejected.length ? `<span class="badge" style="background:#fff3e0;color:#e65100;border:1px solid #ffe0b2">${rejected.length} rejected</span>` : ''}
             </div>
           </div>
 
-          <div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">
+          <div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <button class="btn btn-sm ${PAY_FILTER === 'pending' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('pending')">
               Under Processing (${pending.length})
             </button>
             <button class="btn btn-sm ${PAY_FILTER === 'paid' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('paid')">
               Paid &amp; Verified (${paid.length})
+            </button>
+            <button class="btn btn-sm ${PAY_FILTER === 'refunds' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('refunds')" style="position:relative">
+              <span class="material-icons" style="font-size:14px;vertical-align:middle">currency_exchange</span> Cancelled &amp; Refunds (${cancelled.length})
+              ${pendingRefunds.length ? `<span style="background:#c62828;color:#fff;border-radius:10px;padding:2px 7px;font-size:11px;font-weight:700;margin-left:4px">${pendingRefunds.length} Due</span>` : ''}
             </button>
             <button class="btn btn-sm ${PAY_FILTER === 'rejected' ? 'btn-gold' : 'btn-outline'}" onclick="setPaymentFilter('rejected')">
               Rejected (${rejected.length})
@@ -2238,6 +2249,163 @@
           </div>
 
           ${(() => {
+            if (PAY_FILTER === 'refunds') {
+              const list = cancelled;
+              if (!list.length) {
+                return `<div class="empty" style="padding:48px 20px">
+                  <span class="material-icons" style="font-size:44px;color:var(--admin-gold)">task_alt</span>
+                  <p style="margin:8px 0 0">No cancelled ceremonies found in ledger. All rituals are active or completed.</p>
+                </div>`;
+              }
+              const visiblePaymentIds = list.map(b => b.bookingId);
+              const allPaymentsSelected = visiblePaymentIds.length > 0 && visiblePaymentIds.every(id => SELECTED.payments.has(id));
+
+              return `
+                ${getBulkBarHtml('payments', 'Refund Record', 'deleteSelectedPayments')}
+                <div class="table-responsive">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th class="th-cb"><input type="checkbox" ${allPaymentsSelected ? 'checked' : ''} onchange="toggleSelectAll('payments', this.checked, [${visiblePaymentIds.map(id => `'${esc(id)}'`).join(',')}])" title="Select All Payments"></th>
+                        <th style="min-width:180px">Cancelled Ceremony &amp; Booking ID</th>
+                        <th style="min-width:170px">Devotee Information</th>
+                        <th style="min-width:220px">Cancellation Notice &amp; Policy Rule</th>
+                        <th style="min-width:210px">Uncompacted Financial Calculation</th>
+                        <th style="min-width:220px">Devotee Bank &amp; UPI QR Details</th>
+                        <th style="min-width:140px">Refund Status</th>
+                        <th style="min-width:150px;text-align:right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${list.map(b => {
+                        const payout = b.refundAccountDetails || {};
+                        const devoteeUser = (S.users || []).find(x => (x.email || '').toLowerCase() === (b.userEmail || '').toLowerCase()) || {};
+                        const upiId = payout.upiId || devoteeUser.upiId || '';
+                        const bankAccount = payout.bankAccount || devoteeUser.bankAccount || '';
+                        const ifscCode = payout.ifscCode || devoteeUser.ifscCode || '';
+                        const accountHolder = payout.accountHolder || devoteeUser.accountHolder || b.userName;
+                        const qrCode = payout.qrCode || devoteeUser.qrCode || '';
+
+                        const hours = b.cancellationHoursBefore !== undefined ? b.cancellationHoursBefore : 0;
+                        const fee = Number(b.fee) || 0;
+                        const cancelFee = Number(b.cancellationFeeAmount) || 0;
+                        const refundAmt = Number(b.refundAmount) || 0;
+                        const refundPct = Number(b.refundEligiblePercent) || 0;
+                        const panditComp = Number(b.panditCompensationAmount) || 0;
+
+                        const isPanditCancel = b.cancelledBy === 'pandit';
+                        const isRefunded = b.refundStatus === 'Refunded';
+                        const isPendingRefund = !isRefunded && refundAmt > 0;
+
+                        return `
+                          <tr style="${isPendingRefund ? 'background:#fffbf7' : ''}">
+                            <td class="td-cb"><input type="checkbox" ${SELECTED.payments.has(b.bookingId) ? 'checked' : ''} onchange="toggleSelectRow('payments', '${esc(b.bookingId)}', this.checked)"></td>
+                            <td>
+                              <b>${esc(b.bookingId)}</b><br>
+                              <span style="font-weight:700;color:var(--admin-gold)">${esc(b.service)}</span><br>
+                              <small class="muted">📅 ${esc(b.date)} (${esc(b.time || '10:00 AM')})</small><br>
+                              <span class="badge ${isPanditCancel ? 'red' : 'amber'}" style="font-size:10.5px;margin-top:3px">
+                                Cancelled by: ${isPanditCancel ? 'Assigned Pandit' : 'Devotee'}
+                              </span>
+                            </td>
+                            <td>
+                              <b>${esc(b.userName)}</b><br>
+                              <small class="muted">✉️ ${esc(b.userEmail)}</small><br>
+                              <small class="muted">📞 ${esc(b.phone || b.userPhone || 'N/A')}</small>
+                            </td>
+                            <td>
+                              <!-- Uncompacted Timing & Rule Breakdown -->
+                              <div style="font-size:12.5px;line-height:1.5">
+                                <div><span class="muted">Notice Given:</span> <b>${esc(hours)} hrs before ceremony</b></div>
+                                ${isPanditCancel ? `
+                                  <span class="badge green" style="font-size:10.5px;margin-top:2px">🛡️ Pandit Cancelled (100% Full Refund Guarantee)</span>
+                                ` : hours >= 18 ? `
+                                  <span class="badge green" style="font-size:10.5px;margin-top:2px">🟢 &gt; 18h Before Start (100% Full Refund · ₹0 Fee)</span>
+                                ` : hours >= 1 ? `
+                                  <span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100;font-size:10.5px;margin-top:2px">🟡 18h to 1h Before (40% Refund, 60% Retained Fee)</span>
+                                ` : `
+                                  <span class="badge red" style="font-size:10.5px;margin-top:2px">🔴 &lt; 1h Before Start (0% Refund, 100% Retained Fee)</span>
+                                `}
+                                ${b.cancellationReason ? `<div style="font-size:11.5px;color:#777;margin-top:3px;font-style:italic">Reason: ${esc(b.cancellationReason)}</div>` : ''}
+                              </div>
+                            </td>
+                            <td>
+                              <!-- Uncompacted Financial Breakdown -->
+                              <div style="font-size:12.5px;line-height:1.5">
+                                <div><span class="muted">Total Dakshina:</span> <b>${inr(fee)}</b></div>
+                                <div style="color:#c62828"><span class="muted">Cancellation Fee:</span> <b>-${inr(cancelFee)} (${b.cancellationFeePercent || 0}%)</b></div>
+                                <div style="border-top:1px dashed #ebd9c2;padding-top:3px;margin-top:3px">
+                                  <span class="muted">Refund Due:</span> <b style="color:#1b5e20;font-size:14.5px">${inr(refundAmt)} (${refundPct}%)</b>
+                                </div>
+                                ${panditComp > 0 ? `
+                                  <div style="font-size:11.5px;color:#7a553e;margin-top:2px">
+                                    ↳ Pandit Share (40%): <b>${inr(panditComp)}</b> (${b.panditCompensationStatus === 'Paid' ? 'Paid ✅' : 'Pending'})
+                                  </div>
+                                ` : ''}
+                              </div>
+                            </td>
+                            <td>
+                              <!-- Devotee Bank Details & Uploaded QR Code -->
+                              <div style="font-size:12px;line-height:1.5">
+                                ${upiId ? `<div><span class="muted">UPI ID:</span> <b style="font-family:monospace;color:#1b5e20">${esc(upiId)}</b></div>` : ''}
+                                ${bankAccount ? `
+                                  <div><span class="muted">A/C:</span> <span style="font-family:monospace;font-weight:700;color:#1b5e20">${esc(bankAccount)}</span></div>
+                                  <div><span class="muted">IFSC:</span> <b style="font-family:monospace">${esc(ifscCode)}</b></div>
+                                  <div><span class="muted">Holder:</span> <b>${esc(accountHolder)}</b></div>
+                                ` : (!upiId ? '<span class="muted">⚠️ No bank/UPI details submitted</span>' : '')}
+
+                                ${qrCode ? `
+                                  <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+                                    <div style="position:relative;cursor:pointer" onclick="openQrViewModal('${esc(qrCode)}', 'Devotee ${esc(b.userName)} – UPI QR Code')">
+                                      <img src="${esc(qrCode)}" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1.5px solid #d99a19;padding:2px;background:#fff;display:block" alt="Devotee QR">
+                                      <span class="material-icons" style="position:absolute;bottom:1px;right:1px;background:rgba(0,0,0,0.65);color:#fff;font-size:10px;border-radius:2px;padding:1px">fullscreen</span>
+                                    </div>
+                                    <span class="badge green" style="font-size:10px;cursor:pointer" onclick="openQrViewModal('${esc(qrCode)}', 'Devotee ${esc(b.userName)} – UPI QR Code')">
+                                      Scan Devotee QR
+                                    </span>
+                                  </div>
+                                ` : ''}
+                              </div>
+                            </td>
+                            <td>
+                              ${isRefunded ? `
+                                <span class="badge green">Refund Completed ✅</span><br>
+                                <div style="font-size:11px;margin-top:3px;color:#2e7d32;line-height:1.3">
+                                  <code>Ref: ${esc(b.refundTxnId || 'Direct')}</code><br>
+                                  <span class="muted">${b.refundDate ? new Date(b.refundDate).toLocaleDateString() : ''}</span>
+                                </div>
+                              ` : isPendingRefund ? `
+                                <span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a">Pending Refund</span><br>
+                                <div style="font-size:14px;color:#c62828;font-weight:800;margin-top:2px">${inr(refundAmt)}</div>
+                              ` : `
+                                <span class="badge" style="background:#f5f5f5;color:#777">No Refund Due</span>
+                              `}
+                            </td>
+                            <td style="text-align:right">
+                              <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
+                                ${isPendingRefund ? `
+                                  <button class="btn btn-gold btn-sm" onclick="openAdminProcessRefundModal('${esc(b.bookingId)}')">
+                                    <span class="material-icons" style="font-size:14px">payments</span> Transfer &amp; Refund
+                                  </button>
+                                ` : isRefunded ? `
+                                  <button class="btn btn-outline dark btn-sm" onclick="openAdminProcessRefundModal('${esc(b.bookingId)}', true)">
+                                    <span class="material-icons" style="font-size:14px">receipt</span> View Slip
+                                  </button>
+                                ` : ''}
+                                <button class="btn btn-red btn-sm" onclick="deleteBookingPayment('${esc(b.bookingId)}')" title="Delete Record">
+                                  <span class="material-icons" style="font-size:14px">delete</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              `;
+            }
+
             const list = PAY_FILTER === 'pending' ? pending : PAY_FILTER === 'paid' ? paid : PAY_FILTER === 'rejected' ? rejected : allBookings;
             if (!list.length) {
               return `<div class="empty" style="padding:40px 20px">No payments found in this category.</div>`;
@@ -2266,6 +2434,10 @@
                       const isPending = b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending';
                       const isPaid = b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified';
                       const isRejected = b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected';
+                      const isCancelled = b.status === 'Cancelled';
+                      const isPendingRefund = isCancelled && b.refundStatus !== 'Refunded' && (b.refundAmount || 0) > 0;
+                      const isRefunded = isCancelled && b.refundStatus === 'Refunded';
+
                       return `
                         <tr>
                           <td class="td-cb"><input type="checkbox" ${SELECTED.payments.has(b.bookingId) ? 'checked' : ''} onchange="toggleSelectRow('payments', '${esc(b.bookingId)}', this.checked)"></td>
@@ -2273,6 +2445,7 @@
                             <b>${esc(b.bookingId)}</b><br>
                             <small class="muted">${esc(b.date)} (${esc(b.time || '10:00 AM')})</small><br>
                             <span style="font-size:12px;color:var(--mahogany)">${esc(b.service)}</span>
+                            ${isCancelled ? `<br><span class="badge red" style="font-size:10px">Cancelled</span>` : ''}
                           </td>
                           <td>
                             <b>${esc(b.userName)}</b><br>
@@ -2286,6 +2459,7 @@
                           <td>
                             <b style="color:#d99a19">${inr(b.fee || 1500)}</b><br>
                             <small class="muted">Adv: ${inr(b.advanceAmount || 0)}</small>
+                            ${isCancelled ? `<br><small style="color:#c62828;font-size:11px">Ref: ${inr(b.refundAmount || 0)}</small>` : ''}
                           </td>
                           <td>
                             ${b.paymentProof ? `
@@ -2294,7 +2468,9 @@
                             ` : '<span class="muted">No proof submitted</span>'}
                           </td>
                           <td>
-                            ${isPaid ? '<span class="badge green">Paid &amp; Verified</span>' :
+                            ${isRefunded ? '<span class="badge green">Refunded ✅</span>' :
+                              isPendingRefund ? '<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a">Pending Refund</span>' :
+                              isPaid ? '<span class="badge green">Paid &amp; Verified</span>' :
                               isPending ? '<span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100">Under Processing</span>' :
                               isRejected ? `<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a">Payment Rejected</span>${b.paymentRejectionReason ? `<br><small class="muted" style="color:#c62828;font-size:11px">Reason: ${esc(b.paymentRejectionReason)}</small>` : ''}` :
                               '<span class="badge">' + esc(b.paymentStatus || 'Pending') + '</span>'}
@@ -2307,6 +2483,15 @@
                                 </button>
                                 <button class="btn btn-red btn-sm" onclick="rejectBookingPayment('${esc(b.bookingId)}')">
                                   <span class="material-icons" style="font-size:14px">cancel</span> Reject Payment
+                                </button>
+                              ` : ''}
+                              ${isPendingRefund ? `
+                                <button class="btn btn-gold btn-sm" onclick="openAdminProcessRefundModal('${esc(b.bookingId)}')">
+                                  <span class="material-icons" style="font-size:14px">payments</span> Refund (${inr(b.refundAmount)})
+                                </button>
+                              ` : isRefunded ? `
+                                <button class="btn btn-outline dark btn-sm" onclick="openAdminProcessRefundModal('${esc(b.bookingId)}', true)">
+                                  <span class="material-icons" style="font-size:14px">receipt</span> Refund Slip
                                 </button>
                               ` : ''}
                               ${isPaid ? `
@@ -2400,11 +2585,15 @@
       const allBookings = S.bookings || [];
       // Eligible bookings: must have an assigned pandit and devotee paid or ceremony in progress/confirmed/completed
       const eligible = allBookings.filter(b => b.panditEmail && (b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified' || ['Completed', 'Confirmed', 'In Progress'].includes(b.status)));
+      const cancelledCompensations = allBookings.filter(b => b.status === 'Cancelled' && b.panditEmail && (Number(b.panditCompensationAmount) > 0 || Number(b.cancellationFeeAmount) > 0));
       const pending = eligible.filter(b => b.panditPayoutStatus !== 'Paid');
       const paid = eligible.filter(b => b.panditPayoutStatus === 'Paid');
+      const pendingCompensations = cancelledCompensations.filter(b => b.panditCompensationStatus !== 'Paid');
 
       let list = PANDIT_PAYOUT_FILTER === 'pending' ? pending :
-                 PANDIT_PAYOUT_FILTER === 'paid' ? paid : eligible;
+                 PANDIT_PAYOUT_FILTER === 'paid' ? paid :
+                 PANDIT_PAYOUT_FILTER === 'compensations' ? cancelledCompensations :
+                 [...eligible, ...cancelledCompensations];
 
       if (PANDIT_PAYOUT_SEARCH) {
         const q = PANDIT_PAYOUT_SEARCH.toLowerCase();
@@ -2426,14 +2615,15 @@
           <div class="admin-panel-head">
             <div>
               <h3 style="margin:0"><span class="material-icons" style="color:var(--admin-gold)">account_balance_wallet</span> Pandit Payment Management</h3>
-              <p class="muted" style="margin:4px 0 0;font-size:12.5px">Platform commission split &amp; direct Dakshina payouts to Pandits who performed rituals for devotees</p>
+              <p class="muted" style="margin:4px 0 0;font-size:12.5px">Platform commission split, Dakshina payouts, and 40% cancellation slot compensation to verified Pandits</p>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="btn btn-gold btn-sm" onclick="printPanditPayoutsReport()" title="Print full payout statement without cutoff">
                 <span class="material-icons" style="font-size:15px">print</span> Print Payout Statement
               </button>
-              ${pending.length ? `<span class="badge red">${pending.length} pending payout</span>` : '<span class="badge green">All payouts settled</span>'}
-              <span class="badge">${eligible.length} eligible ceremonies</span>
+              ${pending.length ? `<span class="badge red">${pending.length} pending payouts</span>` : '<span class="badge green">All regular payouts settled</span>'}
+              ${pendingCompensations.length ? `<span class="badge" style="background:#ffebee;color:#c62828;border:1px solid #ffcdd2">${pendingCompensations.length} compensations due</span>` : ''}
+              <span class="badge">${eligible.length + cancelledCompensations.length} total entries</span>
             </div>
           </div>
 
@@ -2494,15 +2684,19 @@
           </div>
 
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px">
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
               <button class="btn btn-sm ${PANDIT_PAYOUT_FILTER === 'pending' ? 'btn-gold' : 'btn-outline'}" onclick="setPanditPayoutFilter('pending')">
-                Pending Payout (${pending.length})
+                Pending Payouts (${pending.length})
               </button>
               <button class="btn btn-sm ${PANDIT_PAYOUT_FILTER === 'paid' ? 'btn-gold' : 'btn-outline'}" onclick="setPanditPayoutFilter('paid')">
                 Paid &amp; Settled (${paid.length})
               </button>
+              <button class="btn btn-sm ${PANDIT_PAYOUT_FILTER === 'compensations' ? 'btn-gold' : 'btn-outline'}" onclick="setPanditPayoutFilter('compensations')">
+                <span class="material-icons" style="font-size:14px;vertical-align:middle">currency_exchange</span> Cancelled Puja Compensations (${cancelledCompensations.length})
+                ${pendingCompensations.length ? `<span style="background:#c62828;color:#fff;border-radius:10px;padding:2px 7px;font-size:10.5px;font-weight:700;margin-left:4px">${pendingCompensations.length} Due</span>` : ''}
+              </button>
               <button class="btn btn-sm ${PANDIT_PAYOUT_FILTER === 'all' ? 'btn-gold' : 'btn-outline'}" onclick="setPanditPayoutFilter('all')">
-                All Eligible Pujas (${eligible.length})
+                All Eligible Entries (${eligible.length + cancelledCompensations.length})
               </button>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -2518,7 +2712,7 @@
             if (!list.length) {
               return `<div class="empty" style="padding:48px 20px">
                 <span class="material-icons" style="font-size:44px;color:var(--admin-gold)">account_balance_wallet</span>
-                <p style="margin:8px 0 0">No eligible ceremonies found in this category.</p>
+                <p style="margin:8px 0 0">No entries found in this category.</p>
               </div>`;
             }
 
@@ -2527,10 +2721,10 @@
                 <table class="admin-table">
                   <thead>
                     <tr>
-                      <th style="min-width:180px">Ceremony &amp; Devotee (Customer) All Details</th>
+                      <th style="min-width:180px">Ceremony &amp; Devotee All Details</th>
                       <th style="min-width:160px">Assigned Pandit Details</th>
                       <th style="min-width:210px">Pandit Bank &amp; UPI QR Account</th>
-                      <th style="min-width:160px">Dakshina &amp; Platform Split</th>
+                      <th style="min-width:170px">Dakshina &amp; Payout Split</th>
                       <th style="min-width:130px">Payout Status</th>
                       <th style="min-width:140px;text-align:right">Action</th>
                     </tr>
@@ -2538,7 +2732,8 @@
                   <tbody>
                     ${list.map(b => {
                       const p = (S.adminPandits || []).find(x => (x.email || '').toLowerCase() === (b.panditEmail || '').toLowerCase());
-                      const isPaid = b.panditPayoutStatus === 'Paid';
+                      const isCancelled = b.status === 'Cancelled';
+                      const isPaid = isCancelled ? (b.panditCompensationStatus === 'Paid') : (b.panditPayoutStatus === 'Paid');
                       const hasBank = p && p.bankAccount;
                       const devoteePaid = b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified';
 
@@ -2546,11 +2741,14 @@
                       const feePct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : (S.commissionPercent ?? 10));
                       const adminFeeAmount = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((mainFee * feePct) / 100));
                       const netDakshina = Number(b.panditNetPayout !== undefined && b.panditNetPayout > 0 ? b.panditNetPayout : (b.panditPayoutAmount || Math.max(0, mainFee - adminFeeAmount)));
+                      const compAmt = Number(b.panditCompensationAmount) || 0;
+                      const cancelFee = Number(b.cancellationFeeAmount) || 0;
 
                       return `
-                        <tr>
+                        <tr style="${isCancelled ? 'background:#fffbf8' : ''}">
                           <td>
-                            <b style="color:var(--admin-dark)">${esc(b.bookingId)}</b> · <span class="badge ${devoteePaid ? 'green' : 'amber'}" style="font-size:11px">${devoteePaid ? 'Paid &amp; Verified ✅' : esc(b.paymentStatus || 'Pending')}</span><br>
+                            <b style="color:var(--admin-dark)">${esc(b.bookingId)}</b> · <span class="badge ${devoteePaid ? 'green' : 'amber'}" style="font-size:11px">${devoteePaid ? 'Paid &amp; Verified ✅' : esc(b.paymentStatus || 'Pending')}</span>
+                            ${isCancelled ? `<span class="badge red" style="font-size:10px;margin-left:4px">Cancelled Ceremony</span>` : ''}<br>
                             <span style="font-weight:600;color:var(--admin-gold)">${esc(b.service)}</span><br>
                             <div style="font-size:12.5px;margin-top:4px;line-height:1.4">
                               <strong>Devotee:</strong> ${esc(b.userName)}<br>
@@ -2613,44 +2811,81 @@
                             `}
                           </td>
                           <td>
-                            <!-- Uncompacted Dakshina & Platform Cut Breakdown -->
-                            <div style="font-size:12.5px;line-height:1.5">
-                              <div><span class="muted">Total Dakshina:</span> <b>${inr(mainFee)}</b></div>
-                              <div style="color:#c62828;margin:2px 0">
-                                <span class="muted">Admin Charge (${feePct}%):</span> <b>-${inr(adminFeeAmount)}</b>
-                              </div>
-                              <div style="border-top:1px dashed #ebd9c2;padding-top:4px;margin-top:4px">
-                                <span class="muted">Amount to Pay Pandit:</span><br>
-                                <b style="color:#1b5e20;font-size:15px">${inr(netDakshina)}</b>
-                              </div>
-                            </div>
-                          </td>
-                          <td>
-                            ${isPaid ? `
-                              <span class="badge green">Paid &amp; Transferred ✅</span><br>
-                              <div style="font-size:11px;margin-top:4px;color:#2e7d32;line-height:1.3">
-                                <code>Ref: ${esc(b.panditPayoutTxnId || 'Direct')}</code><br>
-                                <span class="muted">${b.panditPayoutDate ? new Date(b.panditPayoutDate).toLocaleDateString() : ''}</span>
+                            ${isCancelled ? `
+                              <!-- Cancelled Ceremony Pandit 40% Compensation Breakdown -->
+                              <div style="font-size:12.5px;line-height:1.5">
+                                <div><span class="muted">Total Dakshina:</span> <b>${inr(mainFee)}</b></div>
+                                <div style="color:#c62828"><span class="muted">Devotee Refund:</span> <b>${inr(b.refundAmount || 0)}</b></div>
+                                <div><span class="muted">Retained Fee:</span> <b>${inr(cancelFee)}</b></div>
+                                <div style="border-top:1px dashed #ebd9c2;padding-top:4px;margin-top:4px">
+                                  <span class="muted">Pandit 40% Share:</span><br>
+                                  <b style="color:#1b5e20;font-size:15px">${inr(compAmt)}</b>
+                                </div>
                               </div>
                             ` : `
-                              <span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100">Pending Payout</span>
-                              <div style="font-size:11px;margin-top:4px;color:#e65100">Due: <b>${inr(netDakshina)}</b></div>
+                              <!-- Standard Ceremony Dakshina Split Breakdown -->
+                              <div style="font-size:12.5px;line-height:1.5">
+                                <div><span class="muted">Total Dakshina:</span> <b>${inr(mainFee)}</b></div>
+                                <div style="color:#c62828;margin:2px 0">
+                                  <span class="muted">Admin Charge (${feePct}%):</span> <b>-${inr(adminFeeAmount)}</b>
+                                </div>
+                                <div style="border-top:1px dashed #ebd9c2;padding-top:4px;margin-top:4px">
+                                  <span class="muted">Amount to Pay Pandit:</span><br>
+                                  <b style="color:#1b5e20;font-size:15px">${inr(netDakshina)}</b>
+                                </div>
+                              </div>
+                            `}
+                          </td>
+                          <td>
+                            ${isCancelled ? `
+                              ${isPaid ? `
+                                <span class="badge green">Compensated ✅</span><br>
+                                <div style="font-size:11px;margin-top:4px;color:#2e7d32;line-height:1.3">
+                                  <code>Ref: ${esc(b.panditCompensationTxnId || 'Direct')}</code>
+                                </div>
+                              ` : `
+                                <span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100">Pending Compensation</span>
+                                <div style="font-size:11px;margin-top:4px;color:#e65100">Due: <b>${inr(compAmt)}</b></div>
+                              `}
+                            ` : `
+                              ${isPaid ? `
+                                <span class="badge green">Paid &amp; Transferred ✅</span><br>
+                                <div style="font-size:11px;margin-top:4px;color:#2e7d32;line-height:1.3">
+                                  <code>Ref: ${esc(b.panditPayoutTxnId || 'Direct')}</code><br>
+                                  <span class="muted">${b.panditPayoutDate ? new Date(b.panditPayoutDate).toLocaleDateString() : ''}</span>
+                                </div>
+                              ` : `
+                                <span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100">Pending Payout</span>
+                                <div style="font-size:11px;margin-top:4px;color:#e65100">Due: <b>${inr(netDakshina)}</b></div>
+                              `}
                             `}
                           </td>
                           <td style="text-align:right">
                             <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
-                              ${!isPaid ? `
-                                <button class="btn btn-green btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}')">
-                                  <span class="material-icons" style="font-size:14px">payments</span> Pay Dakshina
-                                </button>
+                              ${isCancelled ? `
+                                ${!isPaid ? `
+                                  <button class="btn btn-green btn-sm" onclick="openPanditCompensationModal('${esc(b.bookingId)}')">
+                                    <span class="material-icons" style="font-size:14px">payments</span> Pay Compensation
+                                  </button>
+                                ` : `
+                                  <button class="btn btn-outline dark btn-sm" onclick="openPanditCompensationModal('${esc(b.bookingId)}', true)">
+                                    <span class="material-icons" style="font-size:14px">receipt</span> View Slip
+                                  </button>
+                                `}
                               ` : `
-                                <button class="btn btn-outline dark btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}', true)">
-                                  <span class="material-icons" style="font-size:14px">receipt</span> View / Re-send
+                                ${!isPaid ? `
+                                  <button class="btn btn-green btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}')">
+                                    <span class="material-icons" style="font-size:14px">payments</span> Pay Dakshina
+                                  </button>
+                                ` : `
+                                  <button class="btn btn-outline dark btn-sm" onclick="openPanditPayModal('${esc(b.bookingId)}', true)">
+                                    <span class="material-icons" style="font-size:14px">receipt</span> View / Re-send
+                                  </button>
+                                `}
+                                <button class="btn btn-outline dark btn-sm" onclick="printSinglePanditPayout('${esc(b.bookingId)}')" title="Print Payout Voucher for this Ceremony">
+                                  <span class="material-icons" style="font-size:14px">print</span>
                                 </button>
                               `}
-                              <button class="btn btn-outline dark btn-sm" onclick="printSinglePanditPayout('${esc(b.bookingId)}')" title="Print Payout Voucher for this Ceremony">
-                                <span class="material-icons" style="font-size:14px">print</span>
-                              </button>
                             </div>
                           </td>
                         </tr>
@@ -3263,6 +3498,361 @@
         </div>
       `);
     };
+
+    // Admin Process Devotee Refund Modal (Calculated upon platform timing rules)
+    async function openAdminProcessRefundModal(bookingId, viewOnly = false) {
+      const b = (S.bookings || []).find(x => x.bookingId === bookingId);
+      if (!b) return toast('Booking not found', true);
+
+      const devoteeUser = (S.users || []).find(x => (x.email || '').toLowerCase() === (b.userEmail || '').toLowerCase()) || {};
+      const payout = b.refundAccountDetails || {};
+      const upiId = payout.upiId || devoteeUser.upiId || '';
+      const bankAccount = payout.bankAccount || devoteeUser.bankAccount || '';
+      const ifscCode = payout.ifscCode || devoteeUser.ifscCode || '';
+      const accountHolder = payout.accountHolder || devoteeUser.accountHolder || devoteeUser.name || b.userName;
+      const bankName = payout.bankName || devoteeUser.bankName || '';
+      const qrCode = payout.qrCode || devoteeUser.qrCode || '';
+
+      const hours = b.cancellationHoursBefore !== undefined ? b.cancellationHoursBefore : 0;
+      const fee = Number(b.fee) || 0;
+      const cancelFee = Number(b.cancellationFeeAmount) || 0;
+      const cancelFeePct = Number(b.cancellationFeePercent) || 0;
+      const refundAmt = Number(b.refundAmount) || 0;
+      const refundPct = Number(b.refundEligiblePercent) || 0;
+      const panditComp = Number(b.panditCompensationAmount) || 0;
+      const adminRetained = Math.max(0, cancelFee - panditComp);
+
+      const tierLabel = b.cancelledBy === 'pandit'
+        ? 'Cancelled by Assigned Pandit (100% Full Refund Guarantee within 24 Hours)'
+        : (hours >= 18
+          ? 'More than 18 hours before ceremony (100% Full Refund / ₹0 Fee)'
+          : (hours >= 1
+            ? 'Between 18 hours and 1 hour before ceremony (40% Refund, 60% Retained Fee)'
+            : 'Less than 1 hour before ceremony (0% Refund, 100% Retained Fee)'));
+
+      openModal(viewOnly ? `Refund Settlement Receipt – ${b.bookingId}` : `Process Devotee Refund – ${b.bookingId}`, `
+        <div style="font-size:13.5px;color:#3b2115">
+          <!-- Cancellation Timing & Applied Policy Assessment (Uncompacted) -->
+          <div style="background:#fff8ed;border:1.5px solid #ebd9c2;border-left:5px solid #d99a19;border-radius:10px;padding:14px;margin-bottom:14px">
+            <h4 style="margin:0 0 8px;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="color:var(--admin-gold);font-size:20px">policy</span>
+              Cancellation Notice &amp; Platform Policy Assessment
+            </h4>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:10px;font-size:13px">
+              <div><span class="muted">Booking ID:</span> <b>${esc(b.bookingId)}</b></div>
+              <div><span class="muted">Sacred Ritual:</span> <b style="color:var(--admin-gold)">${esc(b.service)}</b></div>
+              <div><span class="muted">Ceremony Date &amp; Slot:</span> <b>${esc(b.date)} (${esc(b.time || '10:00 AM')})</b></div>
+              <div><span class="muted">Cancelled By:</span> <b>${esc(b.cancelledBy === 'pandit' ? 'Assigned Pandit' : 'Devotee (Customer)')}</b></div>
+              <div><span class="muted">Notice Given:</span> <b>${esc(hours)} hours before ceremony</b></div>
+              <div><span class="muted">Cancellation Date:</span> <b>${b.cancelledAt ? new Date(b.cancelledAt).toLocaleString('en-IN') : 'N/A'}</b></div>
+              <div style="grid-column:1 / -1"><span class="muted">Cancellation Reason:</span> <em>${esc(b.cancellationReason || 'No reason provided')}</em></div>
+              <div style="grid-column:1 / -1;background:#fff;padding:8px 12px;border-radius:6px;border:1px dashed #d99a19">
+                <span class="muted">Applied Policy Tier:</span> <strong style="color:#b71c1c">${esc(tierLabel)}</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Financial Calculation Breakdown (Uncompacted) -->
+          <div style="background:#ffffff;border:1.5px solid #ebd9c2;border-radius:10px;padding:16px;margin-bottom:14px">
+            <h4 style="margin:0 0 10px;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:18px;color:var(--admin-gold)">calculate</span>
+              Transparent Financial Calculation (Uncompacted)
+            </h4>
+            <table style="width:100%;border-collapse:collapse;font-size:13.5px">
+              <tr>
+                <td style="padding:6px 0;color:#5a3825">Total Ceremony Dakshina:</td>
+                <td style="padding:6px 0;text-align:right;font-weight:700">${inr(fee)}</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;color:#c62828">Cancellation Fee Deducted (${cancelFeePct}%):</td>
+                <td style="padding:6px 0;text-align:right;font-weight:700;color:#c62828">-${inr(cancelFee)}</td>
+              </tr>
+              ${panditComp > 0 ? `
+                <tr>
+                  <td style="padding:4px 0 4px 12px;font-size:12.5px;color:#7a553e">↳ Pandit Reserved Slot Compensation (40% of retained fee):</td>
+                  <td style="padding:4px 0;text-align:right;font-size:12.5px;color:#7a553e">${inr(panditComp)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:4px 0 4px 12px;font-size:12.5px;color:#7a553e">↳ Admin Retained Share of Fee:</td>
+                  <td style="padding:4px 0;text-align:right;font-size:12.5px;color:#7a553e">${inr(adminRetained)}</td>
+                </tr>
+              ` : ''}
+              <tr style="border-top:1.5px dashed #d99a19">
+                <td style="padding:10px 0 4px;font-size:15px;color:#1b5e20"><strong>Net Refund Due to Devotee (${refundPct}%):</strong></td>
+                <td style="padding:10px 0 4px;text-align:right;font-size:20px;color:#1b5e20"><strong>${inr(refundAmt)}</strong></td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Devotee Registered Bank & QR Details -->
+          <div style="background:#e8f5e9;border:1.5px solid #a5d6a7;border-left:5px solid #2e7d32;border-radius:10px;padding:16px;margin-bottom:14px">
+            <h4 style="margin:0 0 10px;color:#1b5e20;display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:18px">account_balance</span>
+              Devotee Payout Destination (Transfer Money to This Account)
+            </h4>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px;font-size:13px">
+              <div><span class="muted">Devotee Name:</span> <b>${esc(b.userName)}</b></div>
+              <div><span class="muted">Phone Number:</span> <b>📞 ${esc(b.phone || devoteeUser.phone || 'N/A')}</b></div>
+              <div><span class="muted">Registered Email:</span> <b>${esc(b.userEmail)}</b></div>
+              <div><span class="muted">UPI ID / Number:</span> <b style="font-family:monospace;font-size:14px;color:#1b5e20">${esc(upiId || 'Not provided')}</b></div>
+              <div><span class="muted">Bank Account No:</span> <b style="font-family:monospace;font-size:14px;color:#1b5e20">${esc(bankAccount || 'Not provided')}</b></div>
+              <div><span class="muted">Bank IFSC Code:</span> <b style="font-family:monospace">${esc(ifscCode || 'Not provided')}</b></div>
+              <div><span class="muted">A/C Holder Name:</span> <b>${esc(accountHolder || b.userName)}</b></div>
+              <div><span class="muted">Bank Name:</span> <b>${esc(bankName || 'Registered Bank')}</b></div>
+            </div>
+
+            ${qrCode ? `
+              <div style="margin-top:14px;padding-top:12px;border-top:1px dashed #a5d6a7;display:flex;align-items:center;gap:14px">
+                <div style="position:relative;cursor:pointer" onclick="openQrViewModal('${esc(qrCode)}', 'Devotee ${esc(b.userName)} – UPI QR Code')">
+                  <img src="${esc(qrCode)}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid #2e7d32;padding:2px;background:#fff;display:block" alt="Devotee UPI QR">
+                  <span class="material-icons" style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.65);color:#fff;font-size:13px;border-radius:3px;padding:1px">fullscreen</span>
+                </div>
+                <div>
+                  <span class="badge green" style="font-size:11px;cursor:pointer" onclick="openQrViewModal('${esc(qrCode)}', 'Devotee ${esc(b.userName)} – UPI QR Code')">
+                    <span class="material-icons" style="font-size:12px;vertical-align:middle">qr_code_scanner</span> Uploaded Devotee UPI QR
+                  </span>
+                  <div style="font-size:12px;color:#1b5e20;margin-top:4px">
+                    Open Google Pay, PhonePe, or Paytm and scan this QR code to disburse the refund instantly.
+                  </div>
+                </div>
+              </div>
+            ` : `
+              <div style="margin-top:10px;font-size:12px;color:#555">
+                <em>No UPI QR screenshot uploaded by devotee. Use UPI ID or Bank Account / IFSC for NEFT/IMPS transfer.</em>
+              </div>
+            `}
+          </div>
+
+          <!-- Admin Settlement Input Form -->
+          <div style="background:#fffcf7;border:1.5px solid #ebd9c2;border-radius:10px;padding:16px;margin-bottom:14px">
+            <h4 style="margin:0 0 12px;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="color:var(--admin-gold);font-size:18px">receipt_long</span>
+              ${viewOnly ? 'Settlement Confirmation Details' : 'Record Transfer &amp; Send Refund Mail to Devotee'}
+            </h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">Disbursed Refund Amount (₹) *</label>
+                <input type="number" id="admin-refund-amt" class="input" style="width:100%" value="${refundAmt}" ${viewOnly ? 'disabled' : ''}>
+              </div>
+              <div>
+                <label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">Payment Transfer Method *</label>
+                <select id="admin-refund-method" class="input" style="width:100%" ${viewOnly ? 'disabled' : ''}>
+                  <option value="UPI Direct Transfer" ${(b.refundMethod || '').includes('UPI') ? 'selected' : ''}>UPI Direct Transfer (GPay / PhonePe / Paytm)</option>
+                  <option value="IMPS (Instant Bank Transfer)" ${(b.refundMethod || '').includes('IMPS') ? 'selected' : ''}>IMPS (Instant Bank Transfer)</option>
+                  <option value="NEFT / RTGS" ${(b.refundMethod || '').includes('NEFT') ? 'selected' : ''}>NEFT / RTGS</option>
+                  <option value="NetBanking Direct Transfer" ${(b.refundMethod || '').includes('NetBanking') ? 'selected' : ''}>NetBanking Direct Transfer</option>
+                </select>
+              </div>
+              <div style="grid-column:1 / -1">
+                <label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">Transaction Reference ID (UTR / UPI Ref ID / Cheque No.) *</label>
+                <input type="text" id="admin-refund-txnid" class="input" style="width:100%;font-family:monospace;font-weight:700" placeholder="e.g. 429381749281 or UTR-20261025-01" value="${esc(b.refundTxnId || '')}" ${viewOnly ? 'disabled' : ''}>
+                <small class="muted" style="font-size:11px;display:block;margin-top:3px">
+                  This official UTR reference ID will be included in the automated confirmation email dispatched to the devotee.
+                </small>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+            <button type="button" class="btn btn-outline" onclick="closeModal()">Close</button>
+            ${!viewOnly ? `
+              <button type="button" class="btn btn-gold" id="btn-submit-admin-refund">
+                <span class="material-icons">send</span> Submit Refund &amp; Dispatch Devotee Email
+              </button>
+            ` : `
+              <button type="button" class="btn btn-gold" onclick="window.print()">
+                <span class="material-icons">print</span> Print Refund Slip
+              </button>
+            `}
+          </div>
+        </div>
+      `);
+
+      if (!viewOnly) {
+        const submitBtn = document.getElementById('btn-submit-admin-refund');
+        if (submitBtn) {
+          submitBtn.onclick = async () => {
+            const txnId = (document.getElementById('admin-refund-txnid').value || '').trim();
+            if (!txnId) return toast('Transaction Reference ID (UTR / Ref ID) is required to record the refund', true);
+            const method = document.getElementById('admin-refund-method').value;
+            const amount = Number(document.getElementById('admin-refund-amt').value) || 0;
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Submitting &amp; Sending Mail...';
+
+            try {
+              const res = await api('/bookings/' + encodeURIComponent(b.bookingId) + '/process-refund', {
+                method: 'POST',
+                body: {
+                  refundTxnId: txnId,
+                  refundMethod: method,
+                  refundAmount: amount
+                }
+              });
+              closeModal();
+              toast(res.message || 'Refund recorded successfully and email sent to devotee! 🙏');
+              const idx = (S.bookings || []).findIndex(x => x.bookingId === b.bookingId);
+              if (idx !== -1 && res.booking) {
+                S.bookings[idx] = res.booking;
+              }
+              renderKpis();
+              renderActiveTab();
+            } catch (e) {
+              toast(e.message || 'Error processing refund', true);
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = '<span class="material-icons">send</span> Submit Refund &amp; Dispatch Devotee Email';
+            }
+          };
+        }
+      }
+    }
+
+    // Admin Settle Pandit Compensation Modal
+    async function openPanditCompensationModal(bookingId, viewOnly = false) {
+      const b = (S.bookings || []).find(x => x.bookingId === bookingId);
+      if (!b) return toast('Booking not found', true);
+
+      const p = (S.adminPandits || []).find(x => (x.email || '').toLowerCase() === (b.panditEmail || '').toLowerCase());
+      const fee = Number(b.fee) || 0;
+      const cancelFee = Number(b.cancellationFeeAmount) || 0;
+      const compAmt = Number(b.panditCompensationAmount) || 0;
+      const adminRetained = Math.max(0, cancelFee - compAmt);
+
+      openModal(viewOnly ? `Pandit Compensation Slip – ${b.bookingId}` : `Pay Pandit Cancellation Compensation – ${b.bookingId}`, `
+        <div style="font-size:13.5px;color:#3b2115">
+          <div style="background:#fff8ed;border:1.5px solid #ebd9c2;border-radius:10px;padding:14px;margin-bottom:14px">
+            <h4 style="margin:0 0 8px;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="color:var(--admin-gold);font-size:18px">info</span>
+              Cancelled Ceremony &amp; Pandit Allocation Details
+            </h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+              <div><span class="muted">Booking ID:</span> <b>${esc(b.bookingId)}</b></div>
+              <div><span class="muted">Sacred Ritual:</span> <b style="color:var(--admin-gold)">${esc(b.service)}</b></div>
+              <div><span class="muted">Ceremony Date &amp; Slot:</span> <b>${esc(b.date)} (${esc(b.time || '10:00 AM')})</b></div>
+              <div><span class="muted">Cancelled Notice:</span> <b>${esc(b.cancellationHoursBefore || 0)} hours before start</b></div>
+              <div><span class="muted">Confirmed Pandit:</span> <b>${esc(b.panditName)}</b> (${esc(b.panditEmail)})</div>
+              <div><span class="muted">Devotee Name:</span> <b>${esc(b.userName)}</b></div>
+            </div>
+          </div>
+
+          <!-- Uncompacted Retained Fee & Pandit 40% Share Calculation -->
+          <div style="background:#ffffff;border:1.5px solid #ebd9c2;border-left:4px solid var(--admin-gold);border-radius:10px;padding:14px;margin-bottom:14px">
+            <h4 style="margin:0 0 10px;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:18px;color:var(--admin-gold)">calculate</span>
+              Retained Fee Split &amp; Pandit 40% Compensation Rule
+            </h4>
+            <table style="width:100%;border-collapse:collapse;font-size:13.5px">
+              <tr>
+                <td style="padding:5px 0;color:#5a3825">Total Ceremony Dakshina:</td>
+                <td style="padding:5px 0;text-align:right;font-weight:700">${inr(fee)}</td>
+              </tr>
+              <tr>
+                <td style="padding:5px 0;color:#c62828">Devotee Refund Paid (${b.refundEligiblePercent || 0}%):</td>
+                <td style="padding:5px 0;text-align:right;font-weight:700;color:#2e7d32">${inr(b.refundAmount || 0)}</td>
+              </tr>
+              <tr>
+                <td style="padding:5px 0;color:#e65100">Retained Cancellation Fee in Admin Account:</td>
+                <td style="padding:5px 0;text-align:right;font-weight:700;color:#e65100">${inr(cancelFee)}</td>
+              </tr>
+              <tr style="border-top:1.5px dashed #d99a19">
+                <td style="padding:8px 0 4px;font-size:15px;color:#1b5e20"><strong>Pandit 40% Share of Retained Money:</strong></td>
+                <td style="padding:8px 0 4px;text-align:right;font-size:19px;color:#1b5e20"><strong>${inr(compAmt)}</strong></td>
+              </tr>
+              <tr>
+                <td style="padding:4px 0;font-size:12.5px;color:#7a553e">Admin Remaining Share (60%):</td>
+                <td style="padding:4px 0;text-align:right;font-size:12.5px;color:#7a553e">${inr(adminRetained)}</td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Pandit Bank & QR Account -->
+          <div style="background:#ffffff;border:1.5px solid #c8e6c9;border-left:4px solid #2e7d32;border-radius:10px;padding:14px;margin-bottom:14px">
+            <h4 style="margin:0 0 10px;color:#1b5e20;display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:18px">account_balance</span>
+              Pandit Bank Details for Transfer
+            </h4>
+            ${p && p.bankAccount ? `
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
+                <div><span class="muted">Bank:</span> <b>${esc(p.bankName || 'Registered Bank')}</b></div>
+                <div><span class="muted">Holder:</span> <b>${esc(p.accountHolder || p.name)}</b></div>
+                <div><span class="muted">A/C No:</span> <b style="font-family:monospace;font-size:14px;color:#1b5e20">${esc(p.bankAccount)}</b></div>
+                <div><span class="muted">IFSC:</span> <b style="font-family:monospace">${esc(p.ifscCode || 'N/A')}</b></div>
+                <div><span class="muted">UPI ID:</span> <b>${esc(p.upiId || 'N/A')}</b></div>
+              </div>
+              ${p.qrCode ? `
+                <div style="margin-top:10px;padding-top:8px;border-top:1px dashed #a5d6a7;display:flex;align-items:center;gap:12px">
+                  <img src="${esc(p.qrCode)}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1.5px solid #2e7d32;padding:2px;background:#fff;cursor:pointer" onclick="openQrViewModal('${esc(p.qrCode)}', 'Pandit ${esc(p.name)} QR')">
+                  <span class="muted" style="font-size:12px">Scan Pandit UPI QR to transfer compensation instantly</span>
+                </div>
+              ` : ''}
+            ` : `
+              <div style="color:#e65100;font-size:12.5px">⚠️ Pandit has not registered bank details yet.</div>
+            `}
+          </div>
+
+          <!-- Settlement Form -->
+          <div style="background:#fffcf7;border:1.5px solid #ebd9c2;border-radius:10px;padding:14px;margin-bottom:14px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">Compensation Amount (₹) *</label>
+                <input type="number" id="admin-comp-amt" class="input" style="width:100%" value="${compAmt}" ${viewOnly ? 'disabled' : ''}>
+              </div>
+              <div>
+                <label style="font-size:12.5px;font-weight:700;display:block;margin-bottom:4px">Transaction Reference ID (UTR) *</label>
+                <input type="text" id="admin-comp-txnid" class="input" style="width:100%;font-family:monospace;font-weight:700" placeholder="e.g. UTR-COMP-491823" value="${esc(b.panditCompensationTxnId || '')}" ${viewOnly ? 'disabled' : ''}>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button type="button" class="btn btn-outline" onclick="closeModal()">Close</button>
+            ${!viewOnly ? `
+              <button type="button" class="btn btn-green" id="btn-submit-pandit-comp">
+                <span class="material-icons">payments</span> Settle Pandit Compensation
+              </button>
+            ` : `
+              <button type="button" class="btn btn-gold" onclick="window.print()"><span class="material-icons">print</span> Print Slip</button>
+            `}
+          </div>
+        </div>
+      `);
+
+      if (!viewOnly) {
+        const submitBtn = document.getElementById('btn-submit-pandit-comp');
+        if (submitBtn) {
+          submitBtn.onclick = async () => {
+            const txnId = (document.getElementById('admin-comp-txnid').value || '').trim();
+            if (!txnId) return toast('Transaction Reference ID is required', true);
+            const amount = Number(document.getElementById('admin-comp-amt').value) || 0;
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Settling...';
+
+            try {
+              const res = await api('/bookings/' + encodeURIComponent(b.bookingId) + '/settle-pandit-compensation', {
+                method: 'POST',
+                body: {
+                  compensationTxnId: txnId,
+                  compensationAmount: amount
+                }
+              });
+              closeModal();
+              toast(res.message || 'Pandit compensation settled successfully! 🙏');
+              const idx = (S.bookings || []).findIndex(x => x.bookingId === b.bookingId);
+              if (idx !== -1 && res.booking) {
+                S.bookings[idx] = res.booking;
+              }
+              renderKpis();
+              renderActiveTab();
+            } catch (e) {
+              toast(e.message || 'Error settling compensation', true);
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = '<span class="material-icons">payments</span> Settle Pandit Compensation';
+            }
+          };
+        }
+      }
+    }
 
     async function openPanditPayModal(bookingId, isResend = false) {
       const b = (S.bookings || []).find(x => x.bookingId === bookingId);

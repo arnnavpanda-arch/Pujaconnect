@@ -1424,6 +1424,56 @@ async function openBooking(arg) {
         <input id="b-email" value="${esc(u.email || '')}" readonly style="background:#fcf8f0;cursor:not-allowed">
       </div>
     </div>
+
+    <!-- Devotee Refund & Payout Account Details (Required for instant refund processing) -->
+    <div style="background:#fffcf7;border:1.5px solid #ebd9c2;border-radius:10px;padding:14px 16px;margin-top:14px">
+      <div style="font-weight:700;color:#351605;font-size:13.5px;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <span class="material-icons" style="font-size:18px;color:#d99a19">account_balance</span>
+        Devotee Refund &amp; Payout Details (Required for Instant Refund in Case of Cancellation)
+      </div>
+      <div class="form-grid" style="padding:0;gap:10px">
+        <div>
+          <label style="font-size:12px;font-weight:600">UPI ID / Number (Recommended) *</label>
+          <input id="b-upi" value="${esc(u.upiId || '')}" placeholder="e.g. mobile@upi or username@okaxis">
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600">Bank Account Number</label>
+          <input id="b-bank-acc" value="${esc(u.bankAccount || '')}" placeholder="Bank account number">
+        </div>
+      </div>
+      <div class="form-grid" style="padding:0;gap:10px;margin-top:8px">
+        <div>
+          <label style="font-size:12px;font-weight:600">IFSC Code</label>
+          <input id="b-ifsc" value="${esc(u.ifscCode || '')}" placeholder="e.g. SBIN0001234" style="text-transform:uppercase">
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600">Account Holder Name</label>
+          <input id="b-acc-holder" value="${esc(u.accountHolder || u.name || '')}" placeholder="Name as per bank records">
+        </div>
+      </div>
+      <small class="muted" style="font-size:11.5px;display:block;margin-top:4px">
+        Used directly by administration to disburse your refund if the ceremony is cancelled.
+      </small>
+    </div>
+
+    <!-- Transparent Cancellation & Refund Policy -->
+    <div style="background:#fff8ed;border:1.5px solid #d99a19;border-radius:10px;padding:14px 16px;margin-top:14px">
+      <div style="font-weight:800;color:#351605;font-size:13.5px;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <span class="material-icons" style="font-size:18px;color:#d99a19">policy</span>
+        PujaConnect Cancellation &amp; Refund Policy
+      </div>
+      <div style="font-size:12px;color:#5a3825;line-height:1.6">
+        <div>• <strong>More than 18 hours before start:</strong> 100% Full Refund (₹0 cancellation fee).</div>
+        <div>• <strong>Between 18 hours to 1 hour before start:</strong> 40% Refund (60% cancellation fee). Confirmed Pandit receives 40% of retained fee as slot reservation compensation.</div>
+        <div>• <strong>Less than 1 hour before start:</strong> No Refund (0%) due to emergency slot lock.</div>
+        <div>• <strong>Cancelled by Pandit at any time:</strong> 100% Full Refund Guaranteed to devotee within 24 hours.</div>
+      </div>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-top:12px;padding-top:10px;border-top:1px dashed #d99a19;font-weight:700;font-size:13px;color:#351605">
+        <input type="checkbox" id="b-agree-cancellation-policy" checked style="transform:scale(1.25);cursor:pointer">
+        <span>I have read and agree to the Cancellation &amp; Refund Policy *</span>
+      </label>
+    </div>
+
     <div class="cost-box" style="margin-top:14px"></div>
     <button class="btn btn-gold btn-lg" id="b-submit" style="width:100%;margin-top:12px">
       <span class="material-icons">${isRebook ? 'event_repeat' : 'send'}</span> ${isRebook ? 'Submit Rebook Request' : 'Submit Booking Request'}
@@ -1590,6 +1640,11 @@ async function openBooking(arg) {
     };
 
     $('#b-submit', m).onclick = async (e) => {
+      const agreePolicy = $('#b-agree-cancellation-policy', m);
+      if (agreePolicy && !agreePolicy.checked) {
+        return toast('Please accept the Cancellation & Refund Policy terms to proceed with booking 🙏', true);
+      }
+
       const date = dateInp.value;
       if (!date) return toast('Please choose a ceremony date', true);
       if (!sel.time) return toast('Please choose a time slot', true);
@@ -1597,6 +1652,11 @@ async function openBooking(arg) {
       if (!address) return toast('Please enter your ceremony venue / address', true);
       const phone = $('#b-phone', m).value.trim();
       if (!phone) return toast('Please enter your contact mobile number', true);
+
+      const upiId = ($('#b-upi', m) ? $('#b-upi', m).value : '').trim();
+      const bankAccount = ($('#b-bank-acc', m) ? $('#b-bank-acc', m).value : '').trim();
+      const ifscCode = ($('#b-ifsc', m) ? $('#b-ifsc', m).value : '').trim().toUpperCase();
+      const accountHolder = ($('#b-acc-holder', m) ? $('#b-acc-holder', m).value : '').trim();
 
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
       const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
@@ -1627,9 +1687,21 @@ async function openBooking(arg) {
             time: sel.time,
             address,
             panditEmail: panditSel.value,
-            fee
+            fee,
+            upiId,
+            bankAccount,
+            ifscCode,
+            accountHolder,
+            termsAccepted: true
           }
         });
+
+        if (S.user) {
+          if (upiId) S.user.upiId = upiId;
+          if (bankAccount) S.user.bankAccount = bankAccount;
+          if (ifscCode) S.user.ifscCode = ifscCode;
+          if (accountHolder) S.user.accountHolder = accountHolder;
+        }
 
         closeModal();
         const bk = res.booking || res;
@@ -2224,6 +2296,7 @@ async function userDash(root) {
   const upcoming = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').length;
   const pendingPayments = bookings.filter((b) => b.paymentStatus !== 'Paid' && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')).length;
   const rebookNeeded = bookings.filter(isBookingRejected).length;
+  const refundPendingCount = bookings.filter((b) => b.status === 'Cancelled' && b.refundStatus === 'Pending Refund').length;
   const initial = (S.user.name || 'D').charAt(0).toUpperCase();
 
   root.innerHTML = `
@@ -2328,6 +2401,15 @@ async function userDash(root) {
         ${pendingPayments > 0 ? `<span class="subtab-badge alert">${pendingPayments}</span>` : ''}
       </button>
 
+      <button class="subtab ${tab === 'refunds' ? 'active' : ''}" data-action="dashTab" data-tab="refunds">
+        <span class="subtab-icon-wrap"><span class="material-icons">account_balance</span></span>
+        <div class="subtab-info">
+          <span class="subtab-title">Refund &amp; Bank Details</span>
+          <span class="subtab-sub">${refundPendingCount > 0 ? `${refundPendingCount} Refund Due` : 'Payout Setup'}</span>
+        </div>
+        ${refundPendingCount > 0 ? `<span class="subtab-badge alert" style="background:#2e7d32;color:#fff">${refundPendingCount}</span>` : ''}
+      </button>
+
       <button class="subtab ${tab === 'explore' ? 'active' : ''}" data-action="dashTab" data-tab="explore">
         <span class="subtab-icon-wrap"><span class="material-icons">spa</span></span>
         <div class="subtab-info">
@@ -2357,11 +2439,13 @@ async function userDash(root) {
     <div id="dash-tab-content">
       ${tab === 'bookings' ? renderDevoteeBookingsTab(bookings) : ''}
       ${tab === 'payments' ? renderDevoteePaymentTrackingTab(bookings) : ''}
+      ${tab === 'refunds' ? renderDevoteeRefundsTab(bookings) : ''}
       ${tab === 'explore' ? renderDevoteeExploreTab() : ''}
       ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
       ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
     </div>
   `;
+  setupDevoteeRefundListeners();
 }
 
 function renderDevoteePaymentTrackingTab(bookings) {
@@ -2837,14 +2921,18 @@ function renderDevoteeBookingsTab(bookings) {
                   <span class="material-icons">refresh</span> Repay (${inr(fee)})
                 </button>
               ` : (!isSlotRejected && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')) ? `
-                <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
-                  <span class="material-icons">payments</span> Pay (${inr(fee)})
+                <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}" style="font-weight:700">
+                  <span class="material-icons">payments</span> Pay Full Dakshina (${inr(fee)})
                 </button>
+              ` : (!isSlotRejected && b.status !== 'Cancelled') ? `
+                <span class="badge amber" style="font-size:11px" title="Dakshina payment unlocks once Pandit confirms your ceremony"><span class="material-icons" style="font-size:13px">hourglass_top</span> Pay after Pandit Confirmation</span>
               ` : ''}
             </div>
             <div style="display:flex;gap:6px">
               ${['Confirmed', 'In Progress'].includes(b.status) ? `
                 <button class="btn btn-outline dark btn-sm" data-action="reschedule" data-id="${esc(b.bookingId)}">Reschedule</button>
+              ` : ''}
+              ${!['Completed', 'Cancelled', 'Rejected'].includes(b.status) ? `
                 <button class="btn btn-red btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>
               ` : ''}
             </div>
@@ -3001,6 +3089,262 @@ function renderDevoteeProfileTab(totalBookings) {
       </div>
     </div>
   `;
+}
+
+function renderDevoteeRefundsTab(bookings) {
+  const u = S.user || {};
+  const cancelledBookings = (bookings || []).filter((b) => b.status === 'Cancelled' || b.refundStatus === 'Pending Refund' || b.refundStatus === 'Refunded');
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <!-- Payout Details Card -->
+      <div class="panel" style="background:#fffcf7;border:1.5px solid #ebd9c2">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+          <div>
+            <h3 style="margin:0;color:var(--mahogany);display:flex;align-items:center;gap:8px">
+              <span class="material-icons" style="color:var(--ochre)">account_balance</span>
+              Devotee Refund &amp; Payout Bank Details
+            </h3>
+            <p class="muted" style="margin:4px 0 0;font-size:13px">
+              Your registered UPI ID or Bank Account is used by PujaConnect Administration for direct, instant refunds if any ceremony is cancelled.
+            </p>
+          </div>
+          <button class="btn btn-gold btn-sm" id="btn-save-payout-details">
+            <span class="material-icons" style="font-size:14px;vertical-align:middle">save</span> Save Payout Details
+          </button>
+        </div>
+
+        <div class="form-grid" style="padding:0;gap:14px">
+          <div>
+            <label style="font-weight:600;font-size:13px">UPI ID / Number (Fastest 1-Click Refund) *</label>
+            <input id="dev-payout-upi" class="input" style="width:100%" placeholder="e.g. mobile@upi or name@okicici" value="${esc(u.upiId || '')}">
+            <small class="muted" style="font-size:11px;display:block;margin-top:3px">Direct instant credit to your phone UPI</small>
+          </div>
+          <div>
+            <label style="font-weight:600;font-size:13px">Bank Account Number</label>
+            <input id="dev-payout-acc" class="input" style="width:100%" placeholder="Enter bank account number" value="${esc(u.bankAccount || '')}">
+          </div>
+          <div>
+            <label style="font-weight:600;font-size:13px">Bank IFSC Code</label>
+            <input id="dev-payout-ifsc" class="input" style="width:100%;text-transform:uppercase" placeholder="e.g. SBIN0001234" value="${esc(u.ifscCode || '')}">
+          </div>
+          <div>
+            <label style="font-weight:600;font-size:13px">Account Holder Name</label>
+            <input id="dev-payout-holder" class="input" style="width:100%" placeholder="Account holder name" value="${esc(u.accountHolder || u.name || '')}">
+          </div>
+          <div>
+            <label style="font-weight:600;font-size:13px">Bank Name &amp; Branch</label>
+            <input id="dev-payout-bank" class="input" style="width:100%" placeholder="e.g. State Bank of India" value="${esc(u.bankName || '')}">
+          </div>
+          <div>
+            <label style="font-weight:600;font-size:13px">UPI QR Code (Optional – Scan &amp; Pay Instant Refund)</label>
+            <input type="file" id="dev-payout-qr-file" accept="image/*" style="display:none">
+            <input id="dev-payout-qr" type="hidden" value="${esc(u.qrCode || '')}">
+            <div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap">
+              <button type="button" class="btn btn-outline dark btn-sm" id="btn-upload-dev-qr">
+                <span class="material-icons" style="font-size:15px">qr_code_scanner</span> ${u.qrCode ? 'Change QR Image' : 'Upload UPI QR Screenshot'}
+              </button>
+              <div id="dev-qr-preview-box" style="display:${u.qrCode ? 'flex' : 'none'};align-items:center;gap:8px">
+                <img id="dev-qr-preview-img" src="${esc(u.qrCode || '')}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1.5px solid #d99a19;padding:2px;background:#fff;cursor:pointer" alt="Devotee UPI QR" onclick="if(window.openQrViewModal) openQrViewModal(this.src, 'Your Devotee UPI QR Code')">
+                <button type="button" class="btn btn-red btn-sm" id="btn-remove-dev-qr" style="padding:2px 8px;font-size:11px">Remove</button>
+              </div>
+            </div>
+            <small class="muted" style="font-size:11px;display:block;margin-top:3px">Allows administration to scan and disburse your refund in 1 second.</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transparent Cancellation & Refund Policy Accordion (Uncompacted) -->
+      <div class="panel" style="background:#fff8ed;border:1.5px solid #d99a19">
+        <h3 style="margin:0 0 8px;color:var(--mahogany);display:flex;align-items:center;gap:8px">
+          <span class="material-icons" style="color:var(--ochre)">verified_user</span>
+          PujaConnect Cancellation &amp; Refund Policy (Uncompacted)
+        </h3>
+        <p class="muted" style="margin:0 0 14px;font-size:13px">Transparent, fair timelines certified for all sacred rituals across India.</p>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:12px;font-size:13px">
+          <div style="background:#ffffff;border:1.5px solid #c8e6c9;border-left:4px solid #2e7d32;border-radius:8px;padding:12px">
+            <b style="color:#1b5e20;display:block;margin-bottom:4px">🟢 Cancelled &gt; 18 Hours Before Puja</b>
+            <div style="color:#2e7d32;font-size:16px;font-weight:800;margin-bottom:4px">100% Full Refund · ₹0 Fee</div>
+            <p style="margin:0;font-size:12px;color:#555;line-height:1.4">If cancelled more than 18 hours before scheduled start time, you receive a full 100% refund. If unpaid, no payment is required.</p>
+          </div>
+
+          <div style="background:#ffffff;border:1.5px solid #ffe0b2;border-left:4px solid #f57c00;border-radius:8px;padding:12px">
+            <b style="color:#e65100;display:block;margin-bottom:4px">🟡 Between 18 Hours to 1 Hour Before</b>
+            <div style="color:#e65100;font-size:16px;font-weight:800;margin-bottom:4px">40% Refund · 60% Fee</div>
+            <p style="margin:0;font-size:12px;color:#555;line-height:1.4">40% refund is returned to devotee. From the 60% cancellation fee, <strong>40% is credited to confirmed Pandit</strong> for reserved slot compensation.</p>
+          </div>
+
+          <div style="background:#ffffff;border:1.5px solid #ffcdd2;border-left:4px solid #c62828;border-radius:8px;padding:12px">
+            <b style="color:#c62828;display:block;margin-bottom:4px">🔴 Cancelled &lt; 1 Hour Before Puja</b>
+            <div style="color:#c62828;font-size:16px;font-weight:800;margin-bottom:4px">No Refund (0%)</div>
+            <p style="margin:0;font-size:12px;color:#555;line-height:1.4">Because pandits have already travelled and prepared sacred samagri, emergency cancellations under 1 hour are non-refundable.</p>
+          </div>
+
+          <div style="background:#ffffff;border:1.5px solid #bbdefb;border-left:4px solid #1976d2;border-radius:8px;padding:12px">
+            <b style="color:#0d47a1;display:block;margin-bottom:4px">🛡️ Cancelled by Pandit (Anytime)</b>
+            <div style="color:#0d47a1;font-size:16px;font-weight:800;margin-bottom:4px">100% Full Refund Assured</div>
+            <p style="margin:0;font-size:12px;color:#555;line-height:1.4">If assigned Pandit cancels due to emergency, devotee receives an automatic 100% FULL REFUND credited within 24 hours.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cancelled Ceremonies & Live Refund Tracker -->
+      <div class="panel">
+        <h3 style="margin:0 0 12px;color:var(--mahogany);display:flex;align-items:center;gap:8px">
+          <span class="material-icons" style="color:var(--ochre)">history</span>
+          Cancelled Ceremonies &amp; Refund Status
+        </h3>
+
+        ${!cancelledBookings.length ? `
+          <div class="empty" style="padding:28px 20px;text-align:center">
+            <span class="material-icons" style="font-size:36px;color:#d99a19">task_alt</span>
+            <p class="muted" style="margin:8px 0 0">You have no cancelled ceremonies. All scheduled rituals are active.</p>
+          </div>
+        ` : `
+          <div style="display:flex;flex-direction:column;gap:12px">
+            ${cancelledBookings.map((b) => {
+              const fee = Number(b.fee) || 0;
+              const refAmt = Number(b.refundAmount) || 0;
+              const isRefunded = b.refundStatus === 'Refunded';
+              const isPending = b.refundStatus === 'Pending Refund';
+
+              return `
+                <div style="background:#fffcf7;border:1.5px solid #ebd9c2;border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                    <div>
+                      <b style="font-size:16px;color:var(--mahogany)">${esc(b.service)}</b> · <span class="booking-id-tag">${esc(b.bookingId)}</span>
+                      <div class="muted" style="font-size:12.5px;margin-top:2px">
+                        Scheduled for: 📅 ${esc(b.date)} (${esc(b.time || '10:00 AM')}) · Cancelled by: <b>${esc(b.cancelledBy === 'pandit' ? 'Assigned Pandit' : 'You (Devotee)')}</b>
+                        ${b.cancellationHoursBefore ? ` · (${b.cancellationHoursBefore} hrs before start)` : ''}
+                      </div>
+                    </div>
+                    <div>
+                      ${isRefunded ? `
+                        <span class="badge green" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;font-size:12px;font-weight:700">
+                          <span class="material-icons" style="font-size:14px;vertical-align:middle">check_circle</span> Refunded (${inr(refAmt)})
+                        </span>
+                      ` : isPending ? `
+                        <span class="badge amber" style="background:#fff3e0;color:#e65100;border:1px solid #ffcc80;font-size:12px;font-weight:700">
+                          <span class="material-icons" style="font-size:14px;vertical-align:middle">hourglass_top</span> Refund ${inr(refAmt)} Under Processing
+                        </span>
+                      ` : `
+                        <span class="badge red">Cancelled</span>
+                      `}
+                    </div>
+                  </div>
+
+                  <!-- Uncompacted Refund Breakdown Row -->
+                  <div style="background:#ffffff;border:1px solid #ebd9c2;border-radius:8px;padding:10px 14px;display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:10px;font-size:13px">
+                    <div>
+                      <span class="muted" style="font-size:11.5px;display:block">Total Dakshina</span>
+                      <b>${inr(fee)}</b>
+                    </div>
+                    <div>
+                      <span class="muted" style="font-size:11.5px;display:block">Cancellation Fee</span>
+                      <b style="color:#c62828">${b.cancellationFeeAmount ? `-${inr(b.cancellationFeeAmount)} (${b.cancellationFeePercent || 0}%)` : '₹0 (100% Refund)'}</b>
+                    </div>
+                    <div>
+                      <span class="muted" style="font-size:11.5px;display:block">Net Refund Amount</span>
+                      <b style="color:#1b5e20;font-size:15px">${inr(refAmt)}</b>
+                    </div>
+                    <div>
+                      <span class="muted" style="font-size:11.5px;display:block">Refund Status</span>
+                      <b>${isRefunded ? 'Disbursed ✅' : isPending ? 'Processing (Within 24h)' : 'N/A'}</b>
+                    </div>
+                  </div>
+
+                  ${isRefunded ? `
+                    <div style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px;padding:8px 12px;font-size:12px;color:#1b5e20">
+                      ✓ Refund disbursed via <b>${esc(b.refundMethod || 'Direct Transfer')}</b> · Bank UTR / Ref: <code style="background:#fff;padding:1px 5px;border-radius:4px">${esc(b.refundTxnId)}</code>
+                      ${b.refundDate ? ` · Disbursed on: ${new Date(b.refundDate).toLocaleString('en-IN')}` : ''}
+                    </div>
+                  ` : isPending ? `
+                    <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:6px;padding:8px 12px;font-size:12px;color:#8d4f00">
+                      ⏳ Your refund of <strong>${inr(refAmt)}</strong> is in queue and will be credited to your registered UPI / Bank account within 24 hours.
+                    </div>
+                  ` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `}
+      </div>
+    </div>
+  `;
+}
+
+function setupDevoteeRefundListeners() {
+  setTimeout(() => {
+    const qrFileInput = document.getElementById('dev-payout-qr-file');
+    const uploadQrBtn = document.getElementById('btn-upload-dev-qr');
+    const removeQrBtn = document.getElementById('btn-remove-dev-qr');
+    const qrHiddenInp = document.getElementById('dev-payout-qr');
+    const qrPreviewBox = document.getElementById('dev-qr-preview-box');
+    const qrPreviewImg = document.getElementById('dev-qr-preview-img');
+
+    if (uploadQrBtn && qrFileInput) {
+      uploadQrBtn.onclick = () => qrFileInput.click();
+      qrFileInput.onchange = (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) return toast('Please select an image file (PNG / JPG / WEBP)', true);
+        if (file.size > 5 * 1024 * 1024) return toast('Image size exceeds 5MB limit', true);
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const dataUrl = ev.target.result;
+          if (qrHiddenInp) qrHiddenInp.value = dataUrl;
+          if (qrPreviewImg) qrPreviewImg.src = dataUrl;
+          if (qrPreviewBox) qrPreviewBox.style.display = 'flex';
+          uploadQrBtn.innerHTML = '<span class="material-icons" style="font-size:15px">qr_code_scanner</span> Change QR Image';
+          toast('UPI QR Code selected! Click "Save Payout Details" to save changes. 🙏');
+        };
+        reader.readAsDataURL(file);
+      };
+    }
+
+    if (removeQrBtn) {
+      removeQrBtn.onclick = () => {
+        if (qrHiddenInp) qrHiddenInp.value = '';
+        if (qrPreviewImg) qrPreviewImg.src = '';
+        if (qrPreviewBox) qrPreviewBox.style.display = 'none';
+        if (qrFileInput) qrFileInput.value = '';
+        if (uploadQrBtn) uploadQrBtn.innerHTML = '<span class="material-icons" style="font-size:15px">qr_code_scanner</span> Upload UPI QR Screenshot';
+        toast('QR Code removed. Remember to click "Save Payout Details".');
+      };
+    }
+
+    const savePayoutBtn = document.getElementById('btn-save-payout-details');
+    if (savePayoutBtn) {
+      savePayoutBtn.onclick = async () => {
+        savePayoutBtn.disabled = true;
+        savePayoutBtn.innerHTML = '<span class="material-icons spin">sync</span> Saving...';
+        try {
+          const upiId = (document.getElementById('dev-payout-upi') ? document.getElementById('dev-payout-upi').value : '').trim();
+          const bankAccount = (document.getElementById('dev-payout-acc') ? document.getElementById('dev-payout-acc').value : '').trim();
+          const ifscCode = (document.getElementById('dev-payout-ifsc') ? document.getElementById('dev-payout-ifsc').value : '').trim().toUpperCase();
+          const accountHolder = (document.getElementById('dev-payout-holder') ? document.getElementById('dev-payout-holder').value : '').trim();
+          const bankName = (document.getElementById('dev-payout-bank') ? document.getElementById('dev-payout-bank').value : '').trim();
+          const qrCode = (document.getElementById('dev-payout-qr') ? document.getElementById('dev-payout-qr').value : '').trim();
+
+          const res = await api('/users/profile', {
+            method: 'PUT',
+            body: { upiId, bankAccount, ifscCode, accountHolder, bankName, qrCode }
+          });
+          if (res) {
+            saveSession(res, S.token);
+          }
+          toast('Refund & Payout details saved successfully! 🙏');
+          renderDashboard();
+        } catch (e) {
+          toast(e.message || 'Error saving payout details', true);
+          savePayoutBtn.disabled = false;
+          savePayoutBtn.innerHTML = '<span class="material-icons">save</span> Save Payout Details';
+        }
+      };
+    }
+  }, 100);
 }
 
 async function panditDash(root) {
@@ -4072,6 +4416,215 @@ function openPujaEditor(id) {
   });
 }
 
+async function openDevoteeCancellationModal(bookingId) {
+  let preview = null;
+  try {
+    preview = await api('/bookings/' + encodeURIComponent(bookingId) + '/cancellation-preview?cancelledBy=user');
+  } catch (e) {
+    return toast(e.message || 'Error fetching cancellation preview', true);
+  }
+  if (!preview || !preview.terms) return toast('Could not calculate cancellation terms', true);
+
+  const t = preview.terms;
+  const u = preview.userPayoutDetails || {};
+  const fee = Number(preview.fee) || 0;
+  const isPaid = preview.paymentStatus === 'Paid' || preview.paymentStatus === 'Paid & Verified';
+
+  openModal(`Cancel Ceremony – ${esc(preview.service || 'Puja')}`, `
+    <div style="padding:4px 0">
+      <div style="background:#fff8ed;border:1.5px solid #d99a19;border-radius:10px;padding:16px 18px;margin-bottom:18px">
+        <div style="font-weight:700;color:#351605;font-size:15px;margin-bottom:6px;display:flex;align-items:center;gap:6px">
+          <span class="material-icons" style="color:#d99a19;font-size:20px">schedule</span>
+          Ceremony Timing &amp; Policy Assessment:
+        </div>
+        <div style="font-size:13.5px;color:#4a2b16;line-height:1.6">
+          • <strong>Ceremony Schedule:</strong> ${esc(preview.date)} at <b>${esc(preview.time)}</b><br>
+          • <strong>Hours Before Start:</strong> <b style="color:#c62828;font-size:15px">${t.hoursBefore > 0 ? `${t.hoursBefore} hours remaining` : 'Ceremony time has passed / imminent'}</b><br>
+          • <strong>Applicable Policy Tier:</strong> <span class="badge ${t.refundPercent === 100 ? 'green' : (t.refundPercent === 40 ? 'amber' : 'red')}">${esc(t.tierLabel)}</span>
+        </div>
+      </div>
+
+      <div style="background:#ffffff;border:1.5px solid #ebd9c2;border-radius:10px;padding:18px 20px;margin-bottom:18px">
+        <div style="font-weight:700;color:#351605;font-size:15px;margin-bottom:10px">💰 Financial &amp; Refund Summary (Uncompacted):</div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px">
+          <span>Total Ceremony Dakshina:</span>
+          <b>${inr(fee)}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px">
+          <span>Devotee Payment Status:</span>
+          <b style="color:${isPaid ? '#2e7d32' : '#c62828'}">${isPaid ? 'Paid &amp; Verified ✅' : 'Unpaid / Pending'}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;color:#c62828">
+          <span>Cancellation Fee (${t.cancellationFeePercent}%):</span>
+          <b>-${inr(t.cancellationFee)}</b>
+        </div>
+        ${t.panditCompensation > 0 ? `
+          <div style="display:flex;justify-content:space-between;padding:4px 0 6px 14px;font-size:12.5px;color:#7a553e">
+            <span>↳ Reserved Slot Compensation to Confirmed Pandit (40% of retained fee):</span>
+            <b>${inr(t.panditCompensation)}</b>
+          </div>
+        ` : ''}
+        <div style="display:flex;justify-content:space-between;padding:10px 0 4px;border-top:1.5px dashed #d99a19;margin-top:6px;font-size:16px;color:#2e7d32">
+          <span><strong>Net Refund Amount Due to Devotee:</strong></span>
+          <strong style="font-size:20px">${inr(t.refundAmount)} (${t.refundPercent}%)</strong>
+        </div>
+        ${!isPaid && t.payableIfUnpaid > 0 ? `
+          <div style="margin-top:8px;padding:8px 12px;background:#ffebee;border-radius:6px;font-size:12.5px;color:#b71c1c">
+            ⚠️ <strong>Notice:</strong> Because cancellation occurs within the 18-hour window on an unpaid booking, a cancellation charge of <strong>${inr(t.payableIfUnpaid)}</strong> is due.
+          </div>
+        ` : ''}
+      </div>
+
+      <div style="background:#f9f5ed;border:1.5px solid #ebd9c2;border-radius:10px;padding:16px 18px;margin-bottom:18px">
+        <div style="font-weight:700;color:#351605;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          <span class="material-icons" style="font-size:18px;color:#2e7d32">account_balance</span>
+          Devotee Refund Payout Details (Confirm Destination):
+        </div>
+        <div class="form-grid" style="padding:0;gap:10px">
+          <div>
+            <label style="font-size:12px;font-weight:600">UPI ID / Number (Direct Credit) *</label>
+            <input id="can-upi" class="input" style="width:100%" placeholder="e.g. mobile@upi or username@okaxis" value="${esc(u.upiId || '')}">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600">Bank Account Number</label>
+            <input id="can-acc" class="input" style="width:100%" placeholder="e.g. 1234567890" value="${esc(u.bankAccount || '')}">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600">IFSC Code</label>
+            <input id="can-ifsc" class="input" style="width:100%;text-transform:uppercase" placeholder="e.g. SBIN0001234" value="${esc(u.ifscCode || '')}">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600">Account Holder Name</label>
+            <input id="can-holder" class="input" style="width:100%" placeholder="Name as per bank" value="${esc(u.accountHolder || '')}">
+          </div>
+        </div>
+        <small class="muted" style="font-size:11.5px;display:block;margin-top:6px">
+          PujaConnect Administration will credit your refund of <strong>${inr(t.refundAmount)}</strong> to these details within 24 hours.
+        </small>
+      </div>
+
+      <div style="margin-bottom:18px">
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Reason for Cancellation (Optional):</label>
+        <textarea id="can-reason" rows="2" class="input" style="width:100%" placeholder="e.g. Personal emergency, family function rescheduled, travel dates changed"></textarea>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">Keep My Booking</button>
+        <button type="button" class="btn btn-red" id="btn-submit-cancellation">
+          <span class="material-icons">cancel</span> Confirm Cancellation &amp; Process Refund
+        </button>
+      </div>
+    </div>
+  `, (m) => {
+    $('#btn-submit-cancellation', m).onclick = async () => {
+      const upiId = $('#can-upi', m).value.trim();
+      const bankAccount = $('#can-acc', m).value.trim();
+      const ifscCode = $('#can-ifsc', m).value.trim();
+      const accountHolder = $('#can-holder', m).value.trim();
+      const reason = $('#can-reason', m).value.trim();
+
+      const btn = $('#btn-submit-cancellation', m);
+      btn.disabled = true;
+      btn.innerHTML = '<span class="material-icons spin">sync</span> Processing...';
+
+      try {
+        await api('/bookings/' + encodeURIComponent(bookingId) + '/cancel', {
+          method: 'POST',
+          body: {
+            cancelledBy: 'user',
+            reason,
+            refundAccountDetails: { upiId, bankAccount, ifscCode, accountHolder }
+          }
+        });
+        closeModal();
+        toast('Ceremony booking cancelled. Refund details recorded and confirmation email sent. 🙏');
+        if (S.user) {
+          S.user.upiId = upiId || S.user.upiId;
+          S.user.bankAccount = bankAccount || S.user.bankAccount;
+          S.user.ifscCode = ifscCode || S.user.ifscCode;
+          S.user.accountHolder = accountHolder || S.user.accountHolder;
+        }
+        await renderDashboard();
+      } catch (err) {
+        toast(err.message || 'Error cancelling booking', true);
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-icons">cancel</span> Confirm Cancellation &amp; Process Refund';
+      }
+    };
+  });
+}
+
+async function openPanditCancellationModal(bookingId) {
+  let preview = null;
+  try {
+    preview = await api('/bookings/' + encodeURIComponent(bookingId) + '/cancellation-preview?cancelledBy=pandit');
+  } catch (e) {
+    return toast(e.message || 'Error fetching assignment details', true);
+  }
+  if (!preview) return toast('Assignment record not found', true);
+
+  openModal(`Cancel Ceremony Assignment – ${esc(preview.service || 'Puja')}`, `
+    <div style="padding:4px 0">
+      <div style="background:#ffebee;border:1.5px solid #ffcdd2;border-left:5px solid #d32f2f;padding:16px 18px;border-radius:10px;margin-bottom:18px">
+        <div style="font-weight:700;color:#c62828;font-size:15px;margin-bottom:6px">⚠️ Pandit Cancellation Notice:</div>
+        <p style="margin:0 0 10px;font-size:13.5px;color:#5c1d00;line-height:1.5">
+          If you are unable to conduct this ceremony due to an emergency, cancelling will:
+        </p>
+        <div style="font-size:13px;color:#b71c1c;line-height:1.6">
+          • Automatically trigger an <strong>immediate 100% FULL REFUND</strong> to devotee <b>${esc(preview.userName || 'Devotee')}</b>.<br>
+          • Send an urgent notification email to devotee registered address informing them of the full refund crediting within 24 hours.<br>
+          • Alert PujaConnect Administration for scheduling and records.
+        </div>
+      </div>
+
+      <div style="background:#fffcf7;border:1.5px solid #ebd9c2;border-radius:10px;padding:16px 18px;margin-bottom:18px;font-size:13.5px">
+        <div><b>Booking ID:</b> ${esc(preview.bookingId)}</div>
+        <div><b>Ritual:</b> ${esc(preview.service)}</div>
+        <div><b>Ceremony Date &amp; Slot:</b> ${esc(preview.date)} (${esc(preview.time)})</div>
+        <div><b>Dakshina Payout to be Refunded:</b> <strong>${inr(preview.fee)} (100% to Devotee)</strong></div>
+      </div>
+
+      <div style="margin-bottom:18px">
+        <label style="font-size:13px;font-weight:700;display:block;margin-bottom:6px">Reason for Pandit Cancellation (Required) *</label>
+        <textarea id="p-cancel-reason" rows="2" class="input" style="width:100%" placeholder="Please specify reason (e.g. Sudden illness, family bereavement, temple ritual conflict)"></textarea>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">Back / Keep Assignment</button>
+        <button type="button" class="btn btn-red" id="btn-confirm-pandit-cancel">
+          <span class="material-icons">cancel</span> Confirm Pandit Cancellation (100% Refund to Devotee)
+        </button>
+      </div>
+    </div>
+  `, (m) => {
+    $('#btn-confirm-pandit-cancel', m).onclick = async () => {
+      const reason = $('#p-cancel-reason', m).value.trim();
+      if (!reason) return toast('Please enter a cancellation reason', true);
+
+      const btn = $('#btn-confirm-pandit-cancel', m);
+      btn.disabled = true;
+      btn.innerHTML = '<span class="material-icons spin">sync</span> Cancelling Assignment...';
+
+      try {
+        await api('/bookings/' + encodeURIComponent(bookingId) + '/cancel', {
+          method: 'POST',
+          body: {
+            cancelledBy: 'pandit',
+            reason
+          }
+        });
+        closeModal();
+        toast('Ceremony assignment cancelled. Devotee has been notified of 100% full refund guarantee. 🙏');
+        await renderDashboard();
+      } catch (err) {
+        toast(err.message || 'Error cancelling assignment', true);
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-icons">cancel</span> Confirm Pandit Cancellation (100% Refund to Devotee)';
+      }
+    };
+  });
+}
+
 /* ---------- action dispatcher ---------- */
 const ACTIONS = {
   nav: (d) => showView(d.view),
@@ -4144,22 +4697,10 @@ const ACTIONS = {
       panditEmail: b.preferredPanditEmail || '',
       preferredPanditEmail: b.preferredPanditEmail || '',
       fee: b.fee,
-      isRebook: true
-    });
   },
   slip: (d) => printSlip(S.bookings.find((b) => b.bookingId === d.id)),
-  cancelBooking: async (d) => {
-    const ok = await appConfirm({
-      title: 'Cancel Ceremony Booking',
-      message: 'Are you sure you want to cancel this booking?',
-      detail: 'This will cancel your scheduled ritual slot.',
-      confirmText: 'Yes, Cancel',
-      confirmClass: 'btn-red',
-      icon: 'cancel'
-    });
-    if (!ok) return;
-    try { await api(`/bookings/${d.id}/status`, { method: 'PUT', body: { status: 'Cancelled' } }); toast('Booking cancelled'); renderDashboard(); } catch (e) { toast(e.message, true); }
-  },
+  cancelBooking: (d) => openDevoteeCancellationModal(d.id),
+  panditCancelBooking: (d) => openPanditCancellationModal(d.id),
   reschedule: (d) => {
     const b = S.bookings.find((x) => x.bookingId === d.id);
     if (!b) return toast('Booking record not found', true);
