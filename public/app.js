@@ -5259,7 +5259,8 @@ const ACTIONS = {
       }
       if (!b) return toast('Booking record not found for ' + bId, true);
 
-      if (b.status !== 'Confirmed' && b.panditApproval !== 'Approved') {
+      const isPanditApproved = ['Confirmed', 'In Progress', 'Completed'].includes(b.status) || b.panditApproval === 'Approved';
+      if (!isPanditApproved) {
         return toast('Dakshina payment is accepted only after your ceremony is confirmed by the assigned Pandit 🙏', true);
       }
 

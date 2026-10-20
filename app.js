@@ -2001,7 +2001,8 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
-  if (b.status !== 'Confirmed' && b.panditApproval !== 'Approved') {
+  const isPanditApproved = ['Confirmed', 'In Progress', 'Completed'].includes(b.status) || b.panditApproval === 'Approved';
+  if (!isPanditApproved) {
     return res.status(400).json({ error: 'Dakshina payment is accepted only after the assigned Pandit confirms your ceremony.' });
   }
 
