@@ -629,7 +629,11 @@ function renderNav() {
     ${u && u.role === 'pandit' ? '' : `<button class="btn btn-outline" data-action="panditRegister"><span class="material-icons">badge</span> Pandit Registration</button>`}
     ${u
       ? `<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span class="role-badge">${roleLabel}</span><small style="color:#ffd166">${esc(u.name)}</small></div>
-         <button class="btn btn-outline" data-action="nav" data-view="dashboard"><span class="material-icons">dashboard</span> ${u.role === 'pandit' ? 'Pandit Dashboard' : 'My Account / Dashboard'}</button>
+         <button class="btn btn-outline" data-action="nav" data-view="dashboard"><span class="material-icons">dashboard</span> ${u.role === 'pandit' ? 'Pandit Dashboard' : u.role === 'admin' ? 'Admin Panel' : 'My Account / Dashboard'}</button>
+         ${u.role === 'admin' ? `
+           <button class="btn btn-gold" data-action="openAdminSettings" style="font-weight:700"><span class="material-icons">settings</span> System Settings</button>
+           <a href="/admin" target="_blank" class="btn btn-outline" style="text-decoration:none;color:#ffd88a;border-color:#ffd88a"><span class="material-icons">admin_panel_settings</span> Executive Portal</a>
+         ` : ''}
          <button class="btn btn-outline" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>`
       : `<button class="btn btn-outline" data-action="login"><span class="material-icons">account_circle</span> Login / My Account</button>`}
   `;
@@ -6763,27 +6767,182 @@ async function adminDash(root) {
   } catch {
     dbStatus = { connected: false, status: 'Disconnected' };
   }
-  const [stats, pandits, longs, users, pujas] = await Promise.all([
+  const [stats, pandits, longs, users, pujas, systemSettings] = await Promise.all([
     api('/admin/stats').catch(() => ({ users: 0, pandits: 0, verifiedPandits: 0, pendingPandits: 0, bookings: 0, completed: 0, revenue: 0, longRequests: 0, pendingLong: 0 })),
     api('/pandits').catch(() => []),
     api('/long-puja-requests').catch(() => []),
     api('/users').catch(() => []),
-    api('/pujas').catch(() => [])
+    api('/pujas').catch(() => []),
+    api('/system-settings').catch(() => DEFAULT_SYSTEM_SETTINGS)
   ]);
   S.adminPandits = pandits; S.adminLongs = longs; S.pujas = pujas;
+  if (systemSettings) S.systemSettings = systemSettings;
+
+  const currContact = (S.systemSettings && S.systemSettings.contactNumber) || DEFAULT_SYSTEM_SETTINGS.contactNumber;
+  const currLogo = (S.systemSettings && S.systemSettings.logo) || '';
+  const currAddress = (S.systemSettings && S.systemSettings.officeAddress) || DEFAULT_SYSTEM_SETTINGS.officeAddress;
+
   const pend = pandits.filter((p) => p.status === 'Pending Review');
   const unassigned = longs.filter((l) => l.status === 'Pending Admin' || ['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status));
   const isConnected = dbStatus && (dbStatus.connected || dbStatus.status === 'Connected');
 
-  root.innerHTML = `<div class="row" style="margin-bottom:16px;flex-wrap:wrap;gap:12px">
-      <h2 class="section-title" style="margin:0">Super Admin Dashboard</h2>
-      <div style="display:inline-flex;align-items:center;gap:8px;background:${isConnected ? 'rgba(46,125,50,0.1)' : 'rgba(211,47,47,0.1)'};border:1.5px solid ${isConnected ? '#2e7d32' : '#d32f2f'};padding:6px 14px;border-radius:20px;font-weight:600;font-size:13px;color:${isConnected ? '#1b5e20' : '#b71c1c'}">
-        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${isConnected ? '#2e7d32' : '#d32f2f'}"></span>
-        Database: ${isConnected ? 'MongoDB Connected 🟢 (' + (dbStatus.host || 'Atlas') + ')' : 'Disconnected 🔴'}
-        <button class="btn btn-outline dark btn-sm" data-action="refreshDbStatus" style="padding:2px 8px;font-size:11px;margin-left:6px" title="Refresh DB status">Check</button>
+  root.innerHTML = `
+    <div class="row" style="margin-bottom:18px;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <h2 class="section-title" style="margin:0">Super Admin Dashboard &amp; Panel</h2>
+        <div style="display:inline-flex;align-items:center;gap:8px;background:${isConnected ? 'rgba(46,125,50,0.1)' : 'rgba(211,47,47,0.1)'};border:1.5px solid ${isConnected ? '#2e7d32' : '#d32f2f'};padding:6px 14px;border-radius:20px;font-weight:600;font-size:13px;color:${isConnected ? '#1b5e20' : '#b71c1c'}">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${isConnected ? '#2e7d32' : '#d32f2f'}"></span>
+          Database: ${isConnected ? 'MongoDB Connected 🟢 (' + (dbStatus.host || 'Atlas') + ')' : 'Disconnected 🔴'}
+          <button class="btn btn-outline dark btn-sm" data-action="refreshDbStatus" style="padding:2px 8px;font-size:11px;margin-left:6px" title="Refresh DB status">Check</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn btn-gold btn-sm" onclick="const p=document.getElementById('admin-system-settings-panel');if(p){p.scrollIntoView({behavior:'smooth'});p.style.boxShadow='0 0 0 4px #d99a19';setTimeout(()=>p.style.boxShadow='',2000);}" style="font-weight:700">
+          <span class="material-icons" style="font-size:16px;vertical-align:middle">settings</span> System Settings
+        </button>
+        <a href="/admin" target="_blank" class="btn btn-outline dark btn-sm" style="text-decoration:none;font-weight:600">
+          <span class="material-icons" style="font-size:16px;vertical-align:middle">open_in_new</span> Executive Portal (/admin)
+        </a>
       </div>
     </div>
+
+    <!-- Admin KPI Cards -->
     <div class="stats">${[['Devotees', stats.users], ['Pandits', stats.pandits], ['Verified', stats.verifiedPandits], ['Pending KYC', stats.pendingPandits], ['Bookings', stats.bookings], ['Completed', stats.completed], ['Booked Dakshina', inr(stats.revenue)], ['Multi-day (pending)', `${stats.pendingLong}/${stats.longRequests}`]].map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('')}</div>
+
+    <!-- Official Platform System Settings Panel (Spacious & Completely Uncompacted) -->
+    <div class="panel" id="admin-system-settings-panel" style="border:2px solid var(--ochre, #d99a19);background:#fffdf9;box-shadow:0 6px 24px rgba(217,154,25,0.08);margin-bottom:26px;padding:24px 26px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:20px;padding-bottom:16px;border-bottom:1.5px solid #ebd9c2">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="material-icons" style="color:var(--ochre, #d99a19);font-size:28px">settings</span>
+            <h3 style="margin:0;color:#2e1305;font-size:22px;font-weight:800;font-family:Georgia,serif">Platform System Settings &amp; Brand Identity</h3>
+            <span class="badge green" style="font-size:11px">Live &amp; Centralized</span>
+          </div>
+          <p class="muted" style="margin:6px 0 0;font-size:13.5px;max-width:860px;line-height:1.5">
+            Manage the official PujaConnect contact helpline, official brand logo (with live Desktop/PC &amp; Mobile previews and file upload), and registered central headquarters office address. Changes update immediately across all devotee &amp; pandit portals and public pages without restarting the server.
+          </p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-outline dark btn-sm" id="dash-btn-test-splash" style="font-weight:600">
+            <span class="material-icons" style="font-size:15px;vertical-align:middle">visibility</span> Test Welcome Splash
+          </button>
+          <a href="/admin#settings" target="_blank" class="btn btn-outline dark btn-sm" style="font-weight:600;text-decoration:none">
+            <span class="material-icons" style="font-size:15px;vertical-align:middle">open_in_new</span> Open in Executive Portal
+          </a>
+        </div>
+      </div>
+
+      <!-- Settings Fields: Spacious & Completely Uncompacted -->
+      <div style="display:flex;flex-direction:column;gap:22px">
+        <!-- 1. Official Helpline -->
+        <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <span class="material-icons" style="color:#d99a19;font-size:22px">phone_in_talk</span>
+            <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Official Contact Number / Helpline *</label>
+          </div>
+          <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+            Priority devotee assistance line and Purohit coordination desk. Renders with one-tap click-to-call on all public footers, booking slips, and user dashboards.
+          </p>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="dash-sys-contact" value="${esc(currContact)}" placeholder="+91 94370 12345" style="font-size:15px;font-weight:600;max-width:360px;flex:1;padding:10px 14px">
+            <span class="badge" style="background:#e8f5e9;border:1px solid #c8e6c9;color:#1b5e20;padding:8px 14px;font-size:12px;display:inline-flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:15px">call</span> Click-to-call active
+            </span>
+          </div>
+        </div>
+
+        <!-- 2. Official Logo Image Configuration -->
+        <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="material-icons" style="color:#d99a19;font-size:22px">photo_library</span>
+              <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Official Platform Brand Logo *</label>
+            </div>
+            <span class="muted" style="font-size:12px">Supports PNG, JPG, WebP, SVG, and Data URLs</span>
+          </div>
+          <p class="muted" style="font-size:12.5px;margin:0 0 14px">
+            Upload your official brand logo image file from your PC or mobile. This logo appears in the full-page welcome splash (4s on initial visit, 3s on login) and on the footers of the public site, devotee dashboard, and pandit portal.
+          </p>
+
+          <!-- Upload and Input Controls -->
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <input type="file" id="dash-sys-logo-file" accept="image/*" style="display:none">
+              <button type="button" class="btn btn-gold btn-sm" id="dash-btn-choose-logo-file" style="padding:9px 16px;font-weight:700">
+                <span class="material-icons" style="font-size:16px;vertical-align:middle">upload_file</span> Choose Logo from Device (PC/Mobile)
+              </button>
+              <button type="button" class="btn btn-outline dark btn-sm" id="dash-btn-reset-default-logo" style="padding:9px 14px">
+                <span class="material-icons" style="font-size:15px;vertical-align:middle">restart_alt</span> Reset to Default Golden Emblem
+              </button>
+              <span id="dash-sys-logo-filename" class="muted" style="font-size:12.5px;font-weight:600"></span>
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:#634330">Or Direct Image URL / Base64 Data URL:</label>
+              <input type="text" id="dash-sys-logo-url" value="${esc(currLogo)}" placeholder="Paste direct image URL or upload image file above" style="font-size:13px;margin-top:4px;padding:9px 12px">
+            </div>
+          </div>
+
+          <!-- Dual Responsive Preview: PC View vs Mobile View (Spacious & Uncompacted) -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;margin-top:14px">
+            <!-- PC / Desktop Preview Box -->
+            <div style="background:#1d0b03;border:1.5px solid #d99a19;border-radius:10px;padding:16px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,0.25)">
+              <div style="display:flex;align-items:center;justify-content:center;gap:6px;color:#ffd88a;font-size:12px;font-weight:700;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">
+                <span class="material-icons" style="font-size:16px">laptop_mac</span> PC / Desktop View
+              </div>
+              <div style="min-height:160px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);border-radius:8px;padding:12px;border:1px dashed rgba(255,216,138,0.3)">
+                <div id="dash-preview-pc-wrap" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px">
+                  <img id="dash-preview-pc-img" src="${esc(currLogo || '')}" alt="PC Logo Preview" style="${currLogo ? 'max-width:280px;max-height:140px;object-fit:contain;border-radius:8px;' : 'display:none;'}">
+                  <div id="dash-preview-pc-placeholder" style="${currLogo ? 'display:none;' : 'display:flex;flex-direction:column;align-items:center;gap:6px;'}">
+                    <span style="font-size:54px;color:#f5b942;line-height:1">ॐ</span>
+                    <span style="font-size:20px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
+                    <span style="font-size:11px;color:#d99a19;letter-spacing:1px">VEDIC RITUALS &amp; CERTIFIED ACHARYAS</span>
+                  </div>
+                </div>
+              </div>
+              <small style="display:block;margin-top:10px;color:#e8c697;font-size:11px">Auto-scaled for wide screens &amp; laptops</small>
+            </div>
+
+            <!-- Mobile Phone Preview Box -->
+            <div style="background:#1d0b03;border:1.5px solid #d99a19;border-radius:10px;padding:16px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,0.25);max-width:320px;margin:0 auto;width:100%">
+              <div style="display:flex;align-items:center;justify-content:center;gap:6px;color:#ffd88a;font-size:12px;font-weight:700;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">
+                <span class="material-icons" style="font-size:16px">phone_iphone</span> Mobile Phone View
+              </div>
+              <div style="min-height:130px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);border-radius:8px;padding:10px;border:1px dashed rgba(255,216,138,0.3)">
+                <div id="dash-preview-mobile-wrap" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px">
+                  <img id="dash-preview-mobile-img" src="${esc(currLogo || '')}" alt="Mobile Logo Preview" style="${currLogo ? 'max-width:180px;max-height:95px;object-fit:contain;border-radius:6px;' : 'display:none;'}">
+                  <div id="dash-preview-mobile-placeholder" style="${currLogo ? 'display:none;' : 'display:flex;flex-direction:column;align-items:center;gap:4px;'}">
+                    <span style="font-size:38px;color:#f5b942;line-height:1">ॐ</span>
+                    <span style="font-size:16px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
+                    <span style="font-size:9.5px;color:#d99a19;letter-spacing:0.5px">SACRED SERVICES</span>
+                  </div>
+                </div>
+              </div>
+              <small style="display:block;margin-top:10px;color:#e8c697;font-size:11px">Responsive fit for Android &amp; iPhone</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Main Office Address -->
+        <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <span class="material-icons" style="color:#d99a19;font-size:22px">apartment</span>
+            <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Main Office Address *</label>
+          </div>
+          <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+            Official registered headquarters location, central Ashram, street, district, state, and PIN code.
+          </p>
+          <textarea id="dash-sys-address" rows="3" style="width:100%;font-size:14px;padding:11px 14px;line-height:1.5" placeholder="e.g. PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024">${esc(currAddress)}</textarea>
+        </div>
+
+        <!-- 4. Save Button -->
+        <div style="display:flex;gap:12px;align-items:center">
+          <button type="button" class="btn btn-gold btn-lg" id="dash-btn-save-system-settings" style="flex:1;padding:14px 28px;font-size:16px;font-weight:800">
+            <span class="material-icons" style="font-size:20px;vertical-align:middle;margin-right:6px">save</span> Save Official System Settings
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="panel"><h3>Pandit KYC Review</h3>${pend.length ? `<table><tr><th>Photo</th><th>Pandit</th><th>Location</th><th>Fee</th><th></th></tr>${pend.map((p) => `<tr>
       <td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid var(--ochre)"></td>
       <td>${esc(p.name)}<br><small>${esc(p.email)} · ${esc(p.phone)}</small></td><td>${esc(p.location || p.district)}</td><td>${inr(p.fee)}</td>
@@ -6800,6 +6959,106 @@ async function adminDash(root) {
     <div class="panel"><div class="row"><h3>Service Catalog</h3><button class="btn btn-gold btn-sm" data-action="editPuja" data-id="">+ Add Puja</button></div><table><tr><th>Name</th><th>Type</th><th>Fee</th><th></th></tr>${pujas.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${p.type === 'Long' ? inr(p.perHourFee) + '/hr' : inr(p.baseFee)}</td><td><button class="btn btn-outline dark btn-sm" data-action="editPuja" data-id="${esc(p._id)}">Edit</button><button class="btn btn-red btn-sm" data-action="delPuja" data-id="${esc(p._id)}">Delete</button></td></tr>`).join('')}</table></div>
     <div class="panel"><h3>All Pandits</h3><table><tr><th>Photo</th><th>Name</th><th>District</th><th>Experience</th><th>Status</th></tr>${pandits.map((p) => `<tr><td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid var(--ochre)"></td><td>${esc(p.name)}<br><small>${esc(p.email)}</small></td><td>${esc(p.district)}</td><td>${esc(p.exp)}</td><td>${statusBadge(p.status)}</td></tr>`).join('')}</table></div>
     <div class="panel"><h3>Devotees</h3>${users.length ? `<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th></tr>${users.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${esc(u.phone)}</td><td>${new Date(u.createdAt).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No devotees yet.</p>'}</div>`;
+
+  // System Settings live interactive handlers in adminDash
+  const logoUrlInput = document.getElementById('dash-sys-logo-url');
+  const logoFileInput = document.getElementById('dash-sys-logo-file');
+  const chooseBtn = document.getElementById('dash-btn-choose-logo-file');
+  const resetBtn = document.getElementById('dash-btn-reset-default-logo');
+  const testSplashBtn = document.getElementById('dash-btn-test-splash');
+  const pcImg = document.getElementById('dash-preview-pc-img');
+  const pcPlaceholder = document.getElementById('dash-preview-pc-placeholder');
+  const mobileImg = document.getElementById('dash-preview-mobile-img');
+  const mobilePlaceholder = document.getElementById('dash-preview-mobile-placeholder');
+  const filenameLabel = document.getElementById('dash-sys-logo-filename');
+
+  function updateDashPreviews(val) {
+    if (val && val.trim().length > 0) {
+      if (pcImg) { pcImg.src = val; pcImg.style.display = 'block'; }
+      if (pcPlaceholder) pcPlaceholder.style.display = 'none';
+      if (mobileImg) { mobileImg.src = val; mobileImg.style.display = 'block'; }
+      if (mobilePlaceholder) mobilePlaceholder.style.display = 'none';
+    } else {
+      if (pcImg) { pcImg.src = ''; pcImg.style.display = 'none'; }
+      if (pcPlaceholder) pcPlaceholder.style.display = 'flex';
+      if (mobileImg) { mobileImg.src = ''; mobileImg.style.display = 'none'; }
+      if (mobilePlaceholder) mobilePlaceholder.style.display = 'flex';
+    }
+  }
+
+  if (logoUrlInput) {
+    logoUrlInput.oninput = () => {
+      updateDashPreviews(logoUrlInput.value);
+      if (filenameLabel) filenameLabel.textContent = '';
+    };
+  }
+
+  if (chooseBtn && logoFileInput) {
+    chooseBtn.onclick = () => logoFileInput.click();
+    logoFileInput.onchange = (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      if (filenameLabel) filenameLabel.textContent = `Selected: ${file.name} (${Math.round(file.size / 1024)} KB)`;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const base64Data = evt.target.result;
+        if (logoUrlInput) logoUrlInput.value = base64Data;
+        updateDashPreviews(base64Data);
+      };
+      reader.readAsDataURL(file);
+    };
+  }
+
+  if (resetBtn) {
+    resetBtn.onclick = () => {
+      if (logoUrlInput) logoUrlInput.value = '';
+      if (logoFileInput) logoFileInput.value = '';
+      if (filenameLabel) filenameLabel.textContent = 'Default Emblem restored';
+      updateDashPreviews('');
+      toast('Default Vedic logo emblem restored');
+    };
+  }
+
+  if (testSplashBtn) {
+    testSplashBtn.onclick = () => {
+      const currentLogo = logoUrlInput ? logoUrlInput.value.trim() : '';
+      const oldLogo = S.systemSettings ? S.systemSettings.logo : '';
+      if (S.systemSettings) S.systemSettings.logo = currentLogo;
+      showLogoSplash({ durationSec: 4, title: 'Super Admin Live Splash Preview' });
+      if (S.systemSettings) S.systemSettings.logo = oldLogo;
+    };
+  }
+
+  const saveSettingsBtn = document.getElementById('dash-btn-save-system-settings');
+  if (saveSettingsBtn) {
+    saveSettingsBtn.onclick = async () => {
+      saveSettingsBtn.disabled = true;
+      saveSettingsBtn.innerHTML = '<span class="material-icons spin" style="font-size:20px;vertical-align:middle;margin-right:6px">sync</span> Saving System Settings...';
+      try {
+        const contactVal = (document.getElementById('dash-sys-contact').value || '').trim();
+        const logoVal = (document.getElementById('dash-sys-logo-url').value || '').trim();
+        const addressVal = (document.getElementById('dash-sys-address').value || '').trim();
+
+        const updated = await api('/system-settings', {
+          method: 'PUT',
+          body: {
+            contactNumber: contactVal,
+            logo: logoVal,
+            officeAddress: addressVal
+          }
+        });
+        S.systemSettings = updated || { contactNumber: contactVal, logo: logoVal, officeAddress: addressVal };
+        updatePublicFooterSystemInfo();
+        toast('Official System Settings saved successfully! 🙏');
+        saveSettingsBtn.disabled = false;
+        saveSettingsBtn.innerHTML = '<span class="material-icons" style="font-size:20px;vertical-align:middle;margin-right:6px">save</span> Save Official System Settings';
+      } catch (err) {
+        toast(err.message || 'Error saving settings', true);
+        saveSettingsBtn.disabled = false;
+        saveSettingsBtn.innerHTML = '<span class="material-icons" style="font-size:20px;vertical-align:middle;margin-right:6px">save</span> Save Official System Settings';
+      }
+    };
+  }
 }
 
 /* ---------- booking slip ---------- */
@@ -7341,6 +7600,20 @@ const ACTIONS = {
     openAuth('login');
   },
   adminPanel: openAdminDirect,
+  openAdminSettings: () => {
+    const drawer = $('#nav-drawer');
+    if (drawer) drawer.classList.remove('open');
+    showView('dashboard');
+    setTimeout(() => {
+      const panel = document.getElementById('admin-system-settings-panel');
+      if (panel) {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        panel.style.transition = 'box-shadow 0.4s ease, border-color 0.4s ease';
+        panel.style.boxShadow = '0 0 0 4px #d99a19';
+        setTimeout(() => { panel.style.boxShadow = ''; }, 2500);
+      }
+    }, 120);
+  },
   refreshDbStatus: () => renderDashboard(),
   showLogin: () => openAuth('login'),
   showRegister: () => openAuth('register'),
