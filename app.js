@@ -1565,12 +1565,19 @@ app.post('/api/bookings', wrap(async (req, res) => {
     }
   }
 
-  // When Any Available Verified Pandit is chosen, Standard Base Dakshina is removed and fee remains 0 until Admin assigns a Pandit
+  // Calculate base Dakshina: from preferred Pandit if selected, otherwise from the Puja catalog estimated base fee
+  const pujaDoc = await Puja.findOne({ name: new RegExp('^' + String(b.service).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+  const pujaEstimatedFee = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
+
   let rawBaseFee = 0;
   if (preferredPandit) {
-    rawBaseFee = (preferredPandit.districtPrices && Number(preferredPandit.districtPrices[b.district])) || preferredPandit.fee || Number(b.originalFee || b.fee) || 1500;
-  } else if (Number(b.originalFee || b.fee) > 0) {
-    rawBaseFee = Number(b.originalFee || b.fee);
+    rawBaseFee = (preferredPandit.districtPrices && Number(preferredPandit.districtPrices[b.district])) || preferredPandit.fee || Number(b.originalFee || b.fee) || pujaEstimatedFee;
+  } else if (Number(b.originalFee) > 0) {
+    rawBaseFee = Number(b.originalFee);
+  } else if (Number(b.fee) > 0) {
+    rawBaseFee = Number(b.fee);
+  } else {
+    rawBaseFee = pujaEstimatedFee;
   }
 
   const advanceAmount = Number(b.advanceAmount) || 0;
@@ -1691,10 +1698,26 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
     return res.status(409).json({ error: `Pandit ${pandit.name} is already booked on ${b.date} at ${b.time}. Please select another Pandit.` });
   }
 
-  const rawBaseFee = (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || (b.originalFee > 0 ? b.originalFee : (b.fee > 0 ? b.fee : 1500));
+  const pujaDoc = await Puja.findOne({ name: new RegExp('^' + String(b.service).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+  const pujaEstimatedFee = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
+  const rawBaseFee = (pandit.districtPrices && Number(pandit.districtPrices[b.district])) || pandit.fee || (b.originalFee > 0 ? b.originalFee : (b.fee > 0 ? b.fee : pujaEstimatedFee));
   const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
   const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
-  const applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
+
+  let applicableOffer = null;
+  if (b.discountOfferId) {
+    applicableOffer = await MediaOffer.findOne({ offerId: b.discountOfferId });
+  }
+  if (!applicableOffer) {
+    applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
+  }
+  if (!applicableOffer && b.discountPercent > 0) {
+    applicableOffer = {
+      offerId: b.discountOfferId || '',
+      title: b.discountOfferTitle || 'Promotional Festive Offer',
+      discountPercent: b.discountPercent
+    };
+  }
 
   const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
   const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
@@ -1727,7 +1750,7 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
   const rejectUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&decision=Reject&token=${encodeURIComponent(panditToken)}#dashboard`;
   const reviewUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(b.bookingId)}&email=${encodeURIComponent(pandit.email)}&token=${encodeURIComponent(panditToken)}#dashboard`;
 
-  // Send assignment offer alert to Pandit with uncompacted fee, breakdown, and direct Accept/Reject action links
+  // Send assignment offer alert to Pandit with complete offer details, uncompacted fee, breakdown, net profit, and direct Accept/Reject action links
   const targetEmail = lc(pandit.email);
   const emailRes = await sendSafe('PANDIT_NEW_BOOKING', targetEmail, {
     ...b.toObject(),
@@ -1739,16 +1762,22 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
     district: b.district,
     address: b.address || b.district,
     date: b.date,
+    time: b.time,
     fee: feeCalc.finalFee,
     totalPujaCost: feeCalc.finalFee,
     originalFee: feeCalc.originalFee,
     discountAmount: feeCalc.discountAmount,
     discountPercent: feeCalc.discountPercent,
+    discountOfferTitle: feeCalc.offerTitle,
+    discountOfferId: feeCalc.offerId,
+    offerTitle: feeCalc.offerTitle,
+    offerDiscount: feeCalc.discountAmount,
     adminFeePercent: commPct,
     adminFeeAmount: feeCalc.adminFeeAmount,
     adminFee: feeCalc.adminFeeAmount,
     netDakshina: feeCalc.panditNetPayout,
     panditFee: feeCalc.panditNetPayout,
+    netProfit: feeCalc.panditNetPayout,
     panditToken,
     acceptUrl,
     rejectUrl,
@@ -1794,7 +1823,16 @@ app.get('/api/bookings/:id/pandit-offer-link', adminOnly, wrap(async (req, res) 
     district: b.district,
     panditName: b.panditName,
     panditEmail: b.panditEmail,
+    fee: b.fee,
+    totalPujaCost: b.fee,
+    originalFee: b.originalFee || b.fee,
+    discountAmount: b.discountAmount || 0,
+    discountPercent: b.discountPercent || 0,
+    discountOfferTitle: b.discountOfferTitle || '',
+    adminFeePercent: b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION,
+    adminFeeAmount: b.adminFeeAmount || 0,
     netDakshina: b.panditNetPayout || b.fee,
+    netProfit: b.panditNetPayout || b.fee,
     acceptUrl,
     rejectUrl,
     reviewUrl
@@ -1810,7 +1848,13 @@ app.post('/api/bookings/:id/resend-pandit-offer', adminOnly, wrap(async (req, re
   const pRegex = new RegExp('^' + lc(b.panditEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
   const pandit = (await Pandit.findOne({ email: pRegex })) || { name: b.panditName || 'Pandit ji', email: b.panditEmail };
 
-  const fee = b.fee || (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || 1500;
+  const pujaDoc = await Puja.findOne({ name: new RegExp('^' + String(b.service).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+  const pujaEstimatedFee = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
+  const rawBaseFee = (b.originalFee > 0 ? b.originalFee : ((pandit.districtPrices && Number(pandit.districtPrices[b.district])) || pandit.fee || b.fee || pujaEstimatedFee));
+  const fee = b.fee || rawBaseFee;
+  const originalFee = b.originalFee || (b.discountAmount ? fee + b.discountAmount : rawBaseFee);
+  const discountAmount = b.discountAmount || (originalFee > fee ? originalFee - fee : 0);
+  const discountPercent = b.discountPercent || (originalFee > 0 && discountAmount > 0 ? Math.round((discountAmount / originalFee) * 100) : 0);
   const commPct = b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION;
   const adminFeeAmount = b.adminFeeAmount || Math.round((fee * commPct) / 100);
   const panditNetPayout = b.panditNetPayout || Math.max(0, fee - adminFeeAmount);
@@ -1838,11 +1882,19 @@ app.post('/api/bookings/:id/resend-pandit-offer', adminOnly, wrap(async (req, re
     time: b.time,
     fee,
     totalPujaCost: fee,
+    originalFee,
+    discountAmount,
+    discountPercent,
+    discountOfferTitle: b.discountOfferTitle || '',
+    discountOfferId: b.discountOfferId || '',
+    offerTitle: b.discountOfferTitle || '',
+    offerDiscount: discountAmount,
     adminFeePercent: commPct,
     adminFeeAmount,
     adminFee: adminFeeAmount,
     netDakshina: panditNetPayout,
     panditFee: panditNetPayout,
+    netProfit: panditNetPayout,
     panditToken,
     acceptUrl,
     rejectUrl,
@@ -2922,17 +2974,36 @@ app.put('/api/bookings/:id/rebook', wrap(async (req, res) => {
     b.preferredPanditName = 'Any Available Verified Pandit';
   }
 
-  let newFee = Number(fee) || 0;
-  if (!newFee && preferredPandit) {
-    newFee = (preferredPandit.districtPrices && preferredPandit.districtPrices[b.district]) || preferredPandit.fee || 1500;
-  }
-  b.fee = newFee;
+  const pujaDoc = await Puja.findOne({ name: new RegExp('^' + String(b.service).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+  const pujaEstimatedFee = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
 
+  let rawBaseFee = 0;
+  if (preferredPandit) {
+    rawBaseFee = (preferredPandit.districtPrices && Number(preferredPandit.districtPrices[b.district])) || preferredPandit.fee || Number(req.body && req.body.originalFee ? req.body.originalFee : fee) || pujaEstimatedFee;
+  } else if (Number(req.body && req.body.originalFee)) {
+    rawBaseFee = Number(req.body.originalFee);
+  } else if (Number(fee) > 0) {
+    rawBaseFee = Number(fee);
+  } else {
+    rawBaseFee = pujaEstimatedFee;
+  }
+
+  const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
+  const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
+  const applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
   const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
   const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
+
+  const feeCalc = calculateFeeWithDiscount(rawBaseFee, applicableOffer, commPct);
+  b.fee = feeCalc.finalFee;
+  b.originalFee = feeCalc.originalFee;
+  b.discountPercent = feeCalc.discountPercent;
+  b.discountAmount = feeCalc.discountAmount;
+  b.discountOfferId = feeCalc.offerId;
+  b.discountOfferTitle = feeCalc.offerTitle;
   b.adminFeePercent = commPct;
-  b.adminFeeAmount = newFee > 0 ? Math.round((newFee * commPct) / 100) : 0;
-  b.panditNetPayout = Math.max(0, newFee - b.adminFeeAmount);
+  b.adminFeeAmount = feeCalc.adminFeeAmount;
+  b.panditNetPayout = feeCalc.panditNetPayout;
 
   b.status = 'Pending Assignment';
   b.adminApproval = 'Pending';
