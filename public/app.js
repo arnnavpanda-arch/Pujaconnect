@@ -1242,6 +1242,47 @@ function requireLogin(thenAction) {
   return false;
 }
 
+// Helper to find highest applicable active festive offer for service, district, state, and ceremony date
+function findActiveOffer({ service = '', district = '', state = '', date = '' } = {}) {
+  const offers = (S.offers || []).filter(o => o.status === 'Active');
+  if (!offers.length) return null;
+
+  const nowStr = new Date().toISOString().split('T')[0];
+  const queryDate = date ? String(date).split('T')[0] : nowStr;
+  const sNorm = (service || '').trim().toLowerCase();
+  const dNorm = (district || '').trim().toLowerCase();
+  const stNorm = (state || '').trim().toLowerCase();
+
+  const sorted = [...offers].sort((a, b) => (Number(b.discountPercent) || 0) - (Number(a.discountPercent) || 0));
+
+  for (const o of sorted) {
+    const sDate = o.startDate ? String(o.startDate).split('T')[0] : '';
+    const eDate = o.endDate ? String(o.endDate).split('T')[0] : '';
+    const isActiveNow = sDate && eDate && sDate <= nowStr && eDate >= nowStr;
+    const isActiveOnCeremonyDate = sDate && eDate && sDate <= queryDate && eDate >= queryDate;
+    if (!isActiveNow && !isActiveOnCeremonyDate) continue;
+
+    if (o.pujaName && o.pujaName.trim().toLowerCase() !== 'all') {
+      if (sNorm && o.pujaName.trim().toLowerCase() !== sNorm) continue;
+    }
+
+    if (o.targetState && o.targetState.trim().toLowerCase() !== 'all') {
+      if (stNorm && o.targetState.trim().toLowerCase() !== stNorm) continue;
+    }
+
+    const distList = (Array.isArray(o.targetDistricts) ? o.targetDistricts : [o.targetDistricts || 'ALL'])
+      .flatMap(d => String(d).split(','))
+      .map(d => d.trim().toLowerCase())
+      .filter(Boolean);
+    if (distList.length > 0 && !distList.includes('all')) {
+      if (!dNorm || !distList.includes(dNorm)) continue;
+    }
+
+    return o;
+  }
+  return null;
+}
+
 async function openBooking(arg) {
   let targetPanditId = null;
   let targetPujaName = '';
@@ -1273,7 +1314,7 @@ async function openBooking(arg) {
   if (!requireLogin(() => openBooking(arg))) return;
   const u = S.user;
 
-  // Ensure both Pandits and Pujas catalogs are loaded
+  // Ensure Pandits, Pujas, and active Media Offers catalogs are loaded
   const loadPromises = [];
   if (!S.pandits || !S.pandits.length) {
     loadPromises.push(api('/pandits?verified=true').then(res => { S.pandits = res; }).catch(() => {}));
@@ -1281,6 +1322,8 @@ async function openBooking(arg) {
   if (!S.pujas || !S.pujas.length) {
     loadPromises.push(api('/pujas').then(res => { S.pujas = res; }).catch(() => {}));
   }
+  // Always fetch latest offers so discounts are accurately calculated
+  loadPromises.push(api('/media/offers').then(res => { S.offers = res; }).catch(() => { S.offers = S.offers || []; }));
   if (loadPromises.length) await Promise.all(loadPromises);
 
   const allShortPujas = (S.pujas || []).filter(p => p.type === 'Short').map(p => p.name);
@@ -1297,6 +1340,8 @@ async function openBooking(arg) {
   // Full-Screen Verified Vedic Scholars & Location Rates Popup
   // Shown when devotee presses any Book Now puja before booking form
   if (!isRebook && !skipOverview) {
+    const activeOffer = findActiveOffer({ service: initialPuja, district: initialDistrict, state: curState, date: targetDate });
+
     const verifiedPandits = (S.pandits || []).filter((p) => p.verified || p.status === 'Verified');
     const inDistPandits = verifiedPandits.filter((p) =>
       (p.workingDistricts && p.workingDistricts.some((d) => d.trim().toLowerCase() === initialDistrict.toLowerCase())) ||
@@ -1313,6 +1358,9 @@ async function openBooking(arg) {
     const minFee = feeList.length ? Math.min(...feeList) : 1199;
     const maxFee = feeList.length ? Math.max(...feeList) : 1500;
 
+    const minDisc = activeOffer ? Math.max(0, minFee - Math.round((minFee * activeOffer.discountPercent) / 100)) : minFee;
+    const maxDisc = activeOffer ? Math.max(0, maxFee - Math.round((maxFee * activeOffer.discountPercent) / 100)) : maxFee;
+
     const pujaDoc = (S.pujas || []).find((x) => (x.name || '').trim().toLowerCase() === (initialPuja || '').trim().toLowerCase());
     const baseDakshina = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
 
@@ -1326,6 +1374,17 @@ async function openBooking(arg) {
         <p class="loc-popup-subtitle">
           Official transparency report filtered for your registered devotee location (<strong>📍 ${esc(initialDistrict)}, ${esc(curState)}</strong>). Review authorized scholars, verified credentials, and fixed district Dakshina rates before proceeding to schedule.
         </p>
+
+        ${activeOffer ? `
+          <div style="background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:10px;padding:12px 16px;margin:12px 0 16px;display:flex;align-items:center;gap:12px">
+            <span class="material-icons" style="color:#2e7d32;font-size:26px">local_offer</span>
+            <div style="flex:1">
+              <strong style="color:#1b5e20;font-size:14px">🎉 Active Festive Offer: FLAT ${activeOffer.discountPercent}% OFF Dakshina in ${esc(initialDistrict)}!</strong>
+              <div style="font-size:12.5px;color:#2e7d32;margin-top:2px">${esc(activeOffer.title)} — Discount is automatically calculated on official district Dakshina rates below!</div>
+            </div>
+            <span class="badge green" style="font-size:12px;font-weight:700;padding:4px 10px">${activeOffer.discountPercent}% OFF</span>
+          </div>
+        ` : ''}
         
         <div class="loc-stat-grid">
           <div class="loc-stat-box">
@@ -1346,7 +1405,17 @@ async function openBooking(arg) {
             <span class="material-icons stat-icon">payments</span>
             <div>
               <div class="stat-lbl">District Dakshina Schedule</div>
-              <div class="stat-val" style="color:#2e7d32">${minFee === maxFee ? inr(minFee) : `${inr(minFee)} – ${inr(maxFee)}`}</div>
+              ${activeOffer ? `
+                <div class="stat-val" style="color:#2e7d32">
+                  ${minDisc === maxDisc ? inr(minDisc) : `${inr(minDisc)} – ${inr(maxDisc)}`}
+                </div>
+                <div style="font-size:11px;color:#8a6a55;margin-top:2px">
+                  <span style="text-decoration:line-through">${minFee === maxFee ? inr(minFee) : `${inr(minFee)} – ${inr(maxFee)}`}</span>
+                  <span class="badge green" style="font-size:9.5px;padding:1px 5px;margin-left:4px">${activeOffer.discountPercent}% OFF</span>
+                </div>
+              ` : `
+                <div class="stat-val" style="color:#2e7d32">${minFee === maxFee ? inr(minFee) : `${inr(minFee)} – ${inr(maxFee)}`}</div>
+              `}
             </div>
           </div>
           <div class="loc-stat-box">
@@ -1376,6 +1445,8 @@ async function openBooking(arg) {
             ? Number(curPrices[initialDistrict])
             : (p.fee || 1500);
           const workingDists = p.workingDistricts && p.workingDistricts.length ? p.workingDistricts : [p.district || initialDistrict];
+          const discAmt = activeOffer ? Math.round((pCharge * activeOffer.discountPercent) / 100) : 0;
+          const finalCharge = Math.max(0, pCharge - discAmt);
 
           return `
             <div class="loc-scholar-card">
@@ -1387,6 +1458,7 @@ async function openBooking(arg) {
                     <span class="badge green" style="font-size:11px;padding:2px 8px">
                       <span class="material-icons" style="font-size:12px;vertical-align:middle">verified</span> Verified Scholar
                     </span>
+                    ${activeOffer ? `<span class="badge green" style="font-size:11px;padding:2px 8px;margin-left:4px">🏷️ ${activeOffer.discountPercent}% OFF</span>` : ''}
                   </div>
                   <div class="loc-scholar-meta">
                     <span><span class="material-icons" style="font-size:14px;color:var(--ochre);vertical-align:middle">school</span> ${esc(p.exp || `${p.experience || 5}+ Years Rigor`)}</span>
@@ -1404,8 +1476,14 @@ async function openBooking(arg) {
 
               <div class="loc-scholar-actions">
                 <div class="loc-scholar-price-badge">
-                  <div class="loc-scholar-price-val">${inr(pCharge)}</div>
-                  <div class="loc-scholar-price-lbl">Fixed Dakshina for ${esc(initialDistrict)}</div>
+                  ${activeOffer ? `
+                    <div style="font-size:12px;color:#8a6a55;text-decoration:line-through">${inr(pCharge)}</div>
+                    <div class="loc-scholar-price-val" style="color:#2e7d32">${inr(finalCharge)}</div>
+                    <div class="loc-scholar-price-lbl">Fixed Dakshina (${activeOffer.discountPercent}% OFF) for ${esc(initialDistrict)}</div>
+                  ` : `
+                    <div class="loc-scholar-price-val">${inr(pCharge)}</div>
+                    <div class="loc-scholar-price-lbl">Fixed Dakshina for ${esc(initialDistrict)}</div>
+                  `}
                 </div>
                 <button class="btn btn-gold btn-sm" data-action="pickScholar" data-pid="${esc(p._id)}" style="padding:10px 16px;white-space:nowrap">
                   <span class="material-icons" style="font-size:16px">event</span> Book with Pt. ${esc(p.name)} &rarr;
@@ -1726,6 +1804,8 @@ async function openBooking(arg) {
       const pujaDoc = (S.pujas || []).find((x) => (x.name || '').trim().toLowerCase() === (ritual || '').trim().toLowerCase());
       const baseDakshina = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
 
+      const currentOffer = findActiveOffer({ service: ritual, district: dist, state: curState, date: chosenDate });
+
       let optionsHtml = `<option value="">✨ Any Available Verified Pandit (Auto-assigned by Admin)</option>`;
       allPandits.forEach((p) => {
         const isSelected = (selectedPandit && selectedPandit.email.toLowerCase() === p.email.toLowerCase()) || (targetPanditId && (p._id === targetPanditId || p.email.toLowerCase() === String(targetPanditId).toLowerCase()));
@@ -1734,7 +1814,15 @@ async function openBooking(arg) {
         const spec = p.specialty || 'Vedic Rituals';
         const avail = chosenDate ? isPanditAvailableOnDate(p, chosenDate) : { available: true };
         const unavailTag = !avail.available ? ` [⚠️ NOT AVAILABLE: ${avail.reason}]` : '';
-        optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''} ${!avail.available ? 'style="color:#c62828"' : ''}>Pt. ${esc(p.name)} [Specialty: ${esc(spec)}] · ${esc(servesTag)} — Dakshina: ${inr(pFee)}${unavailTag}</option>`;
+
+        let feeDisplay = inr(pFee);
+        if (currentOffer) {
+          const disc = Math.round((pFee * currentOffer.discountPercent) / 100);
+          const discountedPFee = Math.max(0, pFee - disc);
+          feeDisplay = `${inr(discountedPFee)} (${currentOffer.discountPercent}% OFF, orig. ${inr(pFee)})`;
+        }
+
+        optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''} ${!avail.available ? 'style="color:#c62828"' : ''}>Pt. ${esc(p.name)} [Specialty: ${esc(spec)}] · ${esc(servesTag)} — Dakshina: ${feeDisplay}${unavailTag}</option>`;
       });
       panditSel.innerHTML = optionsHtml;
       updatePanditInfo();
@@ -1744,44 +1832,104 @@ async function openBooking(arg) {
     const paintFee = () => {
       const dist = (districtSel ? districtSel.value : '') || initialDistrict;
       const ritual = (serviceSel ? serviceSel.value : '') || initialPuja;
+      const chosenDate = (dateInp ? dateInp.value : '') || targetDate;
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
       const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
       const costBox = m.querySelector('.cost-box');
       if (!costBox) return;
 
+      const currentOffer = findActiveOffer({ service: ritual, district: dist, state: curState, date: chosenDate });
+
       if (p) {
         // Specific Pandit selected: show official Dakshina for this Pandit in district
-        const f = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || 1500;
-        costBox.innerHTML = `
-          <div style="background:#fff8ed;border:1.5px dashed var(--ochre);border-radius:12px;padding:14px">
-            <div class="row" style="align-items:center;justify-content:space-between">
-              <div>
-                <span style="font-size:14px;font-weight:700;color:var(--mahogany)">Pandit Dakshina Rate</span>
-                <div id="b-fee-note" style="font-size:12px;color:var(--muted);margin-top:2px">
-                  Official Dakshina for Pandit ${esc(p.name)} in ${esc(dist)}
+        const rawFee = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || 1500;
+
+        if (currentOffer) {
+          const discPercent = currentOffer.discountPercent;
+          const discAmount = Math.round((rawFee * discPercent) / 100);
+          const finalFee = Math.max(0, rawFee - discAmount);
+
+          costBox.innerHTML = `
+            <div style="background:#fff8ed;border:1.5px dashed var(--ochre);border-radius:12px;padding:14px">
+              <div class="row" style="align-items:center;justify-content:space-between;gap:12px">
+                <div style="flex:1">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <span style="font-size:14px;font-weight:700;color:var(--mahogany)">Pandit Dakshina Rate</span>
+                    <span class="badge green" style="font-size:11.5px;padding:2px 8px;font-weight:700">
+                      <span class="material-icons" style="font-size:13px;vertical-align:middle">local_offer</span>
+                      ${discPercent}% OFF APPLIED
+                    </span>
+                  </div>
+                  <div id="b-fee-note" style="font-size:12px;color:var(--muted);margin-top:3px">
+                    Official Dakshina for Pandit ${esc(p.name)} in ${esc(dist)}: 
+                    <span style="text-decoration:line-through;color:#8a6a55">${inr(rawFee)}</span> 
+                    <strong style="color:#2e7d32">(-${inr(discAmount)} festive discount)</strong>
+                  </div>
+                  <div style="font-size:11.5px;color:#2e7d32;margin-top:2px;font-weight:600">
+                    🪔 Festive Offer: ${esc(currentOffer.title)}
+                  </div>
+                </div>
+                <div style="text-align:right">
+                  <div style="font-size:12px;color:var(--muted);text-decoration:line-through">${inr(rawFee)}</div>
+                  <b id="b-fee" style="font-size:26px;color:#2e7d32;font-weight:700" data-raw-fee="${rawFee}" data-final-fee="${finalFee}" data-offer-id="${esc(currentOffer.offerId || '')}" data-offer-title="${esc(currentOffer.title || '')}" data-discount-pct="${discPercent}" data-discount-amt="${discAmount}">${inr(finalFee)}</b>
                 </div>
               </div>
-              <b id="b-fee" style="font-size:24px;color:var(--ochre);font-weight:700">${inr(f)}</b>
+              <small class="muted" style="display:block;margin-top:8px;font-size:12px;border-top:1px dashed #ebd9c2;padding-top:6px">
+                Dakshina rates are fixed district-wise by PujaConnect Admin. ${discPercent}% festive discount is calculated automatically on district Dakshina before payment. Payment is completed only after admin assignment and confirmation.
+              </small>
             </div>
-            <small class="muted" style="display:block;margin-top:6px;font-size:12px;border-top:1px dashed #ebd9c2;padding-top:6px">
-              Dakshina rates are fixed district-wise by PujaConnect Admin. Payment is completed only after admin assignment and confirmation.
-            </small>
-          </div>
-        `;
+          `;
+        } else {
+          costBox.innerHTML = `
+            <div style="background:#fff8ed;border:1.5px dashed var(--ochre);border-radius:12px;padding:14px">
+              <div class="row" style="align-items:center;justify-content:space-between">
+                <div>
+                  <span style="font-size:14px;font-weight:700;color:var(--mahogany)">Pandit Dakshina Rate</span>
+                  <div id="b-fee-note" style="font-size:12px;color:var(--muted);margin-top:2px">
+                    Official Dakshina for Pandit ${esc(p.name)} in ${esc(dist)}
+                  </div>
+                </div>
+                <b id="b-fee" style="font-size:24px;color:var(--ochre);font-weight:700" data-raw-fee="${rawFee}" data-final-fee="${rawFee}">${inr(rawFee)}</b>
+              </div>
+              <small class="muted" style="display:block;margin-top:6px;font-size:12px;border-top:1px dashed #ebd9c2;padding-top:6px">
+                Dakshina rates are fixed district-wise by PujaConnect Admin. Payment is completed only after admin assignment and confirmation.
+              </small>
+            </div>
+          `;
+        }
       } else {
         // Any Available Verified Pandit (Auto-assigned by Admin):
-        // REMOVE Standard Base Dakshina completely!
-        costBox.innerHTML = `
-          <div style="background:#fcf8f0;border:1.5px dashed #ebd9c2;border-radius:12px;padding:14px;display:flex;align-items:flex-start;gap:12px">
-            <span class="material-icons" style="font-size:22px;color:var(--ochre);margin-top:2px">auto_awesome</span>
-            <div style="flex:1">
-              <div style="font-size:13.5px;font-weight:700;color:var(--mahogany)">Dakshina Finalized by Admin upon Pandit Allocation</div>
-              <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5">
-                You selected <strong>Any Available Verified Pandit (Auto-assigned by Admin)</strong>. PujaConnect Admin will auto-assign a qualified Vedic Pandit for your district. Official Dakshina will be confirmed upon Pandit allocation. No advance payment required now.
+        if (currentOffer) {
+          costBox.innerHTML = `
+            <div style="background:#fcf8f0;border:1.5px dashed #ebd9c2;border-radius:12px;padding:14px;display:flex;align-items:flex-start;gap:12px">
+              <span class="material-icons" style="font-size:22px;color:var(--ochre);margin-top:2px">auto_awesome</span>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  <div style="font-size:13.5px;font-weight:700;color:var(--mahogany)">Dakshina Finalized by Admin upon Pandit Allocation</div>
+                  <span class="badge green" style="font-size:11px;padding:2px 8px;font-weight:700">
+                    <span class="material-icons" style="font-size:13px;vertical-align:middle">local_offer</span>
+                    ${currentOffer.discountPercent}% Discount Active for ${esc(dist)}
+                  </span>
+                </div>
+                <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5">
+                  You selected <strong>Any Available Verified Pandit (Auto-assigned by Admin)</strong>. When Admin allocates a verified Vedic Pandit for ${esc(dist)}, the <strong>${currentOffer.discountPercent}% festive discount (${esc(currentOffer.title)})</strong> will be automatically calculated on the official district Dakshina rate. No advance payment required now.
+                </div>
               </div>
             </div>
-          </div>
-        `;
+          `;
+        } else {
+          costBox.innerHTML = `
+            <div style="background:#fcf8f0;border:1.5px dashed #ebd9c2;border-radius:12px;padding:14px;display:flex;align-items:flex-start;gap:12px">
+              <span class="material-icons" style="font-size:22px;color:var(--ochre);margin-top:2px">auto_awesome</span>
+              <div style="flex:1">
+                <div style="font-size:13.5px;font-weight:700;color:var(--mahogany)">Dakshina Finalized by Admin upon Pandit Allocation</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5">
+                  You selected <strong>Any Available Verified Pandit (Auto-assigned by Admin)</strong>. PujaConnect Admin will auto-assign a qualified Vedic Pandit for your district. Official Dakshina will be confirmed upon Pandit allocation. No advance payment required now.
+                </div>
+              </div>
+            </div>
+          `;
+        }
       }
     };
 
@@ -1828,7 +1976,7 @@ async function openBooking(arg) {
     serviceSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
     districtSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
     panditSel.onchange = () => { updatePanditInfo(); paintFee(); drawSlots(); };
-    dateInp.onchange = () => { updatePanditsDropdown(); drawSlots(); };
+    dateInp.onchange = () => { updatePanditsDropdown(); drawSlots(); paintFee(); };
 
     const viewAreaScholarsBtn = $('#b-view-area-scholars', m);
     if (viewAreaScholarsBtn) {
@@ -1925,15 +2073,25 @@ async function openBooking(arg) {
 
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
       const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
-      let fee = 0;
+      let rawFee = 0;
+      let finalFee = 0;
+      let discountPercent = 0;
+      let discountAmount = 0;
+      let discountOfferId = '';
+      let discountOfferTitle = '';
+
       if (p) {
         const avail = isPanditAvailableOnDate(p, date);
         if (!avail.available) {
           return toast(`Pt. ${p.name} is not available that day (${date} · ${avail.reason}). Please select another date or choose 'Any Available Verified Pandit'.`, true);
         }
         const feeEl = $('#b-fee', m);
-        const feeText = feeEl ? feeEl.textContent.replace(/[^0-9]/g, '') : '';
-        fee = Number(feeText) || (p.districtPrices && Number(p.districtPrices[lockedDistrict || districtSel.value])) || p.fee || 0;
+        rawFee = (feeEl && feeEl.dataset.rawFee) ? Number(feeEl.dataset.rawFee) : ((p.districtPrices && Number(p.districtPrices[lockedDistrict || districtSel.value])) || p.fee || 0);
+        finalFee = (feeEl && feeEl.dataset.finalFee) ? Number(feeEl.dataset.finalFee) : ((feeEl && feeEl.textContent) ? Number(feeEl.textContent.replace(/[^0-9]/g, '')) : rawFee);
+        discountPercent = (feeEl && feeEl.dataset.discountPct) ? Number(feeEl.dataset.discountPct) : 0;
+        discountAmount = (feeEl && feeEl.dataset.discountAmt) ? Number(feeEl.dataset.discountAmt) : 0;
+        discountOfferId = (feeEl && feeEl.dataset.offerId) || '';
+        discountOfferTitle = (feeEl && feeEl.dataset.offerTitle) || '';
       }
 
       const submitBtn = e.target.closest('button') || e.target;
@@ -1956,7 +2114,12 @@ async function openBooking(arg) {
             time: sel.time,
             address,
             panditEmail: panditSel.value,
-            fee,
+            fee: finalFee,
+            originalFee: rawFee,
+            discountPercent,
+            discountAmount,
+            discountOfferId,
+            discountOfferTitle,
             upiId,
             bankAccount,
             ifscCode,
@@ -3686,7 +3849,15 @@ function renderDevoteePaymentTrackingTab(bookings, longs = (S.longs || [])) {
               </div>
               <div class="payment-detail-item">
                 <label>Total Dakshina</label>
-                <b style="color:var(--ochre)">${inr(fee)}</b>
+                ${(b.discountAmount && b.discountAmount > 0) || (b.originalFee && b.originalFee > fee) ? `
+                  <div>
+                    <span style="font-size:11px;color:var(--muted);text-decoration:line-through;margin-right:4px">${inr(b.originalFee || (fee + (b.discountAmount || 0)))}</span>
+                    <b style="color:#2e7d32">${inr(fee)}</b>
+                    <span class="badge green" style="font-size:9.5px;padding:1px 5px;margin-left:3px">${b.discountPercent || Math.round(((b.discountAmount || 0) / (b.originalFee || (fee + (b.discountAmount || 0)))) * 100)}% OFF</span>
+                  </div>
+                ` : `
+                  <b style="color:var(--ochre)">${inr(fee)}</b>
+                `}
               </div>
               <div class="payment-detail-item">
                 <label>Advance Paid</label>

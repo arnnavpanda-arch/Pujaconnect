@@ -1076,10 +1076,14 @@ async function findApplicableOffer({ service = '', district = '', state = '', da
       { $set: { status: 'Expired' } }
     ).catch(() => {});
 
+    // An offer is applicable if it is currently active today (booking promotion)
+    // OR active on the scheduled ceremony date
     const offers = await MediaOffer.find({
       status: 'Active',
-      startDate: { $lte: queryDate },
-      endDate: { $gte: queryDate }
+      $or: [
+        { startDate: { $lte: nowStr }, endDate: { $gte: nowStr } },
+        { startDate: { $lte: queryDate }, endDate: { $gte: queryDate } }
+      ]
     }).sort({ discountPercent: -1 }).lean();
 
     const sNorm = service ? service.trim().toLowerCase() : '';
@@ -1088,19 +1092,21 @@ async function findApplicableOffer({ service = '', district = '', state = '', da
 
     for (const offer of offers) {
       // Check puja match
-      if (offer.pujaName && offer.pujaName !== 'ALL' && sNorm) {
-        if (offer.pujaName.trim().toLowerCase() !== sNorm) continue;
+      if (offer.pujaName && offer.pujaName.trim().toLowerCase() !== 'all') {
+        if (sNorm && offer.pujaName.trim().toLowerCase() !== sNorm) continue;
       }
       // Check state match
-      if (offer.targetState && offer.targetState !== 'ALL' && stNorm) {
-        if (offer.targetState.trim().toLowerCase() !== stNorm) continue;
+      if (offer.targetState && offer.targetState.trim().toLowerCase() !== 'all') {
+        if (stNorm && offer.targetState.trim().toLowerCase() !== stNorm) continue;
       }
       // Check district match
-      if (offer.targetDistricts && offer.targetDistricts.length > 0 && !offer.targetDistricts.includes('ALL')) {
-        if (dNorm) {
-          const matches = offer.targetDistricts.some(d => d.trim().toLowerCase() === dNorm);
-          if (!matches) continue;
-        }
+      const distList = (Array.isArray(offer.targetDistricts) ? offer.targetDistricts : [offer.targetDistricts || 'ALL'])
+        .flatMap(d => String(d).split(','))
+        .map(d => d.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (distList.length > 0 && !distList.includes('all')) {
+        if (!dNorm || !distList.includes(dNorm)) continue;
       }
       return offer;
     }
@@ -1367,6 +1373,31 @@ app.get('/api/bookings', wrap(async (req, res) => {
   if (req.query.paymentStatus) q.paymentStatus = req.query.paymentStatus;
   if (req.query.bookingId) q.bookingId = req.query.bookingId;
   const list = await Booking.find(q).sort({ transactionDate: -1 });
+
+  // Recalculate discount if offer became active after booking creation and payment is still pending
+  const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
+  for (const b of list) {
+    if (b.paymentStatus === 'Pending' && !b.discountAmount && b.fee > 0) {
+      const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
+      const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
+      const applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
+      if (applicableOffer) {
+        const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
+        const feeCalc = calculateFeeWithDiscount(b.originalFee || b.fee, applicableOffer, commPct);
+        b.fee = feeCalc.finalFee;
+        b.originalFee = feeCalc.originalFee;
+        b.discountPercent = feeCalc.discountPercent;
+        b.discountAmount = feeCalc.discountAmount;
+        b.discountOfferId = feeCalc.offerId;
+        b.discountOfferTitle = feeCalc.offerTitle;
+        b.adminFeePercent = commPct;
+        b.adminFeeAmount = feeCalc.adminFeeAmount;
+        b.panditNetPayout = feeCalc.panditNetPayout;
+        await b.save().catch(() => {});
+      }
+    }
+  }
+
   const updated = await autoUpdatePassedSlots(list);
   res.json(updated);
 }));
@@ -1534,21 +1565,23 @@ app.post('/api/bookings', wrap(async (req, res) => {
     }
   }
 
-  let fee = Number(b.fee) || 0;
-  if (!fee && preferredPandit) {
-    fee = (preferredPandit.districtPrices && preferredPandit.districtPrices[b.district]) || preferredPandit.fee || 1500;
-  }
   // When Any Available Verified Pandit is chosen, Standard Base Dakshina is removed and fee remains 0 until Admin assigns a Pandit
+  let rawBaseFee = 0;
+  if (preferredPandit) {
+    rawBaseFee = (preferredPandit.districtPrices && Number(preferredPandit.districtPrices[b.district])) || preferredPandit.fee || Number(b.originalFee || b.fee) || 1500;
+  } else if (Number(b.originalFee || b.fee) > 0) {
+    rawBaseFee = Number(b.originalFee || b.fee);
+  }
 
   const advanceAmount = Number(b.advanceAmount) || 0;
   const bookingId = await uniqueId(Booking, 'bookingId', 'PUJA');
 
   const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
-  const applicableOffer = fee > 0 ? await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date }) : null;
+  const applicableOffer = rawBaseFee > 0 ? await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date }) : null;
   const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
   const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : DEFAULT_PLATFORM_COMMISSION;
 
-  const feeCalc = calculateFeeWithDiscount(fee, applicableOffer, commPct);
+  const feeCalc = calculateFeeWithDiscount(rawBaseFee, applicableOffer, commPct);
 
   const booking = await Booking.create({
     bookingId,
@@ -1580,7 +1613,7 @@ app.post('/api/bookings', wrap(async (req, res) => {
     panditNetPayout: feeCalc.panditNetPayout,
     advanceAmount,
     advancePaid: advanceAmount > 0,
-    paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= fee ? 'Paid' : 'Partial',
+    paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= feeCalc.finalFee ? 'Paid' : 'Partial',
     bookingType: b.bookingType || 'Standard',
     termsAccepted: Boolean(b.termsAccepted !== undefined ? b.termsAccepted : true),
     refundAccountDetails: {
@@ -1706,14 +1739,16 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
     district: b.district,
     address: b.address || b.district,
     date: b.date,
-    time: b.time,
-    fee,
-    totalPujaCost: fee,
+    fee: feeCalc.finalFee,
+    totalPujaCost: feeCalc.finalFee,
+    originalFee: feeCalc.originalFee,
+    discountAmount: feeCalc.discountAmount,
+    discountPercent: feeCalc.discountPercent,
     adminFeePercent: commPct,
-    adminFeeAmount,
-    adminFee: adminFeeAmount,
-    netDakshina: panditNetPayout,
-    panditFee: panditNetPayout,
+    adminFeeAmount: feeCalc.adminFeeAmount,
+    adminFee: feeCalc.adminFeeAmount,
+    netDakshina: feeCalc.panditNetPayout,
+    panditFee: feeCalc.panditNetPayout,
     panditToken,
     acceptUrl,
     rejectUrl,
@@ -3691,6 +3726,13 @@ app.get('/api/media/offers', wrap(async (req, res) => {
   res.json(offers);
 }));
 
+// Query applicable offer for specific ceremony service, district, state, and date
+app.get('/api/media/applicable-offer', wrap(async (req, res) => {
+  const { service, district, state, date } = req.query;
+  const offer = await findApplicableOffer({ service, district, state, date });
+  res.json({ ok: true, offer });
+}));
+
 // 3. Media Offers: Create Offer (with optional direct broadcast email)
 app.post('/api/admin/media/offers', adminOnly, wrap(async (req, res) => {
   const { title, description, pujaName, discountPercent, startDate, endDate, targetState, targetDistricts, bannerImage, sendMailToAll } = req.body;
@@ -3778,6 +3820,44 @@ app.put('/api/admin/media/offers/:id/status', adminOnly, wrap(async (req, res) =
     : { offerId: rawId };
   const offer = await MediaOffer.findOneAndUpdate(q, { status }, { new: true });
   if (!offer) return res.status(404).json({ error: 'Festive offer not found' });
+
+  // When admin activates an offer, auto-apply the discount to existing pending unpaid bookings in matching district/puja
+  if (status === 'Active') {
+    try {
+      const bQuery = { paymentStatus: 'Pending', fee: { $gt: 0 } };
+      if (offer.pujaName && offer.pujaName.trim().toLowerCase() !== 'all') {
+        bQuery.service = new RegExp('^' + offer.pujaName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+      }
+      const distList = (Array.isArray(offer.targetDistricts) ? offer.targetDistricts : [offer.targetDistricts || 'ALL'])
+        .flatMap(d => String(d).split(','))
+        .map(d => d.trim())
+        .filter(d => Boolean(d) && d.toLowerCase() !== 'all');
+      if (distList.length > 0) {
+        bQuery.district = { $in: distList.map(d => new RegExp('^' + d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) };
+      }
+
+      const matchingBookings = await Booking.find(bQuery);
+      const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
+      for (const b of matchingBookings) {
+        const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
+        const base = b.originalFee > 0 ? b.originalFee : b.fee;
+        const feeCalc = calculateFeeWithDiscount(base, offer, commPct);
+        b.fee = feeCalc.finalFee;
+        b.originalFee = feeCalc.originalFee;
+        b.discountPercent = feeCalc.discountPercent;
+        b.discountAmount = feeCalc.discountAmount;
+        b.discountOfferId = feeCalc.offerId;
+        b.discountOfferTitle = feeCalc.offerTitle;
+        b.adminFeePercent = commPct;
+        b.adminFeeAmount = feeCalc.adminFeeAmount;
+        b.panditNetPayout = feeCalc.panditNetPayout;
+        await b.save().catch(() => {});
+      }
+    } catch (e) {
+      console.error('[Auto-apply active offer to pending bookings error]:', e.message);
+    }
+  }
+
   res.json({ ok: true, offer });
 }));
 
