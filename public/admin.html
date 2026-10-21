@@ -78,12 +78,10 @@
     .admin-tabs {
       display: flex;
       gap: 8px;
-      overflow-x: auto;
+      flex-wrap: wrap;
       padding-bottom: 6px;
       margin-bottom: 24px;
-      scrollbar-width: none;
     }
-    .admin-tabs::-webkit-scrollbar { display: none; }
     .admin-tab {
       display: inline-flex;
       align-items: center;
@@ -309,7 +307,10 @@
       <a href="/#puja-prices" target="_blank" class="btn btn-outline" style="padding:6px 14px;font-size:13px;color:#ffd88a;border-color:#ffd88a;text-decoration:none">
         <span class="material-icons" style="font-size:16px;vertical-align:middle">receipt_long</span> A4 Price Chart
       </a>
-      <a href="/" class="btn btn-gold" style="padding:6px 14px;font-size:13px;text-decoration:none">
+      <button class="btn btn-gold" onclick="switchAdminTab('settings')" style="padding:6px 14px;font-size:13px;font-weight:700">
+        <span class="material-icons" style="font-size:16px;vertical-align:middle">settings</span> System Settings
+      </button>
+      <a href="/" class="btn btn-outline" style="padding:6px 14px;font-size:13px;color:#ffd88a;border-color:#ffd88a;text-decoration:none">
         <span class="material-icons" style="font-size:16px;vertical-align:middle">public</span> View Website
       </a>
     </div>
@@ -344,14 +345,14 @@
       <button class="admin-tab" data-tab="platform-bank" onclick="switchAdminTab('platform-bank')">
         <span class="material-icons">account_balance</span> Platform Bank &amp; UPI
       </button>
+      <button class="admin-tab" data-tab="settings" onclick="switchAdminTab('settings')" style="border:1.5px solid var(--admin-gold)">
+        <span class="material-icons" style="color:var(--admin-gold)">settings</span> <b>System Settings</b>
+      </button>
       <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">
         <span class="material-icons">group</span> Devotees
       </button>
       <button class="admin-tab" data-tab="media" onclick="switchAdminTab('media')">
         <span class="material-icons">campaign</span> Media &amp; Offers <span id="badge-media-count" class="admin-tab-pill">0</span>
-      </button>
-      <button class="admin-tab" data-tab="settings" onclick="switchAdminTab('settings')">
-        <span class="material-icons">settings</span> System Settings
       </button>
     </div>
 
@@ -6204,6 +6205,15 @@
       }
 
       await loadData();
+
+      // Support direct tab opening via URL hash (e.g. /admin.html#settings)
+      if (location.hash && location.hash.replace('#', '')) {
+        switchAdminTab(location.hash.replace('#', ''));
+      }
+      window.addEventListener('hashchange', () => {
+        const tab = location.hash.replace('#', '');
+        if (tab) switchAdminTab(tab);
+      });
 
       // Periodic connection check every 15s to auto-reconnect if connection was dropped
       setInterval(async () => {
