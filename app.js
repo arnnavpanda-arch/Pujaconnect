@@ -16,6 +16,7 @@ app.use(express.json({ limit: '10mb' }));
 const JWT_SECRET = () => process.env.JWT_SECRET || 'pujaconnect_dev_secret';
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const lc = (s) => String(s || '').trim().toLowerCase();
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // ---- No-cache on all API responses ----
 app.use('/api', (req, res, next) => {
@@ -257,12 +258,26 @@ app.post('/api/auth/magic-pandit-decision', wrap(async (req, res) => {
   }
 
   let booking = null;
+  let longRequest = null;
   if (bookingId) {
     booking = await Booking.findOne(bookingFindQuery(bookingId));
     if (booking) {
       if (!panditEmail) panditEmail = lc(booking.panditEmail);
       if (lc(booking.panditEmail) === panditEmail || (booking.rejectedPandits || []).includes(panditEmail)) {
         valid = true;
+      }
+    } else {
+      const query = mongoose.Types.ObjectId.isValid(bookingId)
+        ? { $or: [{ id: bookingId }, { _id: bookingId }] }
+        : { id: bookingId };
+      longRequest = await LongPujaRequest.findOne(query);
+      if (longRequest) {
+        if (!panditEmail && longRequest.assignedPandits && longRequest.assignedPandits.length) {
+          panditEmail = lc(longRequest.assignedPandits[0]);
+        }
+        if (panditEmail && (longRequest.assignedPandits || []).map(lc).includes(panditEmail)) {
+          valid = true;
+        }
       }
     }
   }
@@ -284,13 +299,14 @@ app.post('/api/auth/magic-pandit-decision', wrap(async (req, res) => {
     verified: pandit.verified,
     district: pandit.district
   };
-  const authToken = sign({ email: pandit.email, role: 'pandit' });
+  const authToken = sign({ email: pandit.email, role: 'pandit', name: pandit.name });
 
   res.json({
     ok: true,
     user: userSession,
     token: authToken,
-    booking
+    booking,
+    longRequest
   });
 }));
 
@@ -1127,7 +1143,14 @@ app.get('/api/bookings', wrap(async (req, res) => {
 
 app.get('/api/bookings/:id', wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
-  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  if (!b) {
+    const q = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+      : { id: req.params.id };
+    const longDoc = await LongPujaRequest.findOne(q);
+    if (longDoc) return res.json(longDoc);
+    return res.status(404).json({ error: 'Booking not found' });
+  }
   const updated = await autoUpdatePassedSlots([b]);
   res.json(updated[0] || b);
 }));
@@ -2531,6 +2554,16 @@ app.post('/api/long-puja-requests', wrap(async (req, res) => {
   res.status(201).json(reqDoc);
 }));
 
+// Fetch single multi-day ceremony request
+app.get('/api/long-puja-requests/:id', wrap(async (req, res) => {
+  const query = mongoose.Types.ObjectId.isValid(req.params.id)
+    ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+    : { id: req.params.id };
+  const r = await LongPujaRequest.findOne(query);
+  if (!r) return res.status(404).json({ error: 'Multi-day ritual request not found' });
+  res.json(r);
+}));
+
 // Multi-day Cancellation Preview (Devotee or Admin)
 app.get('/api/long-puja-requests/:id/cancellation-preview', wrap(async (req, res) => {
   const r = await LongPujaRequest.findOne({ id: req.params.id });
@@ -2717,12 +2750,14 @@ app.put('/api/long-puja-requests/:id/assign', adminOnly, wrap(async (req, res) =
     const panditToken = sign({ email: pEmail, role: 'pandit', requestId: r.id, purpose: 'long_puja_offer_response' });
     const acceptUrl = `${baseUrl}/api/long-puja-requests/${encodeURIComponent(r.id)}/email-response?email=${encodeURIComponent(pEmail)}&response=Accepted&token=${encodeURIComponent(panditToken)}`;
     const rejectUrl = `${baseUrl}/api/long-puja-requests/${encodeURIComponent(r.id)}/email-response?email=${encodeURIComponent(pEmail)}&response=Rejected&token=${encodeURIComponent(panditToken)}`;
+    const dashboardUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(r.id)}&email=${encodeURIComponent(pEmail)}&token=${encodeURIComponent(panditToken)}&tab=long#dashboard`;
 
     await sendSafe('LONG_PUJA_ASSIGNED_PANDIT', pEmail, {
       ...r.toObject(),
       baseUrl,
       acceptUrl,
       rejectUrl,
+      dashboardUrl,
       panditName: pandit.name,
       panditEmail: pEmail,
       panditPhone: pandit.phone || ''
@@ -2758,6 +2793,11 @@ app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
   const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
   const baseUrl = process.env.APP_URL || origin;
 
+  // Sign persistent auth token for the Pandit so clicking Dashboard logs them in immediately
+  const effectiveEmail = panditEmail || (pandit && pandit.email) || '';
+  const panditAuthToken = sign({ email: effectiveEmail, role: 'pandit', name: panditName });
+  const dashboardUrl = `${baseUrl}/?action=pandit-decision&bookingId=${encodeURIComponent(r.id)}&email=${encodeURIComponent(effectiveEmail)}&token=${encodeURIComponent(panditAuthToken)}&tab=long#dashboard`;
+
   if (isAccept) {
     statuses[panditEmail || 'pandit'] = 'Accepted';
     r.panditStatuses = statuses;
@@ -2767,12 +2807,16 @@ app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
 
     // Send official confirmation email to Devotee!
     if (r.userEmail) {
-      await sendSafe('LONG_PUJA_CONFIRMED', lc(r.userEmail), {
-        ...r.toObject(),
-        panditName,
-        panditPhone,
-        appUrl: baseUrl
-      });
+      try {
+        await sendSafe('LONG_PUJA_CONFIRMED', lc(r.userEmail), {
+          ...r.toObject(),
+          panditName,
+          panditPhone,
+          appUrl: baseUrl
+        });
+      } catch (mailErr) {
+        console.error('Devotee confirmation email error:', mailErr);
+      }
     }
 
     return res.send(`
@@ -2782,6 +2826,7 @@ app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
         <meta charset="utf-8">
         <title>Ceremony Assignment Accepted – PujaConnect</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta http-equiv="refresh" content="3;url=${esc(dashboardUrl)}">
         <style>
           body { font-family: system-ui, -apple-system, sans-serif; background: #fff8ed; color: #351605; margin: 0; padding: 40px 20px; display: flex; align-items: center; justify-content: center; min-height: 80vh; }
           .card { background: #ffffff; max-width: 560px; width: 100%; border-radius: 16px; border: 2px solid #2e7d32; padding: 36px 30px; text-align: center; box-shadow: 0 10px 30px rgba(46,125,50,0.12); }
@@ -2789,7 +2834,8 @@ app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
           h1 { font-family: Georgia, serif; color: #1b5e20; margin: 0 0 12px; font-size: 24px; }
           p { font-size: 14.5px; color: #4a2b16; line-height: 1.6; margin: 0 0 18px; }
           .box { background: #f0fff4; border: 1.5px solid #a5d6a7; padding: 14px 16px; border-radius: 10px; font-size: 13.5px; color: #1b5e20; margin-bottom: 22px; text-align: left; line-height: 1.6; }
-          .btn { display: inline-block; background: #d99a19; color: #ffffff !important; font-weight: 700; text-decoration: none; padding: 13px 30px; border-radius: 8px; font-size: 14px; }
+          .btn { display: inline-block; background: #d99a19; color: #ffffff !important; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 15px; box-shadow: 0 4px 14px rgba(217,154,25,0.35); }
+          .btn:hover { background: #b87c0a; }
         </style>
       </head>
       <body>
@@ -2802,7 +2848,8 @@ app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
             🏛️ <strong>Puja Venue:</strong> ${esc(r.venueAddress || r.venue || r.address || 'Address provided by devotee')}<br>
             📅 <strong>Dates:</strong> ${esc(r.fromDate)} → ${esc(r.toDate)} (${r.totalDays || 1} days, Daily Start: ${esc(r.startTime || '08:00 AM')})
           </div>
-          <a href="/#dashboard" class="btn">Open Pandit Dashboard</a>
+          <a href="${esc(dashboardUrl)}" class="btn">👉 Open Pandit Dashboard</a>
+          <p style="font-size:12.5px;color:#7a553e;margin-top:16px">Redirecting to your Pandit Dashboard in 3 seconds... <a href="${esc(dashboardUrl)}" style="color:#d99a19;font-weight:700">Click here to open now</a></p>
         </div>
       </body>
       </html>
@@ -2816,14 +2863,18 @@ app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
     await r.save();
 
     // Alert Admin so immediate reassignment can be performed
-    const adminEmail = process.env.ADMIN_EMAIL || process.env.SENDER_EMAIL || 'bookpujaconnect@gmail.com';
-    await sendSafe('LONG_PUJA_PANDIT_REJECTED_ALERT', adminEmail, {
-      ...r.toObject(),
-      panditName,
-      panditEmail,
-      panditPhone,
-      baseUrl
-    });
+    try {
+      const adminEmail = process.env.ADMIN_EMAIL || process.env.SENDER_EMAIL || 'bookpujaconnect@gmail.com';
+      await sendSafe('LONG_PUJA_PANDIT_REJECTED_ALERT', adminEmail, {
+        ...r.toObject(),
+        panditName,
+        panditEmail,
+        panditPhone,
+        baseUrl
+      });
+    } catch (mailErr) {
+      console.error('Admin rejection alert email error:', mailErr);
+    }
 
     return res.send(`
       <!DOCTYPE html>
@@ -2832,6 +2883,7 @@ app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
         <meta charset="utf-8">
         <title>Ceremony Assignment Declined – PujaConnect</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta http-equiv="refresh" content="3;url=${esc(dashboardUrl)}">
         <style>
           body { font-family: system-ui, -apple-system, sans-serif; background: #fff8ed; color: #351605; margin: 0; padding: 40px 20px; display: flex; align-items: center; justify-content: center; min-height: 80vh; }
           .card { background: #ffffff; max-width: 560px; width: 100%; border-radius: 16px; border: 2px solid #c62828; padding: 36px 30px; text-align: center; box-shadow: 0 10px 30px rgba(198,40,40,0.12); }
@@ -2839,7 +2891,8 @@ app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
           h1 { font-family: Georgia, serif; color: #c62828; margin: 0 0 12px; font-size: 24px; }
           p { font-size: 14.5px; color: #4a2b16; line-height: 1.6; margin: 0 0 18px; }
           .box { background: #ffebee; border: 1.5px solid #ef9a9a; padding: 14px 16px; border-radius: 10px; font-size: 13.5px; color: #b71c1c; margin-bottom: 22px; text-align: left; line-height: 1.6; }
-          .btn { display: inline-block; background: #351605; color: #ffffff !important; font-weight: 700; text-decoration: none; padding: 13px 30px; border-radius: 8px; font-size: 14px; }
+          .btn { display: inline-block; background: #351605; color: #ffffff !important; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 15px; }
+          .btn:hover { background: #522208; }
         </style>
       </head>
       <body>
@@ -2850,14 +2903,15 @@ app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
           <div class="box">
             ⚠️ <strong>Admin Dashboard Updated:</strong> The request status is marked as <strong>Rejected</strong> on the PujaConnect Administration dashboard so another qualified Vedic Pandit can be assigned promptly without delay.
           </div>
-          <a href="/#dashboard" class="btn">Return to Pandit Dashboard</a>
+          <a href="${esc(dashboardUrl)}" class="btn">👉 Return to Pandit Dashboard</a>
+          <p style="font-size:12.5px;color:#7a553e;margin-top:16px">Redirecting to your Pandit Dashboard in 3 seconds... <a href="${esc(dashboardUrl)}" style="color:#d99a19;font-weight:700">Click here to open now</a></p>
         </div>
       </body>
       </html>
     `);
   }
 
-  res.redirect('/#dashboard');
+  res.redirect(dashboardUrl);
 }));
 
 app.put('/api/long-puja-requests/:id/pandit-response', wrap(async (req, res) => {

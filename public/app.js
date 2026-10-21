@@ -4224,14 +4224,22 @@ async function panditDash(root) {
     ${me.verified ? '' : '<div class="panel" style="background:#fffcf5;border-left:4px solid var(--ochre)"><strong>Your profile is under Admin KYC verification.</strong> Once approved, your profile will be actively listed in the verified pandits directory.</div>'}
 
     ${(() => {
-      const pendingOffers = (bookings || []).filter((b) => (b.status === 'Pending Pandit Confirmation' || b.panditApproval === 'Pending') && b.panditEmail && b.panditEmail.toLowerCase() === email.toLowerCase());
-      if (!pendingOffers.length) return '';
+      const eLower = (email || '').toLowerCase();
+      const pendingOffers = (bookings || []).filter((b) => (b.status === 'Pending Pandit Confirmation' || b.panditApproval === 'Pending') && b.panditEmail && b.panditEmail.toLowerCase() === eLower);
+      const pendingLongOffers = (longs || []).filter((l) => {
+        const pStatus = ((l.panditStatuses || {})[eLower] || '').trim();
+        const isAssigned = (l.assignedPandits || []).map((x) => (x || '').toLowerCase()).includes(eLower);
+        return isAssigned && (!pStatus || pStatus === 'Assigned') && l.status !== 'Confirmed' && l.status !== 'Cancelled';
+      });
+
+      const totalPendingCount = pendingOffers.length + pendingLongOffers.length;
+      if (!totalPendingCount) return '';
       return `
         <div class="dash-pending-offers-box" style="background:#fff8ed;border:2px solid #d99a19;border-left:6px solid #d99a19;border-radius:12px;padding:20px;margin:18px 0;box-shadow:0 4px 18px rgba(217,154,25,0.18)">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:10px">
               <span class="material-icons" style="font-size:30px;color:#d99a19">star</span>
-              <h3 style="margin:0;color:var(--mahogany);font-size:19px">New Ceremony Assignment Offer(s) Awaiting Decision (${pendingOffers.length})</h3>
+              <h3 style="margin:0;color:var(--mahogany);font-size:19px">New Ceremony Assignment Offer(s) Awaiting Decision (${totalPendingCount})</h3>
             </div>
             <span class="badge amber" style="font-weight:700;font-size:12px">Action Required: Accept or Decline</span>
           </div>
@@ -4239,6 +4247,52 @@ async function panditDash(root) {
             PujaConnect Administration has offered you the following sacred ceremony assignment(s). Please review the full uncompacted terms below and submit your decision:
           </p>
           <div style="display:flex;flex-direction:column;gap:14px">
+            ${pendingLongOffers.map((l) => {
+              const totalCost = Number(l.estimatedCost) || 5000;
+              const teamSize = Math.max(1, Number(l.requiredPandits) || 1);
+              const panditShare = Math.round(totalCost / teamSize);
+              const commPct = 10;
+              const adminCut = Math.round((panditShare * commPct) / 100);
+              const netFee = Math.max(0, panditShare - adminCut);
+              const vParts = [];
+              if (l.venueType) vParts.push(`[${l.venueType}]`);
+              if (l.venueName) vParts.push(l.venueName);
+              if (l.venueAddress || l.address || l.venue) vParts.push(l.venueAddress || l.address || l.venue);
+              if (l.venueLandmark) vParts.push(`(Near ${l.venueLandmark})`);
+              const vStr = vParts.join(', ') || l.district;
+              return `
+                <div style="background:#ffffff;border:1.5px solid #ebd9c2;border-radius:10px;padding:18px 20px">
+                  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+                    <div>
+                      <span class="booking-id-tag">${esc(l.id)}</span>
+                      <strong style="font-size:18px;color:var(--mahogany);margin-left:8px">${esc(l.pujaName)}</strong>
+                    </div>
+                    <span class="badge blue" style="background:#e3f2fd;color:#0d47a1;font-weight:700">Multi-Day Mahayajna Offer</span>
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:8px 16px;font-size:13.5px;color:#4a2c17;margin-bottom:14px">
+                    <div>Devotee (Customer): <b>${esc(l.userName || 'Devotee')}</b> (📞 ${esc(l.phone || 'N/A')})</div>
+                    <div>Devotee Registered Email: ✉️ <b>${esc(l.userEmail || '')}</b></div>
+                    <div>Ceremony Schedule: 📅 <b>${esc(l.fromDate)} → ${esc(l.toDate)}</b> (${l.totalDays || 1} days, Daily Start: <b>${esc(l.startTime || '08:00 AM')}</b>)</div>
+                    <div>District &amp; Venue: 📍 <b>${esc(l.district)}</b> (${esc(vStr)})</div>
+                  </div>
+                  <div style="background:#fefbf4;border:1px solid #ebd9c2;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:13.5px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                    <div>Total Ceremony Dakshina: <b>${inr(totalCost)}</b> ${teamSize > 1 ? `· Your Share (${teamSize} Purohits): <b>${inr(panditShare)}</b>` : ''} · Admin Fee (10%): <span style="color:#c62828">-${inr(adminCut)}</span></div>
+                    <div style="font-size:16px;color:#2e7d32"><strong>Net Dakshina Payable to You: ${inr(netFee)}</strong></div>
+                  </div>
+                  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                    <button class="btn btn-green btn-sm" style="flex:1;min-width:160px;padding:11px 18px;font-weight:700" data-action="longResp" data-id="${esc(l.id)}" data-resp="Accepted">
+                      <span class="material-icons" style="font-size:16px;vertical-align:middle">check_circle</span> Accept Ceremony (${inr(netFee)})
+                    </button>
+                    <button class="btn btn-red btn-sm" style="flex:1;min-width:130px;padding:11px 18px" data-action="longResp" data-id="${esc(l.id)}" data-resp="Declined">
+                      <span class="material-icons" style="font-size:16px;vertical-align:middle">cancel</span> Decline Offer
+                    </button>
+                    <button class="btn btn-outline btn-sm" style="padding:11px 16px" data-action="panditDecisionModal" data-id="${esc(l.id)}">
+                      <span class="material-icons" style="font-size:16px;vertical-align:middle">open_in_new</span> Open Dedicated Accept/Reject Template
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
             ${pendingOffers.map((b) => {
               const mFee = Number(b.fee) || 1500;
               const cPct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : 10);
@@ -4581,11 +4635,23 @@ function renderPanditLongTab(longs, email) {
                 <span>Ceremony Dakshina: <b>${inr(l.estimatedCost)}</b></span>
               </div>
             </div>
-            <div class="booking-card-footer">
+            <div class="booking-card-footer" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
               ${st === 'Assigned' ? `
-                <button class="btn btn-green btn-sm" data-action="longResp" data-id="${esc(l.id)}" data-resp="Accepted">Accept Assignment</button>
-                <button class="btn btn-red btn-sm" data-action="longResp" data-id="${esc(l.id)}" data-resp="Declined">Decline</button>
-              ` : `<small class="muted">Status: <b>${esc(st)}</b></small>`}
+                <button class="btn btn-green btn-sm" data-action="longResp" data-id="${esc(l.id)}" data-resp="Accepted">
+                  <span class="material-icons" style="font-size:15px;vertical-align:middle">check_circle</span> Accept Assignment
+                </button>
+                <button class="btn btn-red btn-sm" data-action="longResp" data-id="${esc(l.id)}" data-resp="Declined">
+                  <span class="material-icons" style="font-size:15px;vertical-align:middle">cancel</span> Decline
+                </button>
+                <button class="btn btn-outline btn-sm" data-action="panditDecisionModal" data-id="${esc(l.id)}">
+                  <span class="material-icons" style="font-size:15px;vertical-align:middle">open_in_new</span> Terms &amp; Action
+                </button>
+              ` : `
+                <small class="muted">Status: <b>${esc(st)}</b></small>
+                <button class="btn btn-outline btn-sm" style="margin-left:auto" data-action="panditDecisionModal" data-id="${esc(l.id)}">
+                  <span class="material-icons" style="font-size:15px;vertical-align:middle">visibility</span> View Terms
+                </button>
+              `}
             </div>
           </div>
         `;
@@ -5775,7 +5841,21 @@ const ACTIONS = {
     });
   },
   setStatus: async (d) => { try { await api(`/bookings/${d.id}/status`, { method: 'PUT', body: { status: d.status } }); toast('Updated'); renderDashboard(); } catch (e) { toast(e.message, true); } },
-  longResp: async (d) => { try { await api(`/long-puja-requests/${d.id}/pandit-response`, { method: 'PUT', body: { panditEmail: S.user.email, response: d.resp } }); toast('Response recorded'); renderDashboard(); } catch (e) { toast(e.message, true); } },
+  longResp: async (d) => {
+    try {
+      const pEmail = (S.user && S.user.email) || (S.me && S.me.email) || '';
+      await api(`/long-puja-requests/${d.id}/pandit-response`, {
+        method: 'PUT',
+        body: { panditEmail: pEmail, response: d.resp }
+      });
+      toast(d.resp === 'Accepted'
+        ? '🙏 Multi-day ceremony accepted successfully! Official confirmation email sent to devotee.'
+        : 'Ceremony offer declined and returned to Admin.');
+      renderDashboard();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  },
   saveAvail: async (d, el) => {
     if (!S.me) return;
     const saveBtn = el || document.getElementById('btn-save-all-avail');
@@ -6700,56 +6780,128 @@ function setupPanditHavanListeners() {
 }
 
 async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam) {
-  let b = (typeof arg === 'object' && arg && arg.bookingId) ? arg : null;
-  const bId = (typeof arg === 'string' && arg) || (arg && arg.bookingId);
+  let b = (typeof arg === 'object' && arg && (arg.bookingId || arg.id)) ? arg : null;
+  const bId = (typeof arg === 'string' && arg) || (arg && (arg.bookingId || arg.id));
   if (!b && bId) {
-    try {
-      b = await api('/bookings/' + encodeURIComponent(bId));
-    } catch (e) {}
+    if (String(bId).startsWith('LP')) {
+      b = (S._panditLongs || []).find((x) => x.id === bId);
+      if (!b) {
+        try { b = await api('/long-puja-requests/' + encodeURIComponent(bId)); } catch (e) {}
+      }
+    } else {
+      try { b = await api('/bookings/' + encodeURIComponent(bId)); } catch (e) {}
+      if (!b) {
+        try { b = await api('/long-puja-requests/' + encodeURIComponent(bId)); } catch (e) {}
+      }
+    }
   }
   if (!b) return toast('Ceremony assignment record not found', true);
 
-  const mainFee = Number(b.fee) || 1500;
-  const commPct = Number(b.adminFeePercent) || 10;
-  const adminCut = Math.round((mainFee * commPct) / 100);
-  const netFee = Number(b.panditNetPayout) || Math.max(0, mainFee - adminCut);
+  const isLong = Boolean(b.fromDate || b.pujaName || (b.id && String(b.id).startsWith('LP')) || b.requiredPandits);
   const curDecision = (initialDecision || '').toLowerCase(); // 'accept' | 'reject' | ''
-  const isAlreadyConfirmed = b.status === 'Confirmed' && b.panditApproval === 'Approved';
-  const effectiveEmail = pEmail || (S.user ? S.user.email : '');
-  const isAlreadyDeclined = b.status === 'Pending Assignment' && b.panditApproval === 'Rejected' && effectiveEmail && (b.rejectedPandits || []).includes(effectiveEmail.toLowerCase());
+  const effectiveEmail = (pEmail || (S.user ? S.user.email : '') || (S.me ? S.me.email : '')).toLowerCase();
 
-  openModal(`Ceremony Assignment Offer – ${b.bookingId}`, `
+  // Calculation for long vs standard puja
+  let ceremonyId, ceremonyTitle, dateDisplay, timeDisplay, venueDisplay, devoteeName, devoteePhone, devoteeEmail;
+  let mainFee, commPct, adminCut, netFee;
+  let isAlreadyConfirmed = false;
+  let isAlreadyDeclined = false;
+
+  if (isLong) {
+    ceremonyId = b.id;
+    ceremonyTitle = b.pujaName;
+    dateDisplay = `${b.fromDate} → ${b.toDate} (${b.totalDays || 1} Sacred Days)`;
+    timeDisplay = `${b.dailyHours || 4}h/day · Daily Start: ${b.startTime || '08:00 AM'}`;
+    const vParts = [];
+    if (b.venueType) vParts.push(`[${b.venueType}]`);
+    if (b.venueName) vParts.push(b.venueName);
+    if (b.venueAddress || b.address || b.venue) vParts.push(b.venueAddress || b.address || b.venue);
+    if (b.venueLandmark) vParts.push(`(Near ${b.venueLandmark})`);
+    if (b.venuePincode) vParts.push(`PIN: ${b.venuePincode}`);
+    venueDisplay = vParts.join(', ') || b.district;
+    devoteeName = b.userName || 'Devotee';
+    devoteePhone = b.phone || 'Available in Devotee Dashboard';
+    devoteeEmail = b.userEmail || '';
+
+    const totalCost = Number(b.estimatedCost) || 5000;
+    const teamSize = Math.max(1, Number(b.requiredPandits) || 1);
+    const panditShare = Math.round(totalCost / teamSize);
+    commPct = 10;
+    adminCut = Math.round((panditShare * commPct) / 100);
+    netFee = Math.max(0, panditShare - adminCut);
+    mainFee = panditShare;
+
+    const pStatus = ((b.panditStatuses || {})[effectiveEmail] || '').trim();
+    isAlreadyConfirmed = b.status === 'Confirmed' || pStatus === 'Accepted';
+    isAlreadyDeclined = pStatus === 'Rejected' || pStatus === 'Declined' || (b.status === 'Rejected' && b.rejectionReason && b.rejectionReason.toLowerCase().includes(effectiveEmail));
+  } else {
+    ceremonyId = b.bookingId;
+    ceremonyTitle = b.service;
+    dateDisplay = b.date;
+    timeDisplay = b.time;
+    venueDisplay = `${b.address || b.district}, ${b.district}`;
+    devoteeName = b.userName || 'Devotee';
+    devoteePhone = b.phone || 'Available in Devotee Dashboard';
+    devoteeEmail = b.userEmail || '';
+
+    mainFee = Number(b.fee) || 1500;
+    commPct = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : 10);
+    adminCut = Number(b.adminFeeAmount !== undefined ? b.adminFeeAmount : Math.round((mainFee * commPct) / 100));
+    netFee = Number(b.panditPayoutAmount || b.panditNetPayout) || Math.max(0, mainFee - adminCut);
+    isAlreadyConfirmed = b.status === 'Confirmed' && b.panditApproval === 'Approved';
+    isAlreadyDeclined = b.status === 'Pending Assignment' && b.panditApproval === 'Rejected' && effectiveEmail && (b.rejectedPandits || []).includes(effectiveEmail);
+  }
+
+  openModal(`Ceremony Assignment Offer – ${ceremonyId}`, `
     <div style="padding:4px 0">
       <div style="background:linear-gradient(135deg, #351605 0%, #522208 100%);color:#ffd166;padding:18px 22px;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div>
-          <div style="font-family:Georgia,serif;font-size:18px;font-weight:700">ॐ PujaConnect Ceremony Assignment</div>
+          <div style="font-family:Georgia,serif;font-size:18px;font-weight:700">ॐ PujaConnect ${isLong ? 'Multi-Day Mahayajna' : 'Ceremony'} Assignment</div>
           <div style="font-size:12.5px;color:#f3d69b;margin-top:2px">Official Allocation for Pandit ${esc(S.user ? S.user.name : (b.panditName || 'Purohit'))} · Connected to https://pujaconnect-one.vercel.app</div>
         </div>
-        <span class="badge" style="background:#fff3e0;color:#e65100;font-weight:700;font-size:12px">Official Offer</span>
+        <span class="badge" style="background:#fff3e0;color:#e65100;font-weight:700;font-size:12px">${isLong ? 'Multi-Day Assignment' : 'Official Offer'}</span>
       </div>
 
       <div style="background:#fffcf7;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px;margin-bottom:18px">
-        <h3 style="margin:0 0 12px;color:var(--mahogany);font-size:21px;font-family:Georgia,serif">${esc(b.service)}</h3>
+        <h3 style="margin:0 0 12px;color:var(--mahogany);font-size:21px;font-family:Georgia,serif">${esc(ceremonyTitle)}</h3>
         <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px 20px;font-size:14px;color:#3b2115">
-          <div><b>Booking ID:</b> <span class="booking-id-tag">${esc(b.bookingId)}</span></div>
-          <div><b>Devotee (Customer) Name:</b> ${esc(b.userName || 'Devotee')}</div>
-          <div><b>Customer Phone:</b> 📞 ${esc(b.phone || 'Available in Devotee Dashboard')}</div>
+          <div><b>${isLong ? 'Request ID:' : 'Booking ID:'}</b> <span class="booking-id-tag">${esc(ceremonyId)}</span></div>
+          <div><b>Devotee (Customer) Name:</b> ${esc(devoteeName)}</div>
+          <div><b>Customer Phone:</b> 📞 ${esc(devoteePhone)}</div>
           <div>
-            <b>Devotee Registered Email:</b> ✉️ <strong>${esc(b.userEmail || 'N/A')}</strong>
+            <b>Devotee Registered Email:</b> ✉️ <strong>${esc(devoteeEmail || 'N/A')}</strong>
             <div style="font-size:11.5px;color:#2e7d32;margin-top:2px;font-weight:600">✓ Official confirmation email will be sent here upon your acceptance</div>
           </div>
-          <div><b>Ceremony Date:</b> 📅 ${esc(b.date)}</div>
-          <div><b>Ceremony Time Slot:</b> ⏰ ${esc(b.time)}</div>
-          <div style="grid-column:1 / -1"><b>Ceremony Venue &amp; District:</b> 📍 ${esc(b.address || b.district)}, <strong>${esc(b.district)}</strong></div>
+          <div><b>Ceremony Schedule / Dates:</b> 📅 ${esc(dateDisplay)}</div>
+          <div><b>Daily Time Slot:</b> ⏰ ${esc(timeDisplay)}</div>
+          ${isLong ? `
+            <div><b>Vedic Purohit Team Size:</b> 👥 ${esc(b.requiredPandits || 1)} Vedic Pandit(s)</div>
+            <div><b>Ceremony District:</b> 📍 <strong>${esc(b.district)}</strong></div>
+            <div style="grid-column:1 / -1"><b>Mandap &amp; Venue Details:</b> 📍 ${esc(venueDisplay)}</div>
+            ${b.venueFacilities && b.venueFacilities.length ? `
+              <div style="grid-column:1 / -1"><b>Venue Facilities:</b> ${(b.venueFacilities || []).map(f => `<span class="badge" style="background:#f9f2e7;color:#5a3825;font-size:12px;padding:2px 8px;margin-right:4px">✓ ${esc(f)}</span>`).join('')}</div>
+            ` : ''}
+            ${b.venueNotes ? `
+              <div style="grid-column:1 / -1;background:#fefbf4;border:1px solid #ebd9c2;padding:10px 14px;border-radius:8px"><b>Special Instructions from Devotee:</b> <em>"${esc(b.venueNotes)}"</em></div>
+            ` : ''}
+          ` : `
+            <div style="grid-column:1 / -1"><b>Ceremony Venue &amp; District:</b> 📍 ${esc(venueDisplay)}</div>
+          `}
         </div>
       </div>
 
       <div style="background:#fff8ed;border:1.5px solid #ebd9c2;border-left:5px solid #2e7d32;border-radius:10px;padding:18px 20px;margin-bottom:20px">
         <div style="font-weight:700;color:#351605;font-size:15px;margin-bottom:10px">💰 Pandit Dakshina &amp; Payout Terms (Uncompacted):</div>
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:14px;padding:6px 0">
-          <span>Total Puja Dakshina (Paid by Devotee):</span>
-          <strong style="color:#2e1305;font-size:15px">${inr(mainFee)}</strong>
+          <span>${isLong ? 'Total Ceremony Dakshina (Devotee Booking):' : 'Total Puja Dakshina (Paid by Devotee):'}</span>
+          <strong style="color:#2e1305;font-size:15px">${inr(isLong ? (b.estimatedCost || mainFee) : mainFee)}</strong>
         </div>
+        ${isLong && (b.requiredPandits || 1) > 1 ? `
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:14px;padding:6px 0;color:#5a3825">
+            <span>Your Individual Purohit Allocation (1 of ${b.requiredPandits} Pandits):</span>
+            <strong>${inr(mainFee)}</strong>
+          </div>
+        ` : ''}
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:14px;padding:6px 0;color:#c62828">
           <span>PujaConnect Admin Platform Coordination Charge (${commPct}%):</span>
           <strong>-${inr(adminCut)} (${commPct}%)</strong>
@@ -6769,8 +6921,8 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
             <span class="material-icons" style="font-size:52px;color:#2e7d32">check_circle</span>
             <h3 style="margin:8px 0 6px;color:#1b5e20;font-size:20px">Ceremony Confirmed Successfully 🙏</h3>
             <p style="margin:0 0 16px;font-size:14px;color:#2e7d32;line-height:1.6">
-              You are officially confirmed for <strong>${esc(b.service)}</strong> on <strong>${esc(b.date)} (${esc(b.time)})</strong>.<br>
-              An official confirmation email with your contact details has been sent to the devotee's registered email: <strong>${esc(b.userEmail)}</strong>.<br>
+              You are officially confirmed for <strong>${esc(ceremonyTitle)}</strong> on <strong>${esc(dateDisplay)} (${esc(timeDisplay)})</strong>.<br>
+              An official confirmation email with your contact details has been sent to the devotee's registered email: <strong>${esc(devoteeEmail)}</strong>.<br>
               Connected to website: <a href="https://pujaconnect-one.vercel.app" style="color:#1b5e20;font-weight:700">https://pujaconnect-one.vercel.app</a>
             </p>
             <button class="btn btn-gold" onclick="closeModal();renderDashboard();">
@@ -6793,10 +6945,10 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
           <div style="background:#ffebee;border:1.5px solid #ffcdd2;border-radius:10px;padding:18px 20px;margin-bottom:14px">
             <div style="font-weight:700;color:#c62828;font-size:15px;margin-bottom:6px">Decline Ceremony Assignment</div>
             <p style="margin:0 0 10px;font-size:13.5px;color:#5c1d00">
-              Declining this offer returns the booking to PujaConnect Administration for reassignment to another verified Pandit. Devotee will <strong>not</strong> be emailed until Admin verifies slot availability.
+              Declining this offer returns the ceremony to PujaConnect Administration for reassignment to another verified Pandit. Devotee will <strong>not</strong> be emailed until Admin verifies slot availability.
             </p>
             <label style="font-size:13px;font-weight:700;display:block;margin-bottom:6px">Reason for Declining (Optional):</label>
-            <input id="p-decline-reason" type="text" class="input" style="width:100%;margin-bottom:14px" placeholder="e.g. Prior ritual commitment, travelling, unavailable for slot" value="Unavailable for this date/time slot" />
+            <input id="p-decline-reason" type="text" class="input" style="width:100%;margin-bottom:14px" placeholder="e.g. Prior ritual commitment, travelling, unavailable for slot" value="Unavailable for this schedule" />
             <div style="display:flex;gap:12px;flex-wrap:wrap">
               <button class="btn btn-red" id="btn-confirm-decline" style="flex:1;min-width:180px;padding:12px">
                 <span class="material-icons">cancel</span> Confirm Decline / Reject Offer
@@ -6813,7 +6965,7 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
             </div>
             <p style="margin:0 0 16px;font-size:14px;color:#33691e;line-height:1.6">
               Upon clicking Accept, you will be officially confirmed for this ceremony.<br>
-              An official confirmation email with your contact details and ritual schedule will automatically be sent to devotee's registered email (<strong>${esc(b.userEmail)}</strong>) connected to website <a href="https://pujaconnect-one.vercel.app" target="_blank" style="color:#2e7d32;font-weight:700;text-decoration:underline">https://pujaconnect-one.vercel.app</a>.
+              An official confirmation email with your contact details and ritual schedule will automatically be sent to devotee's registered email (<strong>${esc(devoteeEmail)}</strong>) connected to website <a href="https://pujaconnect-one.vercel.app" target="_blank" style="color:#2e7d32;font-weight:700;text-decoration:underline">https://pujaconnect-one.vercel.app</a>.
             </p>
             <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
               <button class="btn btn-green btn-lg" id="btn-confirm-accept" style="padding:14px 34px;font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(46,125,50,0.3)">
@@ -6838,22 +6990,33 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
       btn.disabled = true;
       btn.innerHTML = '<span class="material-icons spin">sync</span> Confirming Acceptance...';
       try {
-        await api('/bookings/' + encodeURIComponent(b.bookingId) + '/pandit-response', {
-          method: 'PUT',
-          body: {
-            response: 'Accept',
-            panditEmail: S.user ? S.user.email : (pEmail || ''),
-            token: tokenParam || ''
-          }
-        });
-        toast('🙏 Ceremony accepted successfully! Official confirmation email sent to devotee at ' + (b.userEmail || ''));
+        if (isLong) {
+          await api('/long-puja-requests/' + encodeURIComponent(b.id) + '/pandit-response', {
+            method: 'PUT',
+            body: {
+              response: 'Accepted',
+              panditEmail: effectiveEmail || (S.user ? S.user.email : '')
+            }
+          });
+          toast('🙏 Multi-day ceremony accepted successfully! Official confirmation email sent to devotee at ' + (devoteeEmail || ''));
+        } else {
+          await api('/bookings/' + encodeURIComponent(b.bookingId) + '/pandit-response', {
+            method: 'PUT',
+            body: {
+              response: 'Accept',
+              panditEmail: S.user ? S.user.email : (pEmail || ''),
+              token: tokenParam || ''
+            }
+          });
+          toast('🙏 Ceremony accepted successfully! Official confirmation email sent to devotee at ' + (devoteeEmail || ''));
+        }
         actionBox.innerHTML = `
           <div style="background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:10px;padding:24px 20px;text-align:center">
             <span class="material-icons" style="font-size:52px;color:#2e7d32">check_circle</span>
             <h3 style="margin:8px 0 6px;color:#1b5e20;font-size:20px">Ceremony Confirmed Successfully 🙏</h3>
             <p style="margin:0 0 16px;font-size:14px;color:#2e7d32;line-height:1.6">
-              You are officially confirmed for <strong>${esc(b.service)}</strong> on <strong>${esc(b.date)} (${esc(b.time)})</strong>.<br>
-              An official confirmation email with your details and schedule has been sent to devotee's registered email: <strong>${esc(b.userEmail)}</strong>.<br>
+              You are officially confirmed for <strong>${esc(ceremonyTitle)}</strong> on <strong>${esc(dateDisplay)} (${esc(timeDisplay)})</strong>.<br>
+              An official confirmation email with your details and schedule has been sent to devotee's registered email: <strong>${esc(devoteeEmail)}</strong>.<br>
               Connected to website: <a href="https://pujaconnect-one.vercel.app" style="color:#1b5e20;font-weight:700">https://pujaconnect-one.vercel.app</a>
             </p>
             <button class="btn btn-gold" onclick="closeModal();renderDashboard();">
@@ -6873,16 +7036,28 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
       btn.disabled = true;
       btn.innerHTML = '<span class="material-icons spin">sync</span> Declining Offer...';
       try {
-        await api('/bookings/' + encodeURIComponent(b.bookingId) + '/pandit-response', {
-          method: 'PUT',
-          body: {
-            response: 'Reject',
-            rejectionReason: reason || 'Unavailable for this time slot',
-            panditEmail: S.user ? S.user.email : (pEmail || ''),
-            token: tokenParam || ''
-          }
-        });
-        toast('Ceremony offer declined and returned to Admin for reassignment. Devotee has not been notified.');
+        if (isLong) {
+          await api('/long-puja-requests/' + encodeURIComponent(b.id) + '/pandit-response', {
+            method: 'PUT',
+            body: {
+              response: 'Rejected',
+              rejectionReason: reason || 'Unavailable for this ceremony schedule',
+              panditEmail: effectiveEmail || (S.user ? S.user.email : '')
+            }
+          });
+          toast('Ceremony offer declined and returned to Admin for prompt reassignment.');
+        } else {
+          await api('/bookings/' + encodeURIComponent(b.bookingId) + '/pandit-response', {
+            method: 'PUT',
+            body: {
+              response: 'Reject',
+              rejectionReason: reason || 'Unavailable for this time slot',
+              panditEmail: S.user ? S.user.email : (pEmail || ''),
+              token: tokenParam || ''
+            }
+          });
+          toast('Ceremony offer declined and returned to Admin for reassignment. Devotee has not been notified.');
+        }
         actionBox.innerHTML = `
           <div style="background:#fff3e0;border:1.5px solid #ffcc80;border-radius:10px;padding:24px 20px;text-align:center">
             <span class="material-icons" style="font-size:52px;color:#e65100">info</span>
@@ -6944,10 +7119,12 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
   const rebookId = urlParams.get('bookingId') || urlParams.get('rebook');
   const emailParam = urlParams.get('email');
   const tokenParam = urlParams.get('token');
+  const tabParam = urlParams.get('tab');
 
   if (actionParam === 'pandit-decision' || actionParam === 'pandit-response') {
     const bookingId = urlParams.get('bookingId') || rebookId;
     const decisionParam = urlParams.get('decision') || urlParams.get('response') || '';
+    if (tabParam) S.dashTab = tabParam;
 
     // Immediately switch to dashboard view so front page is NEVER rendered
     showView('dashboard');
@@ -6956,6 +7133,7 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
     } catch (e) {}
 
     let authBooking = null;
+    let authLong = null;
     try {
       const authRes = await api('/auth/magic-pandit-decision', {
         method: 'POST',
@@ -6965,13 +7143,17 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
         saveSession(authRes.user, authRes.token);
         renderNav();
         authBooking = authRes.booking;
+        authLong = authRes.longRequest;
+        if (authLong || (bookingId && String(bookingId).startsWith('LP'))) {
+          S.dashTab = 'long';
+        }
       }
     } catch (err) {
       console.warn('Pandit magic decision auth error:', err);
     }
 
     await renderDashboard();
-    openPanditDecisionModal(authBooking || bookingId, decisionParam, emailParam, tokenParam);
+    openPanditDecisionModal(authBooking || authLong || bookingId, decisionParam, emailParam, tokenParam);
 
     // Load background catalogue silently without blocking dashboard
     loadPujas().then(() => {
