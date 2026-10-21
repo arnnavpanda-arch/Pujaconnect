@@ -187,7 +187,7 @@ const S = {
 
 const DEFAULT_SYSTEM_SETTINGS = {
   contactNumber: '+91 94370 12345',
-  logo: '',
+  logo: '/logo.jpg',
   officeAddress: 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024'
 };
 
@@ -2670,18 +2670,40 @@ function openAuth(mode = 'login') {
         </div>
       </div>`, (m) => {
       // Devotee Login Handler (No password, no OTP - Email only)
-      $('#devotee-submit', m).onclick = async () => {
+      const doDevoteeLogin = async () => {
         const email = $('#devotee-email', m).value.trim();
         if (!email) return toast('Please enter your registered devotee email', true);
+        const btn = $('#devotee-submit', m);
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<span class="material-icons" style="font-size:18px;vertical-align:middle;margin-right:4px">hourglass_top</span> Logging in...';
+        }
         try {
           const r = await api('/auth/devotee-login', { method: 'POST', body: { email } });
           afterAuth(r);
-        } catch (e) { toast(e.message, true); }
+        } catch (e) {
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="material-icons" style="font-size:18px;vertical-align:middle;margin-right:4px">login</span> Login as Devotee';
+          }
+          toast(e.message, true);
+        }
       };
+
+      $('#devotee-submit', m).onclick = doDevoteeLogin;
+      const devEmailInput = $('#devotee-email', m);
+      if (devEmailInput) {
+        devEmailInput.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            doDevoteeLogin();
+          }
+        });
+      }
 
       // Pandit Send OTP Handler
       let sentEmail = '';
-      $('#btn-send-otp', m).onclick = async () => {
+      const doSendOtp = async () => {
         const email = $('#pandit-email', m).value.trim();
         if (!email) return toast('Please enter your registered Pandit email first', true);
         const btn = $('#btn-send-otp', m);
@@ -2696,6 +2718,8 @@ function openAuth(mode = 'login') {
           btn.disabled = false;
           $('#pandit-otp-msg', m).innerHTML = 'A 6-digit verification code was sent to <b>' + esc(email) + '</b>.<br><span style="font-size:12px;color:var(--muted)">Please check your inbox or spam folder.</span>';
           toast('Verification code sent to your email! 🙏 Check inbox/spam.');
+          const otpInput = $('#pandit-otp', m);
+          if (otpInput) setTimeout(() => otpInput.focus(), 100);
         } catch (e) {
           btn.disabled = false;
           btn.textContent = 'Send OTP';
@@ -2703,17 +2727,50 @@ function openAuth(mode = 'login') {
         }
       };
 
+      $('#btn-send-otp', m).onclick = doSendOtp;
+      const pEmailInput = $('#pandit-email', m);
+      if (pEmailInput) {
+        pEmailInput.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            doSendOtp();
+          }
+        });
+      }
+
       // Pandit Verify & Login Handler
-      $('#pandit-submit', m).onclick = async () => {
+      const doPanditVerify = async () => {
         const email = sentEmail || $('#pandit-email', m).value.trim();
         const otp = $('#pandit-otp', m).value.trim();
         if (!email) return toast('Please enter your Pandit email', true);
         if (!otp || otp.length < 4) return toast('Please enter the verification code sent to your email', true);
+        const pBtn = $('#pandit-submit', m);
+        if (pBtn) {
+          pBtn.disabled = true;
+          pBtn.innerHTML = '<span class="material-icons" style="font-size:18px;vertical-align:middle;margin-right:4px">hourglass_top</span> Verifying...';
+        }
         try {
           const r = await api('/auth/pandit/verify-otp', { method: 'POST', body: { email, otp } });
           afterAuth(r);
-        } catch (e) { toast(e.message, true); }
+        } catch (e) {
+          if (pBtn) {
+            pBtn.disabled = false;
+            pBtn.innerHTML = '<span class="material-icons" style="font-size:18px;vertical-align:middle;margin-right:4px">verified_user</span> Verify OTP &amp; Login';
+          }
+          toast(e.message, true);
+        }
       };
+
+      $('#pandit-submit', m).onclick = doPanditVerify;
+      const pOtpInput = $('#pandit-otp', m);
+      if (pOtpInput) {
+        pOtpInput.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            doPanditVerify();
+          }
+        });
+      }
     }, true);
   } else {
     // Devotee Registration: All States of India, NO PASSWORD required
@@ -2761,17 +2818,13 @@ function afterAuth(r) {
   saveSession(r.user, r.token);
   closeModal();
   toast('Namaste, ' + r.user.name + ' 🙏');
-  const roleName = r.user.role === 'pandit' ? 'Acharya' : 'Devotee';
-  showLogoSplash({
-    durationSec: 3,
-    title: `Namaste, ${r.user.name}! Entering ${roleName} Portal...`,
-    onFinish: () => {
-      const next = S.afterLogin;
-      S.afterLogin = null;
-      if (next) next();
-      else showView('dashboard');
-    }
-  });
+  const next = S.afterLogin;
+  S.afterLogin = null;
+  if (next) {
+    next();
+  } else {
+    showView('dashboard');
+  }
 }
 
 /* ---------- pandit registration ---------- */

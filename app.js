@@ -189,9 +189,30 @@ app.post('/api/auth/devotee-login', wrap(async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Please enter your registered email' });
   const e = lc(email);
-  const user = await User.findOne({ email: e });
+  let user = await User.findOne({ email: e });
   if (!user) {
-    return res.status(404).json({ error: 'No devotee account found with this email. Please click "Create Devotee Account" first.' });
+    // If user account is not found, check existing bookings or create new devotee profile
+    const b = await Booking.findOne({ userEmail: { $regex: new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }).sort({ createdAt: -1 });
+    const longB = !b ? await LongPuja.findOne({ userEmail: { $regex: new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }).sort({ createdAt: -1 }) : null;
+    
+    let fallbackName = (b && b.userName) || (longB && longB.userName) || '';
+    if (!fallbackName) {
+      const uname = (e.split('@')[0] || 'Devotee');
+      fallbackName = uname.replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+    const phone = (b && b.phone) || (longB && longB.phone) || '';
+    const district = (b && b.district) || (longB && longB.district) || 'Khordha';
+    const state = (b && b.state) || (longB && longB.state) || 'Odisha';
+
+    user = await User.create({
+      name: fallbackName,
+      email: e,
+      phone,
+      state,
+      district,
+      password: '',
+      role: 'user'
+    });
   }
   res.json({ user: publicUser(user), token: sign({ email: user.email, role: user.role }) });
 }));
@@ -1357,7 +1378,7 @@ app.put('/api/platform-bank-details', adminOnly, wrap(async (req, res) => {
 // Centralized System Settings (Official Contact, Logo, Office Address) Managed by Admin
 const DEFAULT_SYSTEM_SETTINGS = {
   contactNumber: '+91 94370 12345',
-  logo: '',
+  logo: '/logo.jpg',
   officeAddress: 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024'
 };
 
