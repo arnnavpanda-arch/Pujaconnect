@@ -2834,7 +2834,7 @@ function renderLongForm() {
 const statusBadge = (s) => {
   let cls = 'amber';
   if (['Completed', 'Confirmed', 'Verified', 'Assigned', 'Accepted'].includes(s)) cls = 'green';
-  else if (['Cancelled', 'Rejected', 'Declined'].includes(s)) cls = 'red';
+  else if (['Cancelled', 'Rejected', 'Declined', 'Rejected by Pandit'].includes(s)) cls = 'red';
   else if (['Pending Pandit Confirmation', 'Offered'].includes(s)) cls = 'blue';
   return `<span class="badge ${cls}">${esc(s)}</span>`;
 };
@@ -3820,6 +3820,20 @@ function renderDevoteeLongTab(longs) {
               <span class="material-icons">payments</span>
               <span>Estimated Total Dakshina: <b>${inr(l.estimatedCost)}</b> ${l.advancePaid ? '<span class="badge green">Advance Paid</span>' : '<span class="badge" style="background:#f5ece1;color:#6d4833">Pay on Confirmation</span>'}</span>
             </div>
+
+            ${l.status === 'Confirmed' ? `
+              <div style="background:#f0fff4;border:1px solid #a5d6a7;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:12.5px;color:#1b5e20">
+                ✅ <strong>Ceremony Confirmed!</strong> A verified Vedic Acharya has accepted your ceremony assignment.
+              </div>
+            ` : (l.status === 'Assigned' ? `
+              <div style="background:#fffcf0;border:1px solid #ebd9c2;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:12.5px;color:#7a553e">
+                ⏳ <strong>Pandit Assigned:</strong> Awaiting Purohit confirmation.
+              </div>
+            ` : (['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? `
+              <div style="background:#fffaf0;border:1px solid #ffe0b2;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:12.5px;color:#e65100">
+                🔄 <strong>Administration Re-assignment:</strong> Our team is assigning another verified Vedic Scholar for your ceremony dates.
+              </div>
+            ` : ''))}
 
             ${isCancelled ? `
               <div style="background:#ffebee;border:1px solid #ffcdd2;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12.5px;color:#b71c1c">
@@ -5085,7 +5099,7 @@ async function adminDash(root) {
   ]);
   S.adminPandits = pandits; S.adminLongs = longs; S.pujas = pujas;
   const pend = pandits.filter((p) => p.status === 'Pending Review');
-  const unassigned = longs.filter((l) => l.status === 'Pending Admin');
+  const unassigned = longs.filter((l) => l.status === 'Pending Admin' || ['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status));
   const isConnected = dbStatus && (dbStatus.connected || dbStatus.status === 'Connected');
 
   root.innerHTML = `<div class="row" style="margin-bottom:16px;flex-wrap:wrap;gap:12px">
@@ -5103,8 +5117,13 @@ async function adminDash(root) {
       <td><button class="btn btn-green btn-sm" data-action="panditStatus" data-id="${esc(p._id)}" data-status="Verified">Approve</button><button class="btn btn-red btn-sm" data-action="panditStatus" data-id="${esc(p._id)}" data-status="Rejected">Reject</button></td></tr>`).join('')}</table>` : '<p class="muted">No Pandits awaiting review.</p>'}</div>
     <div class="panel"><h3>Multi-Day Requests</h3>${longs.length ? `<table><tr><th>ID</th><th>Devotee</th><th>Ritual</th><th>Dates &amp; Schedule</th><th>Venue of Puja</th><th>Pandits</th><th>Status</th><th></th></tr>${longs.map((l) => `<tr><td>${esc(l.id)}</td><td>${esc(l.userName)}<br><small>${esc(l.userEmail)} · ${esc(l.phone || '')}</small></td><td>${esc(l.pujaName)}<br><small>${esc(l.district)}</small></td><td>${esc(l.fromDate)} → ${esc(l.toDate)}<br><small class="muted">${l.totalDays}d × ${l.dailyHours}h (Start: ${esc(l.startTime || '08:00 AM')})</small></td>
       <td><span class="venue-badge-pill" style="font-size:10px">${esc(l.venueType || 'Venue')}</span><br><b>${esc(l.venueName || '')}</b><br><small class="muted">${esc(l.venueAddress || l.venue || l.address || '')}${l.venueLandmark ? ` (Nr: ${esc(l.venueLandmark)})` : ''}</small></td>
-      <td>${(l.assignedPandits || []).length}/${l.requiredPandits}</td><td>${statusBadge(l.status)}</td><td>${['Pending Admin', 'Assigned'].includes(l.status) ? `<button class="btn btn-dark btn-sm" data-action="assign" data-id="${esc(l.id)}">${l.status === 'Assigned' ? 'Re-assign' : 'Assign'}</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">No requests.</p>'}
-      ${unassigned.length ? `<p class="muted">${unassigned.length} request(s) need Pandit assignment.</p>` : ''}</div>
+      <td>${(l.assignedPandits || []).length}/${l.requiredPandits}</td>
+      <td>
+        ${statusBadge(l.status)}
+        ${['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? '<br><small class="badge red" style="font-size:10px;margin-top:4px;display:inline-block">⚠️ Re-assignment</small>' : ''}
+      </td>
+      <td>${['Pending Admin', 'Assigned', 'Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? `<button class="btn btn-gold btn-sm" data-action="assign" data-id="${esc(l.id)}">${l.status === 'Pending Admin' ? 'Assign' : 'Re-assign'}</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">No requests.</p>'}
+      ${unassigned.length ? `<p class="muted">${unassigned.length} request(s) need Pandit assignment or re-assignment.</p>` : ''}</div>
     <div class="panel"><div class="row"><h3>Service Catalog</h3><button class="btn btn-gold btn-sm" data-action="editPuja" data-id="">+ Add Puja</button></div><table><tr><th>Name</th><th>Type</th><th>Fee</th><th></th></tr>${pujas.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${p.type === 'Long' ? inr(p.perHourFee) + '/hr' : inr(p.baseFee)}</td><td><button class="btn btn-outline dark btn-sm" data-action="editPuja" data-id="${esc(p._id)}">Edit</button><button class="btn btn-red btn-sm" data-action="delPuja" data-id="${esc(p._id)}">Delete</button></td></tr>`).join('')}</table></div>
     <div class="panel"><h3>All Pandits</h3><table><tr><th>Photo</th><th>Name</th><th>District</th><th>Experience</th><th>Status</th></tr>${pandits.map((p) => `<tr><td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid var(--ochre)"></td><td>${esc(p.name)}<br><small>${esc(p.email)}</small></td><td>${esc(p.district)}</td><td>${esc(p.exp)}</td><td>${statusBadge(p.status)}</td></tr>`).join('')}</table></div>
     <div class="panel"><h3>Devotees</h3>${users.length ? `<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th></tr>${users.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${esc(u.phone)}</td><td>${new Date(u.createdAt).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No devotees yet.</p>'}</div>`;
@@ -5140,21 +5159,44 @@ function printSlip(b) {
 /* ---------- admin modals ---------- */
 function openAssign(id) {
   const l = S.adminLongs.find((x) => x.id === id);
+  if (!l) return toast('Request not found', true);
+  const isRejected = ['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status);
   const eligible = S.adminPandits.filter((p) => p.verified && ((p.workingDistricts || []).includes(l.district) || p.district === l.district));
   const list = eligible.length ? eligible : S.adminPandits.filter((p) => p.verified);
-  openModal('Assign Pandits – ' + l.id, `
+
+  openModal((isRejected ? 'Re-assign Pandits – ' : 'Assign Pandits – ') + l.id, `
+    ${isRejected ? `
+      <div style="background:#ffebee;border:1.5px solid #ef9a9a;color:#b71c1c;padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:13px;line-height:1.4">
+        <strong>⚠️ Previous Offer Declined:</strong> ${esc(l.rejectionReason || 'The assigned Pandit declined this ritual.')}<br>
+        Please select another verified Pandit below to send a new assignment offer.
+      </div>
+    ` : ''}
     <div style="background:#fcf8f0;border:1px solid #ebd9c2;border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px">
       <div style="font-weight:700;color:#351605;font-size:14px">${esc(l.pujaName)} · ${esc(l.district)}</div>
       <div style="margin-top:4px">🏛️ <b>Venue:</b> ${esc(l.venueName ? `${l.venueName}, ` : '')}${esc(l.venueAddress || l.venue || l.address || '')}${l.venueLandmark ? ` (Nr: ${esc(l.venueLandmark)})` : ''}</div>
       <div style="margin-top:2px">⏱️ <b>Schedule:</b> ${esc(l.fromDate)} → ${esc(l.toDate)} (${l.totalDays}d × ${l.dailyHours}h, Start: ${esc(l.startTime || '08:00 AM')})</div>
       <div style="margin-top:2px">👥 <b>Team Required:</b> ${l.requiredPandits} Pandit(s)</div>
     </div>
-    <div class="checks" style="flex-direction:column;align-items:stretch">${list.map((p) => `<label class="check"><input type="checkbox" name="as" value="${esc(p.email)}" ${l.assignedPandits.includes(p.email) ? 'checked' : ''}>${esc(p.name)} · ${esc(p.district)} · ${esc(p.exp)}</label>`).join('') || '<span class="muted">No verified Pandits available.</span>'}</div>
-    <button class="btn btn-gold" id="as-go" style="margin-top:14px;width:100%">Assign Selected Pandits</button>`, (m) => {
+    <div class="checks" style="flex-direction:column;align-items:stretch">${list.map((p) => {
+      const wasAssigned = (l.assignedPandits || []).includes(p.email);
+      const panditSt = (l.panditStatuses && l.panditStatuses[p.email]);
+      const isPrevReject = panditSt === 'Rejected' || panditSt === 'Declined';
+      return `<label class="check" style="${isPrevReject ? 'opacity:0.6;' : ''}">
+        <input type="checkbox" name="as" value="${esc(p.email)}" ${(wasAssigned && !isPrevReject) ? 'checked' : ''}>
+        ${esc(p.name)} · ${esc(p.district)} · ${esc(p.exp)}
+        ${isPrevReject ? '<span style="color:#c62828;font-size:11px;font-weight:700;margin-left:6px">(Declined)</span>' : ''}
+      </label>`;
+    }).join('') || '<span class="muted">No verified Pandits available.</span>'}</div>
+    <button class="btn btn-gold" id="as-go" style="margin-top:14px;width:100%">${isRejected ? 'Confirm & Send New Assignment' : 'Assign Selected Pandits'}</button>`, (m) => {
     $('#as-go', m).onclick = async () => {
       const emails = [...m.querySelectorAll('input[name="as"]:checked')].map((i) => i.value);
       if (!emails.length) return toast('Select at least one Pandit', true);
-      try { await api(`/long-puja-requests/${id}/assign`, { method: 'PUT', body: { panditEmails: emails } }); closeModal(); toast('Pandits assigned'); renderDashboard(); } catch (e) { toast(e.message, true); }
+      try {
+        await api(`/long-puja-requests/${id}/assign`, { method: 'PUT', body: { panditEmails: emails } });
+        closeModal();
+        toast('Pandits assigned & notification emails sent');
+        renderDashboard();
+      } catch (e) { toast(e.message, true); }
     };
   });
 }

@@ -2693,32 +2693,231 @@ app.put('/api/long-puja-requests/:id/assign', adminOnly, wrap(async (req, res) =
   if (found.length !== emails.length) return res.status(400).json({ error: 'All assigned Pandits must be verified' });
   const statuses = {};
   emails.forEach((e) => { statuses[e] = 'Assigned'; });
-  const r = await LongPujaRequest.findOneAndUpdate({ id: req.params.id }, { assignedPandits: emails, panditStatuses: statuses, status: 'Assigned' }, { new: true });
+
+  const query = mongoose.Types.ObjectId.isValid(req.params.id)
+    ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+    : { id: req.params.id };
+
+  const r = await LongPujaRequest.findOneAndUpdate(
+    query,
+    { assignedPandits: emails, panditStatuses: statuses, status: 'Assigned', rejectionReason: '' },
+    { new: true }
+  );
   if (!r) return res.status(404).json({ error: 'Request not found' });
 
-  // Send assignment offer notification email to each assigned Pandit
+  // Compute robust origin base URL
+  const reqHost = req.get('host') || '';
+  const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : (req.protocol || 'http'));
+  const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
+  const baseUrl = process.env.APP_URL || origin;
+
+  // Send assignment offer notification email to each assigned Pandit with direct Accept/Reject action links
   for (const pandit of found) {
-    await sendSafe('LONG_PUJA_ASSIGNED_PANDIT', lc(pandit.email), {
+    const pEmail = lc(pandit.email);
+    const panditToken = sign({ email: pEmail, role: 'pandit', requestId: r.id, purpose: 'long_puja_offer_response' });
+    const acceptUrl = `${baseUrl}/api/long-puja-requests/${encodeURIComponent(r.id)}/email-response?email=${encodeURIComponent(pEmail)}&response=Accepted&token=${encodeURIComponent(panditToken)}`;
+    const rejectUrl = `${baseUrl}/api/long-puja-requests/${encodeURIComponent(r.id)}/email-response?email=${encodeURIComponent(pEmail)}&response=Rejected&token=${encodeURIComponent(panditToken)}`;
+
+    await sendSafe('LONG_PUJA_ASSIGNED_PANDIT', pEmail, {
       ...r.toObject(),
+      baseUrl,
+      acceptUrl,
+      rejectUrl,
       panditName: pandit.name,
-      panditEmail: pandit.email
+      panditEmail: pEmail,
+      panditPhone: pandit.phone || ''
     });
   }
 
   res.json(r);
 }));
 
-app.put('/api/long-puja-requests/:id/pandit-response', wrap(async (req, res) => {
-  const { panditEmail, response } = req.body; // 'Accepted' | 'Declined'
-  const r = await LongPujaRequest.findOne({ id: req.params.id });
-  if (!r) return res.status(404).json({ error: 'Request not found' });
+// Direct response handler for clicks from Pandit assignment email
+app.get('/api/long-puja-requests/:id/email-response', wrap(async (req, res) => {
+  const panditEmail = lc(req.query.email || req.query.panditEmail || '');
+  const response = (req.query.response || req.query.decision || '').trim();
+  const isAccept = response.toLowerCase() === 'accepted' || response.toLowerCase() === 'accept';
+  const isReject = response.toLowerCase() === 'rejected' || response.toLowerCase() === 'reject' || response.toLowerCase() === 'declined' || response.toLowerCase() === 'decline';
+
+  const query = mongoose.Types.ObjectId.isValid(req.params.id)
+    ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+    : { id: req.params.id };
+
+  const r = await LongPujaRequest.findOne(query);
+  if (!r) {
+    return res.status(404).send('<h2>Ceremony request not found or expired.</h2>');
+  }
+
+  const pandit = panditEmail ? await Pandit.findOne({ email: panditEmail }) : null;
+  const panditName = pandit ? pandit.name : 'Vedic Pandit';
+  const panditPhone = pandit ? (pandit.phone || '') : '';
   const statuses = { ...(r.panditStatuses || {}) };
-  statuses[lc(panditEmail)] = response;
+
+  const reqHost = req.get('host') || '';
+  const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : (req.protocol || 'http'));
+  const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
+  const baseUrl = process.env.APP_URL || origin;
+
+  if (isAccept) {
+    statuses[panditEmail || 'pandit'] = 'Accepted';
+    r.panditStatuses = statuses;
+    r.status = 'Confirmed';
+    r.markModified('panditStatuses');
+    await r.save();
+
+    // Send official confirmation email to Devotee!
+    if (r.userEmail) {
+      await sendSafe('LONG_PUJA_CONFIRMED', lc(r.userEmail), {
+        ...r.toObject(),
+        panditName,
+        panditPhone,
+        appUrl: baseUrl
+      });
+    }
+
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Ceremony Assignment Accepted – PujaConnect</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: system-ui, -apple-system, sans-serif; background: #fff8ed; color: #351605; margin: 0; padding: 40px 20px; display: flex; align-items: center; justify-content: center; min-height: 80vh; }
+          .card { background: #ffffff; max-width: 560px; width: 100%; border-radius: 16px; border: 2px solid #2e7d32; padding: 36px 30px; text-align: center; box-shadow: 0 10px 30px rgba(46,125,50,0.12); }
+          .icon { width: 64px; height: 64px; border-radius: 50%; background: #2e7d32; color: #ffffff; font-size: 36px; display: flex; align-items: center; justify-content: center; margin: 0 auto 18px; }
+          h1 { font-family: Georgia, serif; color: #1b5e20; margin: 0 0 12px; font-size: 24px; }
+          p { font-size: 14.5px; color: #4a2b16; line-height: 1.6; margin: 0 0 18px; }
+          .box { background: #f0fff4; border: 1.5px solid #a5d6a7; padding: 14px 16px; border-radius: 10px; font-size: 13.5px; color: #1b5e20; margin-bottom: 22px; text-align: left; line-height: 1.6; }
+          .btn { display: inline-block; background: #d99a19; color: #ffffff !important; font-weight: 700; text-decoration: none; padding: 13px 30px; border-radius: 8px; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="icon">✓</div>
+          <h1>Pranam ${esc(panditName)} 🙏</h1>
+          <p>You have successfully <strong>Accepted</strong> the sacred multi-day ceremony assignment for <strong>${esc(r.pujaName)}</strong> (Request ID: <strong>${esc(r.id)}</strong>).</p>
+          <div class="box">
+            ✅ <strong>Devotee Confirmation Dispatched:</strong> An official confirmation email with your contact details (📞 ${esc(panditPhone || 'Registered Phone')}) has been sent to devotee <strong>${esc(r.userName)}</strong> (${esc(r.userEmail)}).<br>
+            🏛️ <strong>Puja Venue:</strong> ${esc(r.venueAddress || r.venue || r.address || 'Address provided by devotee')}<br>
+            📅 <strong>Dates:</strong> ${esc(r.fromDate)} → ${esc(r.toDate)} (${r.totalDays || 1} days, Daily Start: ${esc(r.startTime || '08:00 AM')})
+          </div>
+          <a href="/#dashboard" class="btn">Open Pandit Dashboard</a>
+        </div>
+      </body>
+      </html>
+    `);
+  } else if (isReject) {
+    statuses[panditEmail || 'pandit'] = 'Rejected';
+    r.panditStatuses = statuses;
+    r.status = 'Rejected';
+    r.rejectionReason = `Declined by Pandit ${panditName} (${panditEmail || 'pandit'})`;
+    r.markModified('panditStatuses');
+    await r.save();
+
+    // Alert Admin so immediate reassignment can be performed
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.SENDER_EMAIL || 'bookpujaconnect@gmail.com';
+    await sendSafe('LONG_PUJA_PANDIT_REJECTED_ALERT', adminEmail, {
+      ...r.toObject(),
+      panditName,
+      panditEmail,
+      panditPhone,
+      baseUrl
+    });
+
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Ceremony Assignment Declined – PujaConnect</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: system-ui, -apple-system, sans-serif; background: #fff8ed; color: #351605; margin: 0; padding: 40px 20px; display: flex; align-items: center; justify-content: center; min-height: 80vh; }
+          .card { background: #ffffff; max-width: 560px; width: 100%; border-radius: 16px; border: 2px solid #c62828; padding: 36px 30px; text-align: center; box-shadow: 0 10px 30px rgba(198,40,40,0.12); }
+          .icon { width: 64px; height: 64px; border-radius: 50%; background: #c62828; color: #ffffff; font-size: 36px; display: flex; align-items: center; justify-content: center; margin: 0 auto 18px; }
+          h1 { font-family: Georgia, serif; color: #c62828; margin: 0 0 12px; font-size: 24px; }
+          p { font-size: 14.5px; color: #4a2b16; line-height: 1.6; margin: 0 0 18px; }
+          .box { background: #ffebee; border: 1.5px solid #ef9a9a; padding: 14px 16px; border-radius: 10px; font-size: 13.5px; color: #b71c1c; margin-bottom: 22px; text-align: left; line-height: 1.6; }
+          .btn { display: inline-block; background: #351605; color: #ffffff !important; font-weight: 700; text-decoration: none; padding: 13px 30px; border-radius: 8px; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="icon">✕</div>
+          <h1>Assignment Declined</h1>
+          <p>Pranam ${esc(panditName)}, you have declined the ceremony assignment for <strong>${esc(r.pujaName)}</strong> (Request ID: <strong>${esc(r.id)}</strong>).</p>
+          <div class="box">
+            ⚠️ <strong>Admin Dashboard Updated:</strong> The request status is marked as <strong>Rejected</strong> on the PujaConnect Administration dashboard so another qualified Vedic Pandit can be assigned promptly without delay.
+          </div>
+          <a href="/#dashboard" class="btn">Return to Pandit Dashboard</a>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+
+  res.redirect('/#dashboard');
+}));
+
+app.put('/api/long-puja-requests/:id/pandit-response', wrap(async (req, res) => {
+  const { panditEmail, response } = req.body; // 'Accepted' | 'Declined' | 'Rejected'
+  const isAccept = response === 'Accepted' || response === 'Accept';
+  const isReject = response === 'Declined' || response === 'Decline' || response === 'Rejected' || response === 'Reject';
+
+  const query = mongoose.Types.ObjectId.isValid(req.params.id)
+    ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+    : { id: req.params.id };
+
+  const r = await LongPujaRequest.findOne(query);
+  if (!r) return res.status(404).json({ error: 'Request not found' });
+
+  const pEmail = lc(panditEmail);
+  const pandit = await Pandit.findOne({ email: pEmail });
+  const panditName = pandit ? pandit.name : 'Verified Pandit';
+  const panditPhone = pandit ? (pandit.phone || '') : '';
+
+  const statuses = { ...(r.panditStatuses || {}) };
+  statuses[pEmail] = isAccept ? 'Accepted' : 'Rejected';
   r.panditStatuses = statuses;
   r.markModified('panditStatuses');
-  const vals = r.assignedPandits.map((e) => statuses[e]);
-  if (vals.length && vals.every((v) => v === 'Accepted')) r.status = 'Confirmed';
-  await r.save();
+
+  const reqHost = req.get('host') || '';
+  const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : (req.protocol || 'http'));
+  const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
+  const baseUrl = process.env.APP_URL || origin;
+
+  if (isAccept) {
+    r.status = 'Confirmed';
+    await r.save();
+
+    // Send official confirmation email to Devotee!
+    if (r.userEmail) {
+      await sendSafe('LONG_PUJA_CONFIRMED', lc(r.userEmail), {
+        ...r.toObject(),
+        panditName,
+        panditPhone,
+        appUrl: baseUrl
+      });
+    }
+  } else if (isReject) {
+    // Rejected: mark status as Rejected so admin dashboard highlights it immediately
+    r.status = 'Rejected';
+    r.rejectionReason = `Declined by Pandit ${panditName} (${pEmail})`;
+    await r.save();
+
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.SENDER_EMAIL || 'bookpujaconnect@gmail.com';
+    await sendSafe('LONG_PUJA_PANDIT_REJECTED_ALERT', adminEmail, {
+      ...r.toObject(),
+      panditName,
+      panditEmail: pEmail,
+      panditPhone,
+      baseUrl
+    });
+  } else {
+    await r.save();
+  }
+
   res.json(r);
 }));
 
@@ -2754,7 +2953,7 @@ app.get('/api/admin/stats', adminOnly, wrap(async (req, res) => {
   const [users, pandits, verified, pending, rawBookings, longReqs, pendingLong] = await Promise.all([
     User.countDocuments({ role: 'user' }), Pandit.countDocuments(), Pandit.countDocuments({ verified: true }),
     Pandit.countDocuments({ status: 'Pending Review' }), Booking.find({}, { fee: 1, status: 1, date: 1, time: 1, havanConducted: 1 }), LongPujaRequest.countDocuments(),
-    LongPujaRequest.countDocuments({ status: 'Pending Admin' })
+    LongPujaRequest.countDocuments({ status: { $in: ['Pending Admin', 'Rejected', 'Declined', 'Rejected by Pandit'] } })
   ]);
   const bookings = await autoUpdatePassedSlots(rawBookings);
   const active = bookings.filter((b) => b.status !== 'Cancelled');
