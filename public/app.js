@@ -498,7 +498,7 @@ function pujaCard(p, withTags) {
   return `<div class="card"><div class="thumb" style="background-image:url('${esc(p.image)}')"></div><div class="body">
     <h3>${esc(p.name)}</h3><p class="muted" style="margin:0 0 8px">${esc(p.desc)}</p>
     ${withTags ? `<p style="font-size:13px;margin:0 0 8px">${esc(p.longDesc)}</p><div>${(p.benefits || []).map((b) => `<span class="badge">✦ ${esc(b)}</span>`).join('')}</div>` : ''}
-    <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap"><span class="price">${isLong ? esc(p.price) : 'From ' + inr(p.baseFee)}</span>
+    <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap"><span class="price">${isLong ? `<span style="font-weight:700">${inr(p.perHourFee || 600)} / hr <small class="muted" style="font-size:11.5px;font-weight:400">per Pandit</small></span>` : 'From ' + inr(p.baseFee)}</span>
     ${isLong ? `
       <button class="btn btn-dark btn-sm" data-action="planLong" data-name="${esc(p.name)}">Customize</button>
     ` : `
@@ -2338,11 +2338,14 @@ function renderLongForm() {
         </div>
 
         <div>
-          <label style="font-weight:700;font-size:13px;color:#351605">Number of Vedic Pandits Required *</label>
+          <label style="font-weight:700;font-size:13px;color:#351605">
+            Number of Vedic Pandits Required * 
+            <span style="font-weight:600;color:var(--ochre);font-size:12px;margin-left:4px">(Hourly rate is per Pandit · Total scales with team size)</span>
+          </label>
           <select id="l-count" style="width:100%;padding:11px 12px">
             ${[1, 2, 3, 5, 7, 9, 11, 21].map((n) => `<option value="${n}" ${n === 1 ? 'selected' : ''}>${n} Vedic Pandit${n > 1 ? 's (Acharya Team)' : ' (Lead Purohit)'}</option>`).join('')}
           </select>
-          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Scholars assigned according to ritual scale</small>
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Hourly Dakshina is per pandit. As you increase the number of Pandits, the total amount increases proportionally.</small>
         </div>
 
         ${lockedDistrict ? `
@@ -2519,19 +2522,29 @@ function renderLongForm() {
         <b id="l-calc-pandits">1 Lead Vedic Pandit</b>
       </div>
       <div class="breakdown-row">
-        <span>Standard Dakshina Rate:</span>
-        <b id="l-calc-rate">${inr(initialRate)} / Pandit / Hour</b>
+        <span>Hourly Dakshina Rate (Per Pandit):</span>
+        <b id="l-calc-rate">${inr(initialRate)} / hour per Pandit</b>
+      </div>
+
+      <div style="background:#fff8ed;border:1.5px dashed #ebd9c2;border-radius:8px;padding:10px 14px;margin:10px 0;font-size:13px;color:#4a2b16" id="l-calc-formula-wrap">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:700;color:var(--mahogany);margin-bottom:3px">
+          <span class="material-icons" style="font-size:16px;color:#d99a19">calculate</span>
+          Live Formula (Hourly Dakshina is per Pandit):
+        </div>
+        <div id="l-calc-formula" style="line-height:1.5;font-size:12.5px">
+          4 Hours × ${inr(initialRate)}/hr per Pandit × 1 Pandit = <b>${inr(4 * initialRate)}</b>
+        </div>
       </div>
 
       <div class="breakdown-row total">
         <div>
           <span>Estimated Total Dakshina:</span>
-          <div style="font-size:12px;font-weight:normal;color:#6b4d3a">Full ceremony dakshina honoring verified Vedic Acharyas</div>
+          <div style="font-size:12px;font-weight:normal;color:#6b4d3a">Full ceremony dakshina honoring verified Vedic Acharyas (scales with team size)</div>
         </div>
         <div class="breakdown-total-dakshina" id="l-calc-total">${inr(4 * initialRate)}</div>
       </div>
       <small class="muted" style="font-size:12px;display:block;margin-top:8px">
-        ✨ <em>Note:</em> Devotee payment is verified upon Pandit assignment and schedule confirmation. No advance payment is charged during customizer submission.
+        ✨ <em>Note:</em> The hourly payment is calculated per Pandit. If the devotee increases the number of Pandits, the total amount increases proportionally. Devotee payment is verified upon Pandit assignment and schedule confirmation.
       </small>
     </div>
 
@@ -2697,9 +2710,14 @@ function renderLongForm() {
 
     if (calcDays) calcDays.textContent = `${days} Day${days > 1 ? 's' : ''} (${dailyHours} hrs/day, Start: ${timeVal})`;
     if (calcHours) calcHours.textContent = `${totalHours} Ritual Hours (${days} days × ${dailyHours} hrs)`;
-    if (calcPandits) calcPandits.textContent = `${pandits} Vedic Pandit${pandits > 1 ? 's' : ' (Lead Purohit)'}`;
-    if (calcRate) calcRate.textContent = `${inr(rate)} / Pandit / Hour`;
+    if (calcPandits) calcPandits.textContent = `${pandits} Vedic Pandit${pandits > 1 ? 's (Acharya Team)' : ' (Lead Purohit)'}`;
+    if (calcRate) calcRate.textContent = `${inr(rate)} / hour per Pandit`;
     if (calcTotal) calcTotal.textContent = inr(totalCost);
+
+    const calcFormula = $('#l-calc-formula');
+    if (calcFormula) {
+      calcFormula.innerHTML = `<strong>Live Multi-Day Formula:</strong> ${days} Day${days > 1 ? 's' : ''} × ${dailyHours} hrs/day (<strong>${totalHours} Total Hours</strong>) × <strong>${inr(rate)}/hr per Pandit</strong> × <strong>${pandits} Pandit${pandits > 1 ? 's' : ''}</strong> = <strong style="color:#2e7d32;font-size:14.5px">${inr(totalCost)}</strong><br><small style="color:#7a553e">Note: Hourly Dakshina is per pandit. Increasing pandit count scales the amount directly.</small>`;
+    }
 
     // Update Puja Description Preview
     const descTitle = $('#l-puja-desc-title');
@@ -2707,7 +2725,7 @@ function renderLongForm() {
     const rateBadge = $('#l-puja-rate-badge');
     if (descTitle) descTitle.textContent = currentPuja.name || '';
     if (descText) descText.textContent = currentPuja.desc || 'Vedic multi-day anushthan conducted by verified Acharyas.';
-    if (rateBadge) rateBadge.textContent = `Standard Dakshina: ${inr(rate)} / Pandit / Hour`;
+    if (rateBadge) rateBadge.textContent = `Standard Dakshina: ${inr(rate)} / hour per Pandit`;
   };
 
   // Attach event listeners for real-time recalculation
@@ -2974,17 +2992,28 @@ function renderPanditCoverageSection(verifiedList, devoteeDistrict, devoteeState
 }
 
 async function userDash(root) {
+  if (!S.pujas || !S.pujas.length) {
+    loadPujas().catch(() => {});
+  }
+  // If cached data exists in memory, render immediately with 0ms delay
+  if (Array.isArray(S.bookings) && Array.isArray(S.longs) && !root.querySelector('.dash-banner')) {
+    renderDevoteeDashboardUI(root, S.bookings, S.longs, S.pandits || []);
+  }
+
   const e = encodeURIComponent(S.user.email);
   const [bookings, longs, panditsRes] = await Promise.all([
-    api('/bookings?userEmail=' + e).catch(() => []),
-    api('/long-puja-requests?userEmail=' + e).catch(() => []),
-    api('/pandits?verified=true').catch(() => [])
+    api('/bookings?userEmail=' + e).catch(() => S.bookings || []),
+    api('/long-puja-requests?userEmail=' + e).catch(() => S.longs || []),
+    api('/pandits?verified=true').catch(() => S.pandits || [])
   ]);
   S.bookings = bookings;
   S.longs = longs;
   if (panditsRes && panditsRes.length) S.pandits = panditsRes;
-  const verifiedList = S.pandits || [];
+  renderDevoteeDashboardUI(root, S.bookings, S.longs, S.pandits || []);
+}
 
+function renderDevoteeDashboardUI(root, bookings, longs, verifiedList) {
+  if (!root) return;
   const devoteeDistrict = (S.user.district || '').trim();
   const devoteeState = (S.user.state || '').trim();
 
@@ -3020,9 +3049,11 @@ async function userDash(root) {
   );
   S._isRegionUnavailable = isRegionUnavailable;
 
-  // Auto-subscribe ONLY 404 error page users so that they receive the notification email when admin sets district-wise amounts
+  // Auto-subscribe ONLY 404 error page users once per session
   const targetLoc = devoteeDistrict || devoteeState;
-  if (isRegionUnavailable && targetLoc && S.user && S.user.email) {
+  const subKey = (S.user.email || '') + ':' + targetLoc;
+  if (isRegionUnavailable && targetLoc && S.user && S.user.email && S._subscribed404 !== subKey) {
+    S._subscribed404 = subKey;
     api('/region-notifications/subscribe-404', {
       method: 'POST',
       body: {
@@ -3193,7 +3224,50 @@ async function userDash(root) {
       ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
     </div>
   `;
-  setupDevoteeRefundListeners();
+  if (tab === 'refunds') {
+    setupDevoteeRefundListeners();
+  }
+}
+
+function switchDevoteeSubtab(tab) {
+  S.dashTab = tab;
+  const subtabs = document.querySelectorAll('.dash-subtabs .subtab');
+  subtabs.forEach((st) => {
+    st.classList.toggle('active', st.dataset.tab === tab);
+  });
+  document.querySelectorAll('.mobile-nav-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === 'dashboard' || (tab === 'profile' && b.dataset.action === 'openProfile'));
+  });
+
+  const container = document.getElementById('dash-tab-content');
+  if (container) {
+    const bookings = S.bookings || [];
+    const longs = S.longs || [];
+    if (tab === 'bookings') {
+      container.innerHTML = renderDevoteeBookingsTab(bookings);
+    } else if (tab === 'payments') {
+      container.innerHTML = renderDevoteePaymentTrackingTab(bookings, longs);
+    } else if (tab === 'refunds') {
+      container.innerHTML = renderDevoteeRefundsTab(bookings);
+      setupDevoteeRefundListeners();
+    } else if (tab === 'explore') {
+      if (!S.pujas || !S.pujas.length) {
+        container.innerHTML = '<div class="panel empty" style="padding:48px 20px"><span class="material-icons spin" style="font-size:36px;color:var(--ochre)">sync</span><p>Loading sacred rituals...</p></div>';
+        loadPujas().then(() => {
+          if (S.dashTab === 'explore') {
+            const el = document.getElementById('dash-tab-content');
+            if (el) el.innerHTML = renderDevoteeExploreTab();
+          }
+        }).catch(() => {});
+      } else {
+        container.innerHTML = renderDevoteeExploreTab();
+      }
+    } else if (tab === 'long') {
+      container.innerHTML = renderDevoteeLongTab(longs);
+    } else if (tab === 'profile') {
+      container.innerHTML = renderDevoteeProfileTab(bookings.length);
+    }
+  }
 }
 
 function renderDevoteePaymentTrackingTab(bookings, longs = (S.longs || [])) {
@@ -3438,24 +3512,20 @@ function renderDevoteePaymentTrackingTab(bookings, longs = (S.longs || [])) {
 }
 
 async function openBookingTimeline(arg) {
-  if (typeof arg === 'string' && (arg.startsWith('LP-') || arg.startsWith('LONG-'))) {
-    return openLongPujaTimeline(arg);
-  }
-  if (typeof arg === 'object' && arg && arg.id && (String(arg.id).startsWith('LP-') || String(arg.id).startsWith('LONG-'))) {
-    return openLongPujaTimeline(arg.id);
-  }
-  if (typeof arg === 'string' && (S.longs || []).some((x) => x.id === arg)) {
-    return openLongPujaTimeline(arg);
+  const targetId = (typeof arg === 'object' && arg) ? (arg.bookingId || arg.id) : arg;
+  if (!targetId && (!arg || typeof arg !== 'object')) return toast('Ceremony booking record not found', true);
+
+  if (targetId && (String(targetId).startsWith('LP-') || String(targetId).startsWith('LONG-') || (S.longs || []).some((x) => x.id === targetId))) {
+    return openLongPujaTimeline(targetId);
   }
 
-  let b = (typeof arg === 'object' && arg && arg.bookingId) ? arg : (S.bookings || []).find((x) => x.bookingId === arg);
-  if (!b && (typeof arg === 'string' || (arg && arg.id))) {
-    const id = typeof arg === 'string' ? arg : arg.id;
-    if ((S.longs || []).some((x) => x.id === id)) {
-      return openLongPujaTimeline(id);
-    }
+  let b = (typeof arg === 'object' && arg && arg.bookingId && arg.service) ? arg : null;
+  if (!b && targetId) {
+    b = (S.bookings || []).find((x) => x.bookingId === targetId || x._id === targetId);
+  }
+  if (!b && targetId) {
     try {
-      b = await api('/bookings/' + encodeURIComponent(id));
+      b = await api('/bookings/' + encodeURIComponent(targetId));
     } catch (e) {}
   }
   if (!b) return toast('Ceremony booking record not found', true);
@@ -3683,11 +3753,14 @@ async function openBookingTimeline(arg) {
 }
 
 async function openLongPujaTimeline(arg) {
-  let l = (typeof arg === 'object' && arg && arg.pujaName && arg.fromDate) ? arg : (S.longs || []).find((x) => x.id === arg || x._id === arg);
-  if (!l && (typeof arg === 'string' || (arg && arg.id))) {
-    const id = typeof arg === 'string' ? arg : arg.id;
+  const targetId = (typeof arg === 'object' && arg) ? (arg.id || arg._id) : arg;
+  let l = (typeof arg === 'object' && arg && arg.pujaName && arg.fromDate) ? arg : null;
+  if (!l && targetId) {
+    l = (S.longs || []).find((x) => x.id === targetId || x._id === targetId);
+  }
+  if (!l && targetId) {
     try {
-      l = await api('/long-puja-requests/' + encodeURIComponent(id));
+      l = await api('/long-puja-requests/' + encodeURIComponent(targetId));
     } catch (e) {}
   }
   if (!l) return toast('Multi-day ceremony record not found', true);
@@ -4437,7 +4510,7 @@ function renderDevoteeRefundsTab(bookings) {
               Your registered UPI ID or Bank Account is used by PujaConnect Administration for direct, instant refunds if any ceremony is cancelled.
             </p>
           </div>
-          <button class="btn btn-gold btn-sm" id="btn-save-payout-details">
+          <button class="btn btn-gold btn-sm" id="btn-save-payout-details" data-action="saveDevoteePayout">
             <span class="material-icons" style="font-size:14px;vertical-align:middle">save</span> Save Payout Details
           </button>
         </div>
@@ -4469,12 +4542,12 @@ function renderDevoteeRefundsTab(bookings) {
             <input type="file" id="dev-payout-qr-file" accept="image/*" style="display:none">
             <input id="dev-payout-qr" type="hidden" value="${esc(u.qrCode || '')}">
             <div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap">
-              <button type="button" class="btn btn-outline dark btn-sm" id="btn-upload-dev-qr">
+              <button type="button" class="btn btn-outline dark btn-sm" id="btn-upload-dev-qr" data-action="uploadDevoteeQr">
                 <span class="material-icons" style="font-size:15px">qr_code_scanner</span> ${u.qrCode ? 'Change QR Image' : 'Upload UPI QR Screenshot'}
               </button>
               <div id="dev-qr-preview-box" style="display:${u.qrCode ? 'flex' : 'none'};align-items:center;gap:8px">
-                <img id="dev-qr-preview-img" src="${esc(u.qrCode || '')}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1.5px solid #d99a19;padding:2px;background:#fff;cursor:pointer" alt="Devotee UPI QR" onclick="if(window.openQrViewModal) openQrViewModal(this.src, 'Your Devotee UPI QR Code')">
-                <button type="button" class="btn btn-red btn-sm" id="btn-remove-dev-qr" style="padding:2px 8px;font-size:11px">Remove</button>
+                <img id="dev-qr-preview-img" src="${esc(u.qrCode || '')}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1.5px solid #d99a19;padding:2px;background:#fff;cursor:pointer" alt="Devotee UPI QR" data-action="previewDevoteeQr" onclick="if(window.openQrViewModal) openQrViewModal(this.src, 'Your Devotee UPI QR Code')">
+                <button type="button" class="btn btn-red btn-sm" id="btn-remove-dev-qr" data-action="removeDevoteeQr" style="padding:2px 8px;font-size:11px">Remove</button>
               </div>
             </div>
             <small class="muted" style="font-size:11px;display:block;margin-top:3px">Allows administration to scan and disburse your refund in 1 second.</small>
@@ -6282,22 +6355,28 @@ const ACTIONS = {
     showView('dashboard');
     setTimeout(() => switchPanditSubtab('havan', d.id), 50);
   },
-  viewLongTimeline: (d) => openLongPujaTimeline(d.id),
+  viewLongTimeline: (d) => {
+    const id = (d && d.id) || (typeof d === 'string' ? d : '');
+    if (!id) return toast('Multi-day ceremony identifier missing', true);
+    openLongPujaTimeline(id);
+  },
   viewTimeline: (d) => {
-    const id = d && d.id;
-    if (id && (id.startsWith('LP-') || id.startsWith('LONG-') || (S.longs || []).some((x) => x.id === id))) {
+    const id = (d && d.id) || (typeof d === 'string' ? d : '');
+    if (!id) return toast('Ceremony identifier missing', true);
+    if (id && (String(id).startsWith('LP-') || String(id).startsWith('LONG-') || (S.longs || []).some((x) => x.id === id))) {
       return openLongPujaTimeline(id);
     }
     return openBookingTimeline(id);
   },
   rebookBooking: async (d) => {
-    let b = (S.bookings || []).find((x) => x.bookingId === d.id);
-    if (!b && d.id) {
+    const bId = d && d.id;
+    let b = (S.bookings || []).find((x) => x.bookingId === bId || x._id === bId);
+    if (!b && bId) {
       try {
-        b = await api('/bookings/' + encodeURIComponent(d.id));
+        b = await api('/bookings/' + encodeURIComponent(bId));
       } catch (e) {}
     }
-    if (!b) return toast('Booking record not found', true);
+    if (!b) return toast('Booking record not found for rebooking', true);
     openBooking({
       bookingId: b.bookingId,
       service: b.service,
@@ -6308,15 +6387,49 @@ const ACTIONS = {
       phone: b.phone || (S.user ? S.user.phone : ''),
       panditEmail: b.preferredPanditEmail || '',
       preferredPanditEmail: b.preferredPanditEmail || '',
-      fee: b.fee
+      fee: b.fee,
+      isRebook: true
     });
   },
-  slip: (d) => printSlip(S.bookings.find((b) => b.bookingId === d.id)),
-  cancelBooking: (d) => openDevoteeCancellationModal(d.id),
-  cancelLongPuja: (d) => openDevoteeLongCancellationModal(d.id),
+  slip: (d) => {
+    const bId = d && d.id;
+    let b = (S.bookings || []).find((x) => x.bookingId === bId || x._id === bId);
+    if (!b && bId) {
+      api('/bookings/' + encodeURIComponent(bId)).then((res) => {
+        if (res) printSlip(res);
+        else toast('Booking record not found for slip', true);
+      }).catch((e) => toast(e.message || 'Error generating slip', true));
+      return;
+    }
+    if (!b) return toast('Booking record not found for slip', true);
+    printSlip(b);
+  },
+  cancelBooking: (d) => {
+    const bId = d && d.id;
+    if (!bId) return toast('Booking identifier missing', true);
+    openDevoteeCancellationModal(bId);
+  },
+  cancelLongPuja: (d) => {
+    const lId = d && d.id;
+    if (!lId) return toast('Multi-day ceremony identifier missing', true);
+    openDevoteeLongCancellationModal(lId);
+  },
   panditCancelBooking: (d) => openPanditCancellationModal(d.id),
   reschedule: (d) => {
-    const b = S.bookings.find((x) => x.bookingId === d.id);
+    const bId = d && d.id;
+    let b = (S.bookings || []).find((x) => x.bookingId === bId || x._id === bId);
+    if (!b && bId) {
+      api('/bookings/' + encodeURIComponent(bId)).then((res) => {
+        if (res) {
+          if (!S.bookings) S.bookings = [];
+          S.bookings.push(res);
+          ACTIONS.reschedule({ id: bId });
+        } else {
+          toast('Booking record not found', true);
+        }
+      }).catch(() => toast('Booking record not found', true));
+      return;
+    }
     if (!b) return toast('Booking record not found', true);
     openModal('Reschedule Ceremony Slot', `
       <div>
@@ -6515,9 +6628,15 @@ const ACTIONS = {
   },
   panditDecisionModal: (d) => openPanditDecisionModal(d.id, d.decision || '', d.email || ''),
   dashTab: (d) => {
-    S.dashTab = d.tab;
+    const targetTab = d && d.tab;
+    if (!targetTab) return;
+    S.dashTab = targetTab;
     if (S.user && S.user.role === 'pandit' && document.getElementById('dash-tab-content')) {
-      switchPanditSubtab(d.tab);
+      switchPanditSubtab(targetTab);
+      return;
+    }
+    if (S.user && S.user.role !== 'admin' && document.getElementById('dash-tab-content')) {
+      switchDevoteeSubtab(targetTab);
       return;
     }
     renderDashboard();
@@ -6529,7 +6648,74 @@ const ACTIONS = {
       return;
     }
     S.dashTab = 'profile';
+    if (S.view === 'dashboard' && document.getElementById('dash-tab-content')) {
+      if (S.user.role === 'pandit') switchPanditSubtab('profile');
+      else switchDevoteeSubtab('profile');
+      return;
+    }
     showView('dashboard');
+  },
+  saveDevoteePayout: async (d, el) => {
+    const btn = el || document.getElementById('btn-save-payout-details');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="material-icons spin">sync</span> Saving...';
+    }
+    try {
+      const upiId = (document.getElementById('dev-payout-upi') ? document.getElementById('dev-payout-upi').value : '').trim();
+      const bankAccount = (document.getElementById('dev-payout-acc') ? document.getElementById('dev-payout-acc').value : '').trim();
+      const ifscCode = (document.getElementById('dev-payout-ifsc') ? document.getElementById('dev-payout-ifsc').value : '').trim().toUpperCase();
+      const accountHolder = (document.getElementById('dev-payout-holder') ? document.getElementById('dev-payout-holder').value : '').trim();
+      const bankName = (document.getElementById('dev-payout-bank') ? document.getElementById('dev-payout-bank').value : '').trim();
+      const qrCode = (document.getElementById('dev-payout-qr') ? document.getElementById('dev-payout-qr').value : '').trim();
+
+      const res = await api('/users/profile', {
+        method: 'PUT',
+        body: { upiId, bankAccount, ifscCode, accountHolder, bankName, qrCode }
+      });
+      if (res) {
+        saveSession(res, S.token);
+      }
+      toast('Refund & Payout details saved successfully! 🙏');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-icons">check_circle</span> Saved';
+        setTimeout(() => {
+          if (btn) btn.innerHTML = '<span class="material-icons">save</span> Save Payout Details';
+        }, 2000);
+      }
+    } catch (e) {
+      toast(e.message || 'Error saving payout details', true);
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-icons">save</span> Save Payout Details';
+      }
+    }
+  },
+  uploadDevoteeQr: () => {
+    const qrFileInput = document.getElementById('dev-payout-qr-file');
+    if (qrFileInput) qrFileInput.click();
+  },
+  removeDevoteeQr: () => {
+    const qrHiddenInp = document.getElementById('dev-payout-qr');
+    const qrPreviewBox = document.getElementById('dev-qr-preview-box');
+    const qrPreviewImg = document.getElementById('dev-qr-preview-img');
+    const qrFileInput = document.getElementById('dev-payout-qr-file');
+    const uploadQrBtn = document.getElementById('btn-upload-dev-qr');
+    if (qrHiddenInp) qrHiddenInp.value = '';
+    if (qrPreviewImg) qrPreviewImg.src = '';
+    if (qrPreviewBox) qrPreviewBox.style.display = 'none';
+    if (qrFileInput) qrFileInput.value = '';
+    if (uploadQrBtn) uploadQrBtn.innerHTML = '<span class="material-icons" style="font-size:15px">qr_code_scanner</span> Upload UPI QR Screenshot';
+    toast('QR Code removed. Remember to click "Save Payout Details".');
+  },
+  previewDevoteeQr: () => {
+    const qrHiddenInp = document.getElementById('dev-payout-qr');
+    const qrPreviewImg = document.getElementById('dev-qr-preview-img');
+    const src = (qrPreviewImg && qrPreviewImg.src) || (qrHiddenInp && qrHiddenInp.value);
+    if (src && window.openQrViewModal) {
+      openQrViewModal(src, 'Your Devotee UPI QR Code');
+    }
   },
   registerDevotee: () => openAuth('register'),
   changeDevoteeLocation: () => {
@@ -7332,10 +7518,21 @@ window.openQrViewModal = function(url, title) {
 document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-action]');
   if (!el) return;
-  const fn = ACTIONS[el.dataset.action];
+  // If clicked inside an interactive form control that is NOT the action element itself, don't trigger parent action
+  const interactiveTarget = ev.target.closest('input, select, textarea, [contenteditable]');
+  if (interactiveTarget && interactiveTarget !== el && !interactiveTarget.matches('[data-action]')) {
+    return;
+  }
+  const action = el.dataset.action;
+  const fn = ACTIONS[action];
   if (!fn) return;
   if (el.tagName === 'A') ev.preventDefault();
-  fn(el.dataset, el, ev);
+  try {
+    fn(el.dataset, el, ev);
+  } catch (err) {
+    console.error(`[PujaConnect Action Error (${action})]:`, err);
+    toast(err.message || 'Operation failed. Please try again.', true);
+  }
 });
 
 document.addEventListener('keydown', (ev) => {

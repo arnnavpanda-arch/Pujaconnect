@@ -2286,25 +2286,40 @@ app.post('/api/bookings/:id/verify-payment', wrap(async (req, res) => {
   res.json({ ok: true, booking: b });
 }));
 
-// Admin pays Pandit: marks payout as Paid and emails Pandit with credited amount & account number
+// Admin pays Pandit: marks payout as Paid (or Admin Fee received) and emails Pandit with full breakdown
 app.post('/api/bookings/:id/pay-pandit', adminOnly, wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
-  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  
+  // If not found in regular bookings, check if this is a LongPujaRequest
+  if (!b) {
+    const lQuery = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+      : { id: req.params.id };
+    const r = await LongPujaRequest.findOne(lQuery);
+    if (!r) return res.status(404).json({ error: 'Ceremony booking not found' });
+    return handleLongPujaPayPandit(r, req, res);
+  }
+
   if (!b.panditEmail) return res.status(400).json({ error: 'No pandit assigned to this booking' });
 
   const pandit = await Pandit.findOne({ email: lc(b.panditEmail) });
-  const { amount, txnId, method, adminFeePercent, adminFeeAmount } = req.body || {};
+  const { amount, txnId, method, adminFeePercent, adminFeeAmount, otherFee, paymentType } = req.body || {};
 
   const mainFee = Number(b.fee) || (pandit && pandit.fee) || 1500;
   const percent = Number(adminFeePercent !== undefined ? adminFeePercent : (b.adminFeePercent !== undefined ? b.adminFeePercent : 10));
   const feeDeduction = Number(adminFeeAmount !== undefined ? adminFeeAmount : Math.round((mainFee * percent) / 100));
-  const payoutAmount = Number(amount) || Math.max(0, mainFee - feeDeduction);
+  const otherFeeAmt = Number(otherFee !== undefined ? otherFee : (b.otherFee || 0));
+  const effPaymentType = paymentType || b.paymentType || (b.paymentMethod === 'Cash Paid to Pandit' ? 'pandit_gives_admin_fee' : 'admin_transfer');
+  
+  const payoutAmount = Number(amount) || (effPaymentType === 'pandit_gives_admin_fee' ? (feeDeduction + otherFeeAmt) : Math.max(0, mainFee - feeDeduction - otherFeeAmt));
   const payoutTxn = txnId ? String(txnId).trim() : ('PAYOUT-' + b.bookingId.replace(/[^0-9]/g, '') + '-' + Date.now().toString().slice(-4));
-  const payoutMethod = method || 'Direct Bank Transfer (IMPS/NEFT)';
+  const payoutMethod = method || (effPaymentType === 'pandit_gives_admin_fee' ? 'Direct / Cash Handover' : 'Direct Bank Transfer (IMPS/NEFT)');
 
   b.adminFeePercent = percent;
   b.adminFeeAmount = feeDeduction;
-  b.panditNetPayout = payoutAmount;
+  b.otherFee = otherFeeAmt;
+  b.paymentType = effPaymentType;
+  b.panditNetPayout = effPaymentType === 'pandit_gives_admin_fee' ? Math.max(0, mainFee - feeDeduction - otherFeeAmt) : payoutAmount;
   b.panditPayoutStatus = 'Paid';
   b.panditPayoutAmount = payoutAmount;
   b.panditPayoutDate = new Date();
@@ -2312,34 +2327,177 @@ app.post('/api/bookings/:id/pay-pandit', adminOnly, wrap(async (req, res) => {
   b.panditPayoutMethod = payoutMethod;
   await b.save();
 
-  // Send email to Pandit notifying money amount credited to account number with full uncompacted details
-  await sendSafe('PANDIT_PAYMENT_CREDITED', b.panditEmail, {
-    bookingId: b.bookingId,
-    service: b.service,
-    panditName: (pandit && pandit.name) || b.panditName || 'Pandit ji',
-    userName: b.userName,
-    userPhone: b.phone || '',
-    userEmail: b.userEmail,
-    date: b.date,
-    time: b.time,
-    district: b.district,
-    address: b.address,
-    mainFee,
-    adminFeePercent: percent,
-    adminFeeAmount: feeDeduction,
-    amount: payoutAmount,
-    bankAccount: (pandit && pandit.bankAccount) || '',
-    bankName: (pandit && pandit.bankName) || '',
-    ifscCode: (pandit && pandit.ifscCode) || '',
-    accountHolder: (pandit && pandit.accountHolder) || (pandit && pandit.name) || '',
-    upiId: (pandit && pandit.upiId) || '',
-    qrCode: (pandit && pandit.qrCode) || '',
-    payoutTxnId: payoutTxn,
-    payoutMethod,
-    paymentProof: b.paymentProof
-  });
+  if (effPaymentType === 'pandit_gives_admin_fee') {
+    // Send email acknowledging Admin Fee Received from Pandit
+    await sendSafe('PANDIT_ADMIN_FEE_RECEIVED', b.panditEmail, {
+      bookingId: b.bookingId,
+      service: b.service,
+      panditName: (pandit && pandit.name) || b.panditName || 'Pandit ji',
+      userName: b.userName,
+      userPhone: b.phone || '',
+      userEmail: b.userEmail,
+      date: b.date,
+      time: b.time,
+      district: b.district,
+      address: b.address,
+      mainFee,
+      adminFeePercent: percent,
+      adminFeeAmount: feeDeduction,
+      otherFee: otherFeeAmt,
+      amount: payoutAmount,
+      payoutTxnId: payoutTxn,
+      payoutMethod
+    });
+  } else {
+    // Send email to Pandit notifying money amount credited to account number with full uncompacted details
+    await sendSafe('PANDIT_PAYMENT_CREDITED', b.panditEmail, {
+      bookingId: b.bookingId,
+      service: b.service,
+      panditName: (pandit && pandit.name) || b.panditName || 'Pandit ji',
+      userName: b.userName,
+      userPhone: b.phone || '',
+      userEmail: b.userEmail,
+      date: b.date,
+      time: b.time,
+      district: b.district,
+      address: b.address,
+      mainFee,
+      adminFeePercent: percent,
+      adminFeeAmount: feeDeduction,
+      otherFee: otherFeeAmt,
+      amount: payoutAmount,
+      bankAccount: (pandit && pandit.bankAccount) || '',
+      bankName: (pandit && pandit.bankName) || '',
+      ifscCode: (pandit && pandit.ifscCode) || '',
+      accountHolder: (pandit && pandit.accountHolder) || (pandit && pandit.name) || '',
+      upiId: (pandit && pandit.upiId) || '',
+      qrCode: (pandit && pandit.qrCode) || '',
+      payoutTxnId: payoutTxn,
+      payoutMethod,
+      paymentProof: b.paymentProof
+    });
+  }
 
   res.json({ ok: true, booking: b });
+}));
+
+async function handleLongPujaPayPandit(r, req, res) {
+  const { amount, txnId, method, adminFeePercent, adminFeeAmount, otherFee, paymentType, panditEmail, grossFee } = req.body || {};
+  const targetEmail = lc(panditEmail || (r.assignedPandits && r.assignedPandits[0]) || '');
+  if (!targetEmail) return res.status(400).json({ error: 'No assigned pandit email specified for payout' });
+
+  const pandit = await Pandit.findOne({ email: targetEmail });
+  const teamSize = Math.max(1, Number(r.requiredPandits) || (r.assignedPandits && r.assignedPandits.length) || 1);
+  const totalCost = Number(r.estimatedCost) || 0;
+  const perPanditGross = Number(grossFee) || Math.round(totalCost / teamSize);
+
+  const percent = Number(adminFeePercent !== undefined ? adminFeePercent : (r.adminFeePercent !== undefined ? r.adminFeePercent : 10));
+  const feeDeduction = Number(adminFeeAmount !== undefined ? adminFeeAmount : Math.round((perPanditGross * percent) / 100));
+  const otherFeeAmt = Number(otherFee !== undefined ? otherFee : (r.otherFee || 0));
+  const effPaymentType = paymentType || r.paymentType || (r.paymentMethod === 'Cash Paid to Pandit' ? 'pandit_gives_admin_fee' : 'admin_transfer');
+
+  const payoutAmount = Number(amount) || (effPaymentType === 'pandit_gives_admin_fee' ? (feeDeduction + otherFeeAmt) : Math.max(0, perPanditGross - feeDeduction - otherFeeAmt));
+  const payoutTxn = txnId ? String(txnId).trim() : ('PAYOUT-' + r.id.replace(/[^0-9]/g, '') + '-' + Date.now().toString().slice(-4));
+  const payoutMethod = method || (effPaymentType === 'pandit_gives_admin_fee' ? 'Direct / Cash Handover' : 'Direct Bank Transfer (IMPS/NEFT)');
+
+  r.panditPayouts = r.panditPayouts || {};
+  r.panditPayouts[targetEmail] = {
+    panditEmail: targetEmail,
+    panditName: (pandit && pandit.name) || targetEmail,
+    payoutStatus: 'Paid',
+    grossFee: perPanditGross,
+    adminFeePercent: percent,
+    adminFeeAmount: feeDeduction,
+    otherFee: otherFeeAmt,
+    netPayout: effPaymentType === 'pandit_gives_admin_fee' ? Math.max(0, perPanditGross - feeDeduction - otherFeeAmt) : payoutAmount,
+    payoutAmount,
+    payoutDate: new Date(),
+    payoutTxnId: payoutTxn,
+    payoutMethod,
+    paymentType: effPaymentType
+  };
+
+  r.adminFeePercent = percent;
+  r.adminFeeAmount = feeDeduction * teamSize;
+  r.otherFee = otherFeeAmt;
+  r.paymentType = effPaymentType;
+
+  // Check if all assigned pandits are paid
+  const assignedList = (r.assignedPandits && r.assignedPandits.length > 0) ? r.assignedPandits : [targetEmail];
+  const allPaid = assignedList.every(em => r.panditPayouts[lc(em)] && r.panditPayouts[lc(em)].payoutStatus === 'Paid');
+  if (allPaid || assignedList.length <= 1) {
+    r.panditPayoutStatus = 'Paid';
+    r.panditPayoutAmount = payoutAmount;
+    r.panditPayoutDate = new Date();
+    r.panditPayoutTxnId = payoutTxn;
+    r.panditPayoutMethod = payoutMethod;
+  }
+
+  r.markModified('panditPayouts');
+  await r.save();
+
+  if (effPaymentType === 'pandit_gives_admin_fee') {
+    // Send email acknowledging Admin Fee Received from Pandit
+    await sendSafe('PANDIT_ADMIN_FEE_RECEIVED', targetEmail, {
+      bookingId: r.id,
+      service: `${r.pujaName} (Multi-Day Ceremony · ${r.totalDays} Days)`,
+      panditName: (pandit && pandit.name) || 'Pandit ji',
+      userName: r.userName,
+      userPhone: r.phone || '',
+      userEmail: r.userEmail,
+      date: `${r.fromDate} → ${r.toDate} (${r.totalDays || 1} Days)`,
+      time: `${r.dailyHours || 4}h/day, Daily Start: ${r.startTime || '08:00 AM'}`,
+      district: r.district,
+      address: r.venueAddress || r.venue || r.address || r.district,
+      mainFee: perPanditGross,
+      adminFeePercent: percent,
+      adminFeeAmount: feeDeduction,
+      otherFee: otherFeeAmt,
+      amount: payoutAmount,
+      payoutTxnId: payoutTxn,
+      payoutMethod
+    });
+  } else {
+    // Send email to Pandit notifying money amount credited to account number with full uncompacted details
+    await sendSafe('PANDIT_PAYMENT_CREDITED', targetEmail, {
+      bookingId: r.id,
+      service: `${r.pujaName} (Multi-Day Ceremony · ${r.totalDays} Days)`,
+      panditName: (pandit && pandit.name) || 'Pandit ji',
+      userName: r.userName,
+      userPhone: r.phone || '',
+      userEmail: r.userEmail,
+      date: `${r.fromDate} → ${r.toDate} (${r.totalDays || 1} Days)`,
+      time: `${r.dailyHours || 4}h/day, Daily Start: ${r.startTime || '08:00 AM'}`,
+      district: r.district,
+      address: r.venueAddress || r.venue || r.address || r.district,
+      mainFee: perPanditGross,
+      adminFeePercent: percent,
+      adminFeeAmount: feeDeduction,
+      otherFee: otherFeeAmt,
+      amount: payoutAmount,
+      bankAccount: (pandit && pandit.bankAccount) || '',
+      bankName: (pandit && pandit.bankName) || '',
+      ifscCode: (pandit && pandit.ifscCode) || '',
+      accountHolder: (pandit && pandit.accountHolder) || (pandit && pandit.name) || '',
+      upiId: (pandit && pandit.upiId) || '',
+      qrCode: (pandit && pandit.qrCode) || '',
+      payoutTxnId: payoutTxn,
+      payoutMethod,
+      paymentProof: r.paymentProof
+    });
+  }
+
+  return res.json({ ok: true, request: r });
+}
+
+// Dedicated endpoint for Long Puja Request Pandit Payouts
+app.post('/api/long-puja-requests/:id/pay-pandit', adminOnly, wrap(async (req, res) => {
+  const query = mongoose.Types.ObjectId.isValid(req.params.id)
+    ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+    : { id: req.params.id };
+  const r = await LongPujaRequest.findOne(query);
+  if (!r) return res.status(404).json({ error: 'Multi-day ritual request not found' });
+  return handleLongPujaPayPandit(r, req, res);
 }));
 
 app.post('/api/bookings/:id/reject-payment', wrap(async (req, res) => {
@@ -3066,6 +3224,45 @@ app.post('/api/long-puja-requests/:id/verify-payment', wrap(async (req, res) => 
   if (!r.invoiceGeneratedAt) {
     r.invoiceGeneratedAt = new Date();
   }
+
+  // Calculate platform admin fee, other fee, and initialize assigned pandit payouts
+  const commSetting = await AppSetting.findOne({ key: 'commission_percent' });
+  const commPct = (commSetting && typeof commSetting.value === 'number') ? commSetting.value : (r.adminFeePercent || 10);
+  r.adminFeePercent = commPct;
+
+  const teamSize = Math.max(1, Number(r.requiredPandits) || (r.assignedPandits && r.assignedPandits.length) || 1);
+  const totalCost = Number(r.estimatedCost) || 0;
+  const perPanditGross = Math.round(totalCost / teamSize);
+  const perPanditAdminCut = Math.round((perPanditGross * commPct) / 100);
+  const otherFeeAmt = Number(r.otherFee || 0);
+  const perPanditNet = Math.max(0, perPanditGross - perPanditAdminCut - otherFeeAmt);
+
+  r.adminFeeAmount = perPanditAdminCut * teamSize;
+  r.otherFee = otherFeeAmt;
+  r.panditNetPayout = perPanditNet;
+  r.paymentType = r.paymentMethod === 'Cash Paid to Pandit' ? 'pandit_gives_admin_fee' : 'admin_transfer';
+
+  r.panditPayouts = r.panditPayouts || {};
+  if (Array.isArray(r.assignedPandits) && r.assignedPandits.length > 0) {
+    for (const pEmail of r.assignedPandits) {
+      const e = lc(pEmail);
+      if (!r.panditPayouts[e]) {
+        const pObj = await Pandit.findOne({ email: e });
+        r.panditPayouts[e] = {
+          panditEmail: e,
+          panditName: pObj ? pObj.name : e,
+          payoutStatus: 'Pending',
+          grossFee: perPanditGross,
+          adminFeePercent: commPct,
+          adminFeeAmount: perPanditAdminCut,
+          otherFee: otherFeeAmt,
+          netPayout: perPanditNet,
+          paymentType: r.paymentType
+        };
+      }
+    }
+  }
+  r.markModified('panditPayouts');
   await r.save();
 
   // Send official payment receipt email to devotee
