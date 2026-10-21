@@ -364,6 +364,36 @@
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 
+    function isPanditAvailableOnDate(p, dateStr) {
+      if (!p || !dateStr) return { available: true };
+      const dStr = String(dateStr).trim().split('T')[0];
+
+      // 1. Check marked non-availability
+      const unavail = p.unavailableDates || [];
+      for (const item of unavail) {
+        const itemDate = typeof item === 'string' ? item.trim() : (item && item.date ? item.date.trim() : '');
+        if (itemDate === dStr) {
+          const reason = (typeof item === 'object' && item.reason) ? ` (${item.reason})` : '';
+          return { available: false, reason: `Marked Non-Availability${reason}` };
+        }
+      }
+
+      // 2. Check availableDays of the week
+      if (Array.isArray(p.availableDays) && p.availableDays.length) {
+        const parts = dStr.split('-');
+        if (parts.length === 3) {
+          const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+          const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const dayName = dayNames[dt.getDay()];
+          if (!p.availableDays.includes(dayName)) {
+            return { available: false, reason: `Not scheduled on ${dayName}s` };
+          }
+        }
+      }
+
+      return { available: true };
+    }
+
     const SELECTED = {
       bookings: new Set(),
       pandits: new Set(),
@@ -1028,20 +1058,23 @@
             const wasRejected = prevRejected.includes(p.email.toLowerCase());
             const isCurrentlyAssigned = b.panditEmail && p.email.toLowerCase() === b.panditEmail.toLowerCase();
             const distFee = (p.districtPrices && p.districtPrices[b.district]) || p.fee || 1500;
+            const avail = isPanditAvailableOnDate(p, b.date);
+            const isUnavail = !avail.available;
             return `
-              <label style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid ${isPref ? '#f59e0b' : '#ebd9c2'};border-radius:10px;background:${wasRejected ? '#fff5f5' : isPref ? '#fffdf5' : '#fff'};cursor:pointer">
-                <input type="radio" name="selected-pandit" value="${esc(p.email)}" ${isCurrentlyAssigned || (!b.panditEmail && isPref && !wasRejected) ? 'checked' : ''}>
+              <label style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1.5px solid ${isUnavail ? '#ef9a9a' : isPref ? '#f59e0b' : '#ebd9c2'};border-radius:10px;background:${isUnavail ? '#fff5f5' : wasRejected ? '#fff5f5' : isPref ? '#fffdf5' : '#fff'};cursor:pointer;${isUnavail ? 'border-left:5px solid #d32f2f;' : ''}">
+                <input type="radio" name="selected-pandit" value="${esc(p.email)}" data-unavail="${isUnavail ? '1' : '0'}" data-unavail-reason="${esc(avail.reason)}" data-pandit-name="${esc(p.name)}" ${(!isUnavail && (isCurrentlyAssigned || (!b.panditEmail && isPref && !wasRejected))) ? 'checked' : ''}>
                 <img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" style="width:44px;height:44px;border-radius:50%;object-fit:cover" alt="Avatar">
                 <div style="flex:1">
                   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                     <b style="color:var(--admin-dark)">${esc(p.name)}</b>
                     ${isPref ? '<span class="badge" style="background:#fef3c7;color:#92400e;font-size:10.5px">★ Devotee Preferred</span>' : ''}
                     ${wasRejected ? '<span class="badge red" style="font-size:10.5px">Declined Earlier</span>' : ''}
-                    <span class="badge green" style="font-size:10.5px">Verified</span>
+                    ${isUnavail ? `<span class="badge red" style="font-size:10.5px;font-weight:700">⚠️ Pandit Not Available That Day (${esc(avail.reason)})</span>` : '<span class="badge green" style="font-size:10.5px">Verified &amp; Available</span>'}
                   </div>
                   <div class="muted" style="font-size:12px;margin-top:2px">
                     Exp: ${esc(p.exp || p.experience + ' Yrs')} · Home: ${esc(p.district)} · Serves: ${(p.workingDistricts || [p.district]).join(', ')}
                   </div>
+                  ${isUnavail ? `<div style="font-size:11.5px;color:#c62828;font-weight:700;margin-top:3px">⚠️ Pandit cannot be assigned on ${esc(b.date)}: ${esc(avail.reason)}</div>` : ''}
                 </div>
                 <div style="text-align:right">
                   <b style="color:var(--admin-gold);font-size:14px">${inr(distFee)}</b>
@@ -1061,6 +1094,9 @@
           btn.onclick = async () => {
             const checked = m.querySelector('input[name="selected-pandit"]:checked');
             if (!checked) return toast('Please select a Pandit from the list', true);
+            if (checked.dataset.unavail === '1') {
+              return toast(`⚠️ Pandit ${checked.dataset.panditName} is not available on ${b.date} (${checked.dataset.unavailReason}). Please select an available Pandit.`, true);
+            }
             btn.disabled = true;
             btn.innerHTML = '<span class="material-icons spin">sync</span> Assigning Pandit...';
             try {
@@ -1786,9 +1822,12 @@
               <option value="">✨ Any Available Verified Pandit (Auto-assigned)</option>
               ${eligiblePandits.map(p => {
                 const servesTag = (!district || (p.workingDistricts || []).includes(district) || p.district === district) ? `Serves ${district || p.district}` : p.district;
-                return `<option value="${esc(p.email)}">Pt. ${esc(p.name)} [Specialty: ${esc(p.specialty || 'Vedic Rituals')}] (${esc(servesTag)}) — Dakshina: ${inr(p.fee)}</option>`;
+                const curDate = (new Date()).toISOString().split('T')[0];
+                const avail = isPanditAvailableOnDate(p, curDate);
+                return `<option value="${esc(p.email)}" ${!avail.available ? 'style="color:#c62828"' : ''}>Pt. ${esc(p.name)} [Specialty: ${esc(p.specialty || 'Vedic Rituals')}] (${esc(servesTag)}) — Dakshina: ${inr(p.fee)}${!avail.available ? ` [⚠️ NOT AVAILABLE: ${avail.reason}]` : ''}</option>`;
               }).join('')}
             </select>
+            <div id="rb-pandit-avail-warning" style="display:none;margin-top:6px;padding:8px 10px;background:#ffebee;border:1px solid #ffcdd2;color:#c62828;border-radius:6px;font-size:12px;font-weight:700"></div>
             <small class="muted" style="display:block;margin-top:3px;font-size:11px">All registered verified Pandits can perform all sacred Vedic pujas. Pandit specialty is displayed for guidance.</small>
           </div>
           <div class="full">
@@ -1800,6 +1839,45 @@
           <span class="material-icons">send</span> Confirm &amp; Schedule Ceremony
         </button>
       `, (m) => {
+        const rbDateInput = m.querySelector('#rb-date');
+        const rbPanditSelect = m.querySelector('#rb-pandit');
+        const warningBox = m.querySelector('#rb-pandit-avail-warning');
+
+        const refreshRebookPandits = () => {
+          const chosenDate = rbDateInput.value;
+          const currentVal = rbPanditSelect.value;
+          let optsHtml = '<option value="">✨ Any Available Verified Pandit (Auto-assigned)</option>';
+          eligiblePandits.forEach(p => {
+            const servesTag = (!district || (p.workingDistricts || []).includes(district) || p.district === district) ? `Serves ${district || p.district}` : p.district;
+            const avail = isPanditAvailableOnDate(p, chosenDate);
+            optsHtml += `<option value="${esc(p.email)}" ${currentVal === p.email ? 'selected' : ''} ${!avail.available ? 'style="color:#c62828"' : ''}>Pt. ${esc(p.name)} (${esc(servesTag)}) — Dakshina: ${inr(p.fee)}${!avail.available ? ` [⚠️ NOT AVAILABLE: ${avail.reason}]` : ''}</option>`;
+          });
+          rbPanditSelect.innerHTML = optsHtml;
+          checkSelectedPanditAvail();
+        };
+
+        const checkSelectedPanditAvail = () => {
+          const chosenDate = rbDateInput.value;
+          const pEmail = rbPanditSelect.value;
+          if (!pEmail) {
+            warningBox.style.display = 'none';
+            return;
+          }
+          const p = eligiblePandits.find(x => x.email.toLowerCase() === pEmail.toLowerCase());
+          if (p) {
+            const avail = isPanditAvailableOnDate(p, chosenDate);
+            if (!avail.available) {
+              warningBox.style.display = 'block';
+              warningBox.innerHTML = `⚠️ Pandit ${esc(p.name)} is not available on ${esc(chosenDate)} (${esc(avail.reason)}). Please pick an available Pandit.`;
+            } else {
+              warningBox.style.display = 'none';
+            }
+          }
+        };
+
+        rbDateInput.addEventListener('change', refreshRebookPandits);
+        rbPanditSelect.addEventListener('change', checkSelectedPanditAvail);
+
         document.getElementById('btn-submit-rebook').onclick = async () => {
           const service = document.getElementById('rb-service').value;
           const dist = document.getElementById('rb-district').value.trim();
@@ -1809,6 +1887,16 @@
           const address = document.getElementById('rb-address').value.trim();
 
           if (!service || !dist || !date) return toast('Please fill required fields (Puja, District, Date)', true);
+
+          if (pEmail) {
+            const p = eligiblePandits.find(x => x.email.toLowerCase() === pEmail.toLowerCase());
+            if (p) {
+              const avail = isPanditAvailableOnDate(p, date);
+              if (!avail.available) {
+                return toast(`⚠️ Pandit ${p.name} is not available on ${date} (${avail.reason}). Please select another Pandit.`, true);
+              }
+            }
+          }
 
           try {
             const newBooking = await api('/bookings', {
@@ -1969,10 +2057,104 @@
           }).join('')}
         </div>
 
+        <!-- Admin Configures Daily Ritual Time Slots for this Pandit -->
+        <div style="background:#fcf8f0;border:1.5px solid #ebd9c2;border-radius:10px;padding:14px;margin-top:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="color:var(--admin-gold);font-size:20px">schedule</span>
+              <label style="font-weight:700;margin:0;color:var(--admin-dark)">Official Daily Ritual Time Slots</label>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button type="button" class="btn btn-outline dark btn-sm" id="btn-adm-slots-standard" style="font-size:11px;padding:3px 8px">All Standard (5)</button>
+              <button type="button" class="btn btn-outline dark btn-sm" id="btn-adm-slots-morning" style="font-size:11px;padding:3px 8px">Morning (2)</button>
+              <button type="button" class="btn btn-outline dark btn-sm" id="btn-adm-slots-evening" style="font-size:11px;padding:3px 8px">Evening (2)</button>
+            </div>
+          </div>
+          <p style="margin:0 0 10px;font-size:12px;color:#7a553e">
+            Admin sets official ceremony time slots. Devotees book rituals in these slots. Saving sends an official email to <b>${esc(p.name)}</b> with all configured daily slots.
+          </p>
+
+          <div id="adm-slots-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="adm-new-slot-input" placeholder="e.g. 06:30 AM - 09:30 AM" style="flex:1;font-size:12.5px;padding:6px 10px">
+            <button type="button" class="btn btn-outline dark btn-sm" id="btn-adm-add-slot" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:14px">add</span> Add Slot
+            </button>
+          </div>
+        </div>
+
         <button class="btn btn-gold" id="btn-save-dist-prices" style="width:100%;margin-top:18px">
-          <span class="material-icons">save</span> Save District Pricing
+          <span class="material-icons">save</span> Save District Pricing &amp; Ritual Time Slots
         </button>
       `, (m) => {
+        let curSlots = [...(Array.isArray(p.timeSlots) && p.timeSlots.length ? p.timeSlots : ['06:00 AM - 09:00 AM', '09:00 AM - 12:00 PM', '01:00 PM - 04:00 PM', '04:00 PM - 07:00 PM', '07:00 PM - 10:00 PM'])];
+        const chipsContainer = m.querySelector('#adm-slots-chips');
+
+        function renderAdmSlots() {
+          if (!chipsContainer) return;
+          if (!curSlots.length) {
+            chipsContainer.innerHTML = '<span class="muted" style="font-size:12px">No slots configured. Use preset buttons above or add custom slots.</span>';
+            return;
+          }
+          chipsContainer.innerHTML = curSlots.map((s, idx) => `
+            <span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1.5px solid #ebd9c2;border-radius:20px;padding:4px 10px;font-size:12px;font-weight:700;color:var(--admin-dark)">
+              <span class="material-icons" style="font-size:14px;color:var(--admin-gold)">schedule</span>
+              <span>${esc(s)}</span>
+              <button type="button" data-adm-slot-idx="${idx}" class="adm-slot-del" style="background:none;border:none;padding:0;cursor:pointer;color:#c62828;display:flex;align-items:center" title="Remove slot">
+                <span class="material-icons" style="font-size:14px">close</span>
+              </button>
+            </span>
+          `).join('');
+
+          chipsContainer.querySelectorAll('.adm-slot-del').forEach(delBtn => {
+            delBtn.onclick = () => {
+              const i = Number(delBtn.dataset.admSlotIdx);
+              curSlots.splice(i, 1);
+              renderAdmSlots();
+            };
+          });
+        }
+
+        renderAdmSlots();
+
+        const btnStd = m.querySelector('#btn-adm-slots-standard');
+        if (btnStd) {
+          btnStd.onclick = () => {
+            curSlots = ['06:00 AM - 09:00 AM', '09:00 AM - 12:00 PM', '01:00 PM - 04:00 PM', '04:00 PM - 07:00 PM', '07:00 PM - 10:00 PM'];
+            renderAdmSlots();
+          };
+        }
+        const btnMorn = m.querySelector('#btn-adm-slots-morning');
+        if (btnMorn) {
+          btnMorn.onclick = () => {
+            curSlots = ['06:00 AM - 09:00 AM', '09:00 AM - 12:00 PM'];
+            renderAdmSlots();
+          };
+        }
+        const btnEve = m.querySelector('#btn-adm-slots-evening');
+        if (btnEve) {
+          btnEve.onclick = () => {
+            curSlots = ['04:00 PM - 07:00 PM', '07:00 PM - 10:00 PM'];
+            renderAdmSlots();
+          };
+        }
+
+        const addSlotBtn = m.querySelector('#btn-adm-add-slot');
+        const newSlotInp = m.querySelector('#adm-new-slot-input');
+        if (addSlotBtn && newSlotInp) {
+          const doAdd = () => {
+            const val = newSlotInp.value.trim();
+            if (!val) return toast('Please enter a time slot (e.g. 06:30 AM - 09:30 AM)', true);
+            if (curSlots.includes(val)) return toast('Time slot already added', true);
+            curSlots.push(val);
+            newSlotInp.value = '';
+            renderAdmSlots();
+          };
+          addSlotBtn.onclick = doAdd;
+          newSlotInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } };
+        }
+
         // Instant visual feedback when admin types in amounts
         m.querySelectorAll('.adm-dist-fee-input').forEach(inp => {
           inp.addEventListener('input', () => {
@@ -2035,19 +2217,22 @@
               prices[d] = val;
             });
 
+            if (!curSlots.length) return toast('Please configure at least one ritual time slot', true);
+
             // Optimistically update in memory immediately so UI does not hang or lag
             p.fee = baseFee;
             p.districtPrices = { ...(p.districtPrices || {}), ...prices };
+            p.timeSlots = curSlots;
             p.status = 'Verified';
             p.verified = true;
             closeModal();
-            toast(`District pricing saved for ${p.name}! 404 waiting devotees notified.`);
+            toast(`District pricing & ritual time slots saved for ${p.name}! Daily time slots notification emailed to Pandit.`);
             renderActiveTab();
 
             // Run backend API update and refresh in background
             api(`/pandits/${p._id}/district-prices`, {
               method: 'PUT',
-              body: { fee: baseFee, districtPrices: prices }
+              body: { fee: baseFee, districtPrices: prices, timeSlots: curSlots }
             }).then(() => {
               loadData();
             }).catch(err => {
@@ -2218,17 +2403,25 @@
             const wasAssigned = (l.assignedPandits || []).includes(p.email);
             const panditSt = (l.panditStatuses && l.panditStatuses[p.email]);
             const isPrevReject = panditSt === 'Rejected' || panditSt === 'Declined';
-            return `<label class="check" style="${isPrevReject ? 'opacity:0.65;' : ''}">
-              <input type="checkbox" name="as-p" value="${esc(p.email)}" ${(wasAssigned && !isPrevReject) ? 'checked' : ''}>
+            const avail = isPanditAvailableOnDate(p, l.fromDate);
+            const isUnavail = !avail.available;
+            return `<label class="check" style="${isPrevReject || isUnavail ? 'opacity:0.75;background:#fff5f5;' : ''}">
+              <input type="checkbox" name="as-p" value="${esc(p.email)}" data-unavail="${isUnavail ? '1' : '0'}" data-unavail-reason="${esc(avail.reason)}" data-pandit-name="${esc(p.name)}" ${(wasAssigned && !isPrevReject && !isUnavail) ? 'checked' : ''}>
               <b>${esc(p.name)}</b> — ${esc(p.district)} (${esc(p.exp)})
               ${isPrevReject ? '<span style="color:#c62828;font-size:11px;font-weight:700;margin-left:6px">(Previously Declined)</span>' : ''}
+              ${isUnavail ? `<span style="color:#c62828;font-size:11px;font-weight:700;margin-left:6px">⚠️ (Not Available that day: ${esc(avail.reason)})</span>` : ''}
             </label>`;
           }).join('') || '<p class="muted">No verified Pandits available for this district.</p>'}
         </div>
         <button class="btn btn-gold" id="btn-save-assign" style="margin-top:14px;width:100%">${isRejected ? 'Confirm & Send New Assignment Offer' : 'Save Assignment & Notify Pandit'}</button>`, (m) => {
         document.getElementById('btn-save-assign').onclick = async () => {
-          const emails = [...m.querySelectorAll('input[name="as-p"]:checked')].map((i) => i.value);
-          if (!emails.length) return toast('Select at least one Pandit', true);
+          const checkedInps = [...m.querySelectorAll('input[name="as-p"]:checked')];
+          if (!checkedInps.length) return toast('Select at least one Pandit', true);
+          const unavailInp = checkedInps.find(x => x.dataset.unavail === '1');
+          if (unavailInp) {
+            return toast(`⚠️ Pandit ${unavailInp.dataset.panditName} is not available on ${l.fromDate} (${unavailInp.dataset.unavailReason}). Please uncheck this Pandit.`, true);
+          }
+          const emails = checkedInps.map((i) => i.value);
           try {
             await api(`/long-puja-requests/${id}/assign`, { method: 'PUT', body: { panditEmails: emails } });
             closeModal();

@@ -192,6 +192,47 @@ const minBookingDate = () => {
   return d.toISOString().slice(0, 10);
 };
 
+const minUnavailDate = () => {
+  const now = new Date();
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const minTarget = new Date(now.getTime() + 12 * 60 * 60 * 1000);
+  const effectiveMin = minTarget > tomorrow ? minTarget : tomorrow;
+  const y = effectiveMin.getFullYear();
+  const m = String(effectiveMin.getMonth() + 1).padStart(2, '0');
+  const d = String(effectiveMin.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+function isPanditAvailableOnDate(p, dateStr) {
+  if (!p || !dateStr) return { available: true };
+  const dStr = String(dateStr).trim().split('T')[0];
+
+  // 1. Check marked non-availability
+  const unavail = p.unavailableDates || [];
+  for (const item of unavail) {
+    const itemDate = typeof item === 'string' ? item.trim() : (item && item.date ? item.date.trim() : '');
+    if (itemDate === dStr) {
+      const reason = (typeof item === 'object' && item.reason) ? ` (${item.reason})` : '';
+      return { available: false, reason: `Marked Non-Availability${reason}` };
+    }
+  }
+
+  // 2. Check availableDays of the week
+  if (Array.isArray(p.availableDays) && p.availableDays.length) {
+    const parts = dStr.split('-');
+    if (parts.length === 3) {
+      const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayName = dayNames[dt.getDay()];
+      if (!p.availableDays.includes(dayName)) {
+        return { available: false, reason: `Not scheduled on ${dayName}s` };
+      }
+    }
+  }
+
+  return { available: true };
+}
+
 function parsePujaStartDateTime(dateStr, timeStr) {
   if (!dateStr) return new Date();
   let year, month, day;
@@ -1631,9 +1672,11 @@ async function openBooking(arg) {
       const box = $('#b-pandit-info', m);
       if (!box) return;
       if (p) {
+        const chosenDate = dateInp ? dateInp.value : '';
+        const avail = chosenDate ? isPanditAvailableOnDate(p, chosenDate) : { available: true };
         box.style.display = 'block';
         box.innerHTML = `
-          <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:10px;padding:10px 12px">
+          <div style="background:#fffcf5;border:1.5px solid ${!avail.available ? '#ef9a9a' : '#ebd9c2'};border-radius:10px;padding:10px 12px">
             <div style="display:flex;align-items:center;gap:10px">
               <img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:1.5px solid var(--ochre)">
               <div style="flex:1">
@@ -1646,10 +1689,16 @@ async function openBooking(arg) {
                 </div>
               </div>
             </div>
-            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #ebd9c2;font-size:11.5px;color:#2e7d32;display:flex;align-items:center;gap:5px">
-              <span class="material-icons" style="font-size:14px">check_circle</span>
-              <span><strong>All Registered Pandits Perform All Pujas:</strong> Pt. ${esc(p.name)} is qualified to perform all sacred home rituals.</span>
-            </div>
+            ${!avail.available ? `
+              <div style="margin-top:8px;background:#ffebee;border:1.5px solid #ef9a9a;color:#c62828;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;line-height:1.4">
+                ⚠️ Pt. ${esc(p.name)} is NOT available on ${esc(chosenDate)} (${esc(avail.reason)}). Please choose another date or select 'Any Available Verified Pandit'.
+              </div>
+            ` : `
+              <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #ebd9c2;font-size:11.5px;color:#2e7d32;display:flex;align-items:center;gap:5px">
+                <span class="material-icons" style="font-size:14px">check_circle</span>
+                <span><strong>All Registered Pandits Perform All Pujas:</strong> Pt. ${esc(p.name)} is qualified to perform all sacred home rituals.</span>
+              </div>
+            `}
           </div>
         `;
       } else {
@@ -1666,6 +1715,7 @@ async function openBooking(arg) {
     const updatePanditsDropdown = () => {
       const dist = districtSel ? districtSel.value : initialDistrict;
       const ritual = serviceSel ? serviceSel.value : initialPuja;
+      const chosenDate = dateInp ? dateInp.value : '';
 
       // All registered pandits can perform all pujas
       const verified = (S.pandits || []).filter((p) => p.verified || p.status === 'Verified');
@@ -1682,7 +1732,9 @@ async function openBooking(arg) {
         const pFee = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || baseDakshina;
         const servesTag = (p.workingDistricts && p.workingDistricts.includes(dist)) || p.district === dist ? `Serves ${dist}` : p.district;
         const spec = p.specialty || 'Vedic Rituals';
-        optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''}>Pt. ${esc(p.name)} [Specialty: ${esc(spec)}] · ${esc(servesTag)} — Dakshina: ${inr(pFee)}</option>`;
+        const avail = chosenDate ? isPanditAvailableOnDate(p, chosenDate) : { available: true };
+        const unavailTag = !avail.available ? ` [⚠️ NOT AVAILABLE: ${avail.reason}]` : '';
+        optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''} ${!avail.available ? 'style="color:#c62828"' : ''}>Pt. ${esc(p.name)} [Specialty: ${esc(spec)}] · ${esc(servesTag)} — Dakshina: ${inr(pFee)}${unavailTag}</option>`;
       });
       panditSel.innerHTML = optionsHtml;
       updatePanditInfo();
@@ -1742,8 +1794,11 @@ async function openBooking(arg) {
         sel.time = '';
         return;
       }
+      const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
+      const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
+      const activeSlots = (p && Array.isArray(p.timeSlots) && p.timeSlots.length) ? p.timeSlots : standardSlots;
       const now = Date.now();
-      box.innerHTML = standardSlots.map((s) => {
+      box.innerHTML = activeSlots.map((s) => {
         const dt = parsePujaStartDateTime(d, s);
         const diffHours = (dt.getTime() - now) / (1000 * 60 * 60);
         const isLocked = diffHours < 48;
@@ -1772,8 +1827,8 @@ async function openBooking(arg) {
 
     serviceSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
     districtSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
-    panditSel.onchange = () => { updatePanditInfo(); paintFee(); };
-    dateInp.onchange = drawSlots;
+    panditSel.onchange = () => { updatePanditInfo(); paintFee(); drawSlots(); };
+    dateInp.onchange = () => { updatePanditsDropdown(); drawSlots(); };
 
     const viewAreaScholarsBtn = $('#b-view-area-scholars', m);
     if (viewAreaScholarsBtn) {
@@ -1872,6 +1927,10 @@ async function openBooking(arg) {
       const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
       let fee = 0;
       if (p) {
+        const avail = isPanditAvailableOnDate(p, date);
+        if (!avail.available) {
+          return toast(`Pt. ${p.name} is not available that day (${date} · ${avail.reason}). Please select another date or choose 'Any Available Verified Pandit'.`, true);
+        }
         const feeEl = $('#b-fee', m);
         const feeText = feeEl ? feeEl.textContent.replace(/[^0-9]/g, '') : '';
         fee = Number(feeText) || (p.districtPrices && Number(p.districtPrices[lockedDistrict || districtSel.value])) || p.fee || 0;
@@ -4940,7 +4999,10 @@ async function panditDash(root) {
         <span class="material-icons">event_note</span> Multi-Day Assignments <span class="subtab-badge">${longs.length}</span>
       </button>
       <button class="subtab ${tab === 'avail' ? 'active' : ''}" data-action="dashTab" data-tab="avail">
-        <span class="material-icons">schedule</span> Availability &amp; Dakshina
+        <span class="material-icons">schedule</span> Manage Working Availability
+      </button>
+      <button class="subtab ${tab === 'unavail' ? 'active' : ''}" data-action="dashTab" data-tab="unavail">
+        <span class="material-icons">event_busy</span> Non-Availability ${(me.unavailableDates && me.unavailableDates.length) ? `<span class="subtab-badge alert">${me.unavailableDates.length}</span>` : ''}
       </button>
       <button class="subtab ${tab === 'bank' ? 'active' : ''}" data-action="dashTab" data-tab="bank">
         <span class="material-icons">account_balance</span> Bank &amp; Payout Account ${me.bankAccount ? '<span class="subtab-badge green">✓ Linked</span>' : (me.verified ? '<span class="subtab-badge alert">Setup</span>' : '')}
@@ -4955,12 +5017,15 @@ async function panditDash(root) {
       ${tab === 'havan' ? renderPanditHavanTab(bookings, me) : ''}
       ${tab === 'long' ? renderPanditLongTab(longs, email) : ''}
       ${tab === 'avail' ? renderPanditAvailTab(me) : ''}
+      ${tab === 'unavail' ? renderPanditUnavailTab(me) : ''}
       ${tab === 'bank' ? renderPanditBankTab(me) : ''}
       ${tab === 'profile' ? renderPanditProfileTab(me) : ''}
     </div>
   `;
   if (tab === 'avail') {
     setupAvailTabListeners(me);
+  } else if (tab === 'unavail') {
+    setupPanditUnavailListeners(me);
   } else if (tab === 'havan') {
     setupPanditHavanListeners();
   }
@@ -4987,6 +5052,9 @@ function switchPanditSubtab(tab, bookingId) {
     else if (tab === 'avail') {
       container.innerHTML = renderPanditAvailTab(me);
       setupAvailTabListeners(me);
+    } else if (tab === 'unavail') {
+      container.innerHTML = renderPanditUnavailTab(me);
+      setupPanditUnavailListeners(me);
     } else if (tab === 'bank') {
       container.innerHTML = renderPanditBankTab(me);
     } else if (tab === 'profile') {
@@ -5322,13 +5390,13 @@ function renderPanditAvailTab(me) {
       </div>
     </div>
 
-    <!-- Modern Manage Working Availability & Time Slots -->
+    <!-- Manage Working Availability -->
     <div class="panel-section-box">
       <div class="section-box-header">
         <div class="box-icon"><span class="material-icons">schedule</span></div>
-        <div>
-          <h4>Manage Working Availability &amp; Ritual Time Slots</h4>
-          <p class="muted">Choose your available days and manage interactive time slots for puja bookings.</p>
+        <div style="flex:1">
+          <h4>Manage Working Availability</h4>
+          <p class="muted">Choose the days of the week you are available. Official ritual time slots are configured by Administration in District Payout.</p>
         </div>
       </div>
 
@@ -5343,35 +5411,38 @@ function renderPanditAvailTab(me) {
         `).join('')}
       </div>
 
-      <!-- Active Time Slots Chips Manager -->
+      <!-- Configured Ritual Time Slots (Managed exclusively by Admin in District Payout) -->
       <div style="margin-top:22px">
-        <div class="row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
-          <label style="margin:0;font-weight:600">Configured Ritual Time Slots</label>
-          <div class="slot-preset-group">
-            <button type="button" class="btn btn-outline dark btn-sm" id="preset-all-slots">All Standard Slots</button>
-            <button type="button" class="btn btn-outline dark btn-sm" id="preset-morning">Morning Only</button>
-            <button type="button" class="btn btn-outline dark btn-sm" id="preset-evening">Evening Only</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+          <div>
+            <label style="margin:0;font-weight:700;color:var(--admin-dark, #351605)">Official Daily Ritual Time Slots</label>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">Configured exclusively by PujaConnect Administration in District Payout. Devotees book rituals strictly within these slots.</div>
           </div>
+          <span class="badge green" style="font-size:11px"><span class="material-icons" style="font-size:13px;vertical-align:middle">verified</span> Admin Configured</span>
         </div>
 
         <div class="active-slots-grid" id="slots-container"></div>
+      </div>
 
-        <div class="add-slot-bar">
-          <div class="add-slot-input-group">
-            <span class="material-icons">access_time</span>
-            <input type="text" id="new-slot-input" placeholder="e.g. 06:30 AM - 09:30 AM" class="slot-text-input">
+      <!-- Need to take a day off? Callout linking to Non-Availability tab -->
+      <div style="background:#fff8ed;border:1.5px solid #ebd9c2;border-radius:10px;padding:12px 16px;margin-top:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="material-icons" style="color:#d99a19;font-size:26px">event_busy</span>
+          <div>
+            <div style="font-size:13.5px;font-weight:700;color:#351605">Taking Leave on a Specific Date?</div>
+            <div style="font-size:12px;color:#7a553e">Mark your non-availability at least 12 hours in advance to inform Admin and Devotees.</div>
           </div>
-          <button type="button" class="btn btn-gold btn-sm" id="btn-add-slot">
-            <span class="material-icons">add</span> Add Custom Slot
-          </button>
         </div>
+        <button type="button" class="btn btn-gold btn-sm" onclick="switchPanditSubtab('unavail')">
+          <span class="material-icons" style="font-size:15px">event_busy</span> Manage Non-Availability &rarr;
+        </button>
       </div>
     </div>
 
     <!-- Prominent Save Action -->
     <div style="margin:20px 0 36px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-gold btn-lg" id="btn-save-all-avail" data-action="saveAvail">
-        <span class="material-icons">save</span> Save Working Districts &amp; Availability
+        <span class="material-icons">save</span> Save Working Districts &amp; Available Days
       </button>
     </div>
   `;
@@ -5398,26 +5469,15 @@ function setupAvailTabListeners(me) {
 
   function renderSlots() {
     if (!slots.length) {
-      slotsWrap.innerHTML = '<span class="muted" style="font-size:13px">No time slots added. Use presets or add custom slots below.</span>';
+      slotsWrap.innerHTML = '<span class="muted" style="font-size:13px">Official daily ritual time slots are configured by Administration in district payout settings.</span>';
       return;
     }
-    slotsWrap.innerHTML = slots.map((s, idx) => `
-      <div class="slot-card-chip">
-        <span class="material-icons clock-icon">schedule</span>
+    slotsWrap.innerHTML = slots.map((s) => `
+      <div class="slot-card-chip" style="background:#fffdf9;border:1.5px solid #ebd9c2;padding:8px 14px;border-radius:8px;font-weight:700;color:var(--admin-dark)">
+        <span class="material-icons clock-icon" style="color:var(--admin-gold)">schedule</span>
         <span>${esc(s)}</span>
-        <button type="button" class="slot-remove-btn" data-slot-idx="${idx}" title="Remove slot">
-          <span class="material-icons">close</span>
-        </button>
       </div>
     `).join('');
-
-    slotsWrap.querySelectorAll('.slot-remove-btn').forEach((btn) => {
-      btn.onclick = () => {
-        const i = +btn.dataset.slotIdx;
-        slots.splice(i, 1);
-        renderSlots();
-      };
-    });
   }
 
   function renderDistrictCheckboxes() {
@@ -5483,45 +5543,6 @@ function setupAvailTabListeners(me) {
     };
   }
 
-  // Slot Presets
-  const btnAllSlots = $('#preset-all-slots', container);
-  if (btnAllSlots) {
-    btnAllSlots.onclick = () => {
-      slots = ['06:00 AM - 09:00 AM', '09:00 AM - 12:00 PM', '01:00 PM - 04:00 PM', '04:00 PM - 07:00 PM', '07:00 PM - 10:00 PM'];
-      renderSlots();
-    };
-  }
-  const btnMorning = $('#preset-morning', container);
-  if (btnMorning) {
-    btnMorning.onclick = () => {
-      slots = ['06:00 AM - 09:00 AM', '09:00 AM - 12:00 PM'];
-      renderSlots();
-    };
-  }
-  const btnEvening = $('#preset-evening', container);
-  if (btnEvening) {
-    btnEvening.onclick = () => {
-      slots = ['04:00 PM - 07:00 PM', '07:00 PM - 10:00 PM'];
-      renderSlots();
-    };
-  }
-
-  // Add Custom Slot
-  const btnAddSlot = $('#btn-add-slot', container);
-  const newSlotInput = $('#new-slot-input', container);
-  if (btnAddSlot && newSlotInput) {
-    const addFn = () => {
-      const val = newSlotInput.value.trim();
-      if (!val) return toast('Please enter time slot text (e.g. 07:00 AM - 10:00 AM)', true);
-      if (slots.includes(val)) return toast('This time slot is already added', true);
-      slots.push(val);
-      newSlotInput.value = '';
-      renderSlots();
-    };
-    btnAddSlot.onclick = addFn;
-    newSlotInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addFn(); } };
-  }
-
   // Initial Renders
   renderSlots();
   renderDistrictCheckboxes();
@@ -5531,6 +5552,210 @@ function setupAvailTabListeners(me) {
     curState,
     workingDistricts: Array.from(curDistricts),
     slots
+  });
+}
+
+function renderPanditUnavailTab(me) {
+  const unavailList = Array.isArray(me.unavailableDates) ? me.unavailableDates : [];
+  const minDate = minUnavailDate();
+
+  return `
+    <!-- Non-Availability Section -->
+    <div class="panel-section-box">
+      <div class="section-box-header">
+        <div class="box-icon" style="background:#ffebee;color:#c62828"><span class="material-icons">event_busy</span></div>
+        <div style="flex:1">
+          <h4 style="color:var(--admin-dark)">Manage Non-Availability &amp; Days Off</h4>
+          <p class="muted">If you are unavailable on any specific date due to travel, family rituals, or prior commitments, select the date below.</p>
+        </div>
+        <span class="badge" style="background:#fff3e0;color:#c62828;border:1px solid #ffcc80">
+          <span class="material-icons" style="font-size:13px;vertical-align:middle">timer</span> Min. 12 Hours Notice
+        </span>
+      </div>
+
+      <!-- 12 Hours Policy Banner -->
+      <div style="background:#fff8ed;border:1.5px solid #ebd9c2;border-left:5px solid #d99a19;border-radius:8px;padding:12px 16px;margin:16px 0;font-size:13px;color:#6b4c35;line-height:1.5">
+        <div style="font-weight:700;color:#351605;margin-bottom:2px">
+          ⏱️ 12-Hour Advance Notice Requirement:
+        </div>
+        You must mark non-availability <strong>at least 12 hours in advance</strong> before the date begins. <strong>Same-day non-availability cannot be selected</strong>. When marked, both Devotees and Admin will see that you are unavailable that day, preventing any new booking or assignment for that date.
+      </div>
+
+      <!-- Mark Date Form -->
+      <div style="background:#fcf8f0;border:1.5px solid #ebd9c2;border-radius:10px;padding:18px 20px;margin-bottom:22px">
+        <div style="font-weight:700;color:var(--admin-dark);font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+          <span class="material-icons" style="font-size:18px;color:var(--ochre)">calendar_today</span>
+          Schedule a Day Off
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:14px;align-items:flex-end">
+          <div>
+            <label for="p-unavail-date" style="font-weight:600;display:block;margin-bottom:4px">Select Date *</label>
+            <input type="date" id="p-unavail-date" min="${minDate}" style="width:100%;padding:9px 12px;border:1.5px solid #ebd9c2;border-radius:8px;font-size:14px">
+            <small id="p-unavail-day-preview" class="muted" style="display:block;margin-top:4px;font-size:12px;font-weight:700;color:var(--ochre)">
+              📅 Please choose a date (Tomorrow or later)
+            </small>
+          </div>
+
+          <div>
+            <label for="p-unavail-reason" style="font-weight:600;display:block;margin-bottom:4px">Reason for Non-Availability</label>
+            <select id="p-unavail-reason" style="width:100%;padding:9px 12px;border:1.5px solid #ebd9c2;border-radius:8px;font-size:14px">
+              <option value="Personal Commitment">Personal / Family Commitment</option>
+              <option value="Travelling / Out of Station">Travelling / Out of Station</option>
+              <option value="Prior Sacred Ceremony">Prior Sacred Ceremony / Ritual</option>
+              <option value="Health / Rest Day">Rest / Health Day</option>
+              <option value="Temple / Ashram Duty">Temple / Ashram Seva</option>
+              <option value="Other">Other Personal Reason</option>
+            </select>
+          </div>
+
+          <div>
+            <button type="button" class="btn btn-gold" id="btn-save-unavail" style="width:100%;padding:11px 18px">
+              <span class="material-icons">event_busy</span> Mark Date as Unavailable
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Current / Upcoming Non-Availability List -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <label style="font-weight:700;color:var(--admin-dark);margin:0;font-size:15px">
+            Your Marked Non-Availability Days (${unavailList.length})
+          </label>
+          <span style="font-size:12px;color:var(--muted)">Admin &amp; Devotee system status is updated immediately.</span>
+        </div>
+
+        <div id="p-unavail-list-wrap">
+          ${unavailList.length ? `
+            <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:12px">
+              ${unavailList.map((item) => {
+                const dateStr = typeof item === 'string' ? item : item.date;
+                const dayName = typeof item === 'object' && item.day ? item.day : '';
+                const reason = typeof item === 'object' && item.reason ? item.reason : 'Personal Commitment';
+                const markedAt = typeof item === 'object' && item.markedAt ? new Date(item.markedAt).toLocaleDateString('en-IN') : '';
+                return `
+                  <div style="background:#ffffff;border:1.5px solid #ebd9c2;border-left:4px solid #c62828;border-radius:8px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+                    <div>
+                      <div style="font-weight:700;color:var(--admin-dark);font-size:14px">
+                        📅 ${esc(dateStr)} ${dayName ? `(${esc(dayName)})` : ''}
+                      </div>
+                      <div style="font-size:12px;color:#c62828;margin-top:2px;font-weight:600">
+                        Reason: ${esc(reason)}
+                      </div>
+                      ${markedAt ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">Marked: ${esc(markedAt)}</div>` : ''}
+                    </div>
+                    <button type="button" class="btn btn-outline dark btn-sm btn-del-unavail" data-date="${esc(dateStr)}" title="Mark Available Again" style="padding:4px 8px;font-size:11.5px;color:#c62828;border-color:#ffcdd2">
+                      <span class="material-icons" style="font-size:14px">delete</span> Remove
+                    </button>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          ` : `
+            <div class="empty" style="padding:28px 20px;border:1.5px dashed #ebd9c2;border-radius:10px;background:#fffdf9">
+              <span class="material-icons" style="font-size:36px;color:#81c784">event_available</span>
+              <p style="margin:6px 0 0;font-size:13.5px;color:#2e7d32;font-weight:600">No upcoming non-availability days marked.</p>
+              <small class="muted">You are currently available on all your scheduled working days of the week.</small>
+            </div>
+          `}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function setupPanditUnavailListeners(me) {
+  const container = $('#dash-tab-content');
+  if (!container) return;
+
+  const dateInput = $('#p-unavail-date', container);
+  const dayPreview = $('#p-unavail-day-preview', container);
+  const reasonSelect = $('#p-unavail-reason', container);
+  const saveBtn = $('#btn-save-unavail', container);
+
+  if (dateInput && dayPreview) {
+    dateInput.onchange = () => {
+      const val = dateInput.value;
+      if (!val) {
+        dayPreview.textContent = '📅 Please choose a date (Tomorrow or later)';
+        return;
+      }
+      const parts = val.split('-');
+      if (parts.length === 3) {
+        const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const dayName = dayNames[dt.getDay()];
+        dayPreview.textContent = `📅 Selected Day: ${dayName}, ${val}`;
+      }
+    };
+  }
+
+  if (saveBtn && dateInput) {
+    saveBtn.onclick = async () => {
+      const dateVal = dateInput.value;
+      if (!dateVal) return toast('Please select a date', true);
+
+      // 12-Hour notice validation
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      if (dateVal <= todayStr) {
+        return toast('Non-availability cannot be selected for today (same date) or past dates. Minimum 12 hours advance notice required.', true);
+      }
+
+      const parts = dateVal.split('-');
+      const selectedDateStart = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0);
+      const diffHours = (selectedDateStart.getTime() - now.getTime()) / (1000 * 60 * 60);
+      if (diffHours < 12) {
+        return toast('Non-availability must be marked at least 12 hours in advance.', true);
+      }
+
+      const reason = (reasonSelect ? reasonSelect.value : 'Personal Commitment').trim();
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="material-icons spin">sync</span> Saving...';
+
+      try {
+        const res = await api(`/pandits/${me._id || me.email}/unavailable-dates`, {
+          method: 'POST',
+          body: { date: dateVal, reason }
+        });
+        if (res && res.unavailableDates) {
+          S.me.unavailableDates = res.unavailableDates;
+        } else {
+          S.me.unavailableDates = [...(S.me.unavailableDates || []), { date: dateVal, reason, day: parts.length === 3 ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][selectedDateStart.getDay()] : '' }];
+        }
+        toast(`✅ Date ${dateVal} marked as unavailable! Devotees and Admin cannot assign this date.`);
+        switchPanditSubtab('unavail');
+      } catch (err) {
+        toast(err.message || 'Failed marking non-availability', true);
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<span class="material-icons">event_busy</span> Mark Date as Unavailable';
+      }
+    };
+  }
+
+  // Delete listener
+  container.querySelectorAll('.btn-del-unavail').forEach(btn => {
+    btn.onclick = async () => {
+      const d = btn.dataset.date;
+      if (!confirm(`Mark ${d} as available again?`)) return;
+      btn.disabled = true;
+      try {
+        const res = await api(`/pandits/${me._id || me.email}/unavailable-dates/${encodeURIComponent(d)}`, {
+          method: 'DELETE'
+        });
+        if (res && res.unavailableDates) {
+          S.me.unavailableDates = res.unavailableDates;
+        } else {
+          S.me.unavailableDates = (S.me.unavailableDates || []).filter(x => (typeof x === 'string' ? x !== d : (x && x.date !== d)));
+        }
+        toast(`Date ${d} is now marked available again.`);
+        switchPanditSubtab('unavail');
+      } catch (err) {
+        toast(err.message || 'Failed updating availability', true);
+        btn.disabled = false;
+      }
+    };
   });
 }
 

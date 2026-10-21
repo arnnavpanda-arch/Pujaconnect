@@ -833,10 +833,11 @@ app.put('/api/pandits/:id', wrap(async (req, res) => {
   const allowed = [
     'name', 'phone', 'state', 'district', 'city', 'location',
     'workingState', 'workingDistricts', 'experience', 'exp', 'specialty',
-    'bio', 'services', 'availableDays', 'daySlots', 'timeSlots',
+    'bio', 'services', 'availableDays', 'daySlots',
     'photo', 'documentUrl', 'idDoc', 'fee', 'bankAccount', 'ifscCode',
     'upiId', 'bankName', 'accountHolder', 'qrCode', 'districtPrices'
   ];
+  if (req.user && req.user.role === 'admin') allowed.push('timeSlots');
   const update = {};
   allowed.forEach((k) => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
   const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
@@ -1063,18 +1064,70 @@ app.put('/api/platform-commission', adminOnly, wrap(async (req, res) => {
   });
 }));
 
-// Admin fixes district-wise amounts for a Pandit
+// Helper to check if Pandit is available on a specific date (considers unavailableDates and availableDays)
+function isPanditAvailableOnDate(pandit, dateStr) {
+  if (!pandit || !dateStr) return { available: true };
+  const dStr = String(dateStr).trim().split('T')[0];
+
+  // 1. Check marked non-availability
+  const unavail = pandit.unavailableDates || [];
+  for (const item of unavail) {
+    const itemDate = typeof item === 'string' ? item.trim() : (item && item.date ? item.date.trim() : '');
+    if (itemDate === dStr) {
+      const reason = (typeof item === 'object' && item.reason) ? ` (${item.reason})` : '';
+      return { available: false, reason: `Pandit marked non-availability for this date${reason}` };
+    }
+  }
+
+  // 2. Check available days of week
+  if (Array.isArray(pandit.availableDays) && pandit.availableDays.length) {
+    const dt = parsePujaStartDateTime(dStr, '12:00 PM');
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayName = dayNames[dt.getDay()];
+    if (!pandit.availableDays.includes(dayName)) {
+      return { available: false, reason: `Pandit is not available on ${dayName}s` };
+    }
+  }
+
+  return { available: true };
+}
+
+// Admin fixes district-wise amounts and daily ritual time slots for a Pandit
 app.put('/api/pandits/:id/district-prices', adminOnly, wrap(async (req, res) => {
-  const { fee, districtPrices } = req.body;
-  const query = req.params.id.match(/^[0-9a-fA-F]{24}$/) ? { _id: req.params.id } : { email: lc(req.params.id) };
+  const { fee, districtPrices, timeSlots } = req.body;
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const query = /^[0-9a-fA-F]{24}$/.test(rawId) ? { _id: rawId } : { email: lc(rawId) };
   const update = {};
   if (fee !== undefined) update.fee = Number(fee) || 1500;
   if (districtPrices !== undefined) update.districtPrices = districtPrices;
+  if (Array.isArray(timeSlots) && timeSlots.length > 0) update.timeSlots = timeSlots;
   // Ensure the pandit is verified and active when admin sets official district rates
   update.status = 'Verified';
   update.verified = true;
   const p = await Pandit.findOneAndUpdate(query, { $set: update }, { new: true, strict: false, runValidators: false }).lean();
   if (!p) return res.status(404).json({ error: 'Pandit not found' });
+
+  // Send official confirmation email to Pandit regarding configured time slots of the day and district rates
+  try {
+    const reqHost = req.get('host') || '';
+    const reqProto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : (req.protocol || 'http'));
+    const origin = req.headers.origin || (reqHost ? `${reqProto}://${reqHost}` : 'https://pujaconnect-one.vercel.app');
+    const baseUrl = process.env.APP_URL || origin;
+
+    await sendSafe('PANDIT_TIMESLOTS_CONFIGURED', p.email, {
+      panditName: p.name,
+      email: p.email,
+      phone: p.phone,
+      timeSlots: p.timeSlots || timeSlots || ['06:00 AM - 09:00 AM', '09:00 AM - 12:00 PM', '04:00 PM - 07:00 PM'],
+      fee: p.fee || fee || 1500,
+      districtPrices: p.districtPrices || districtPrices || {},
+      workingDistricts: p.workingDistricts || [p.district || 'Khordha'],
+      workingState: p.workingState || p.state || 'Odisha',
+      baseUrl
+    });
+  } catch (err) {
+    console.error('[sendSafe PANDIT_TIMESLOTS_CONFIGURED error]:', err.message);
+  }
 
   // When admin sets district prices, notify ONLY 404-error devotees waiting for those districts
   const pricedDistricts = Object.keys(districtPrices || {}).filter(d => Number(districtPrices[d]) > 0);
@@ -1089,6 +1142,89 @@ app.put('/api/pandits/:id/district-prices', adminOnly, wrap(async (req, res) => 
   }
 
   res.json(p);
+}));
+
+// Get Pandit Unavailable Dates
+app.get('/api/pandits/:id/unavailable-dates', wrap(async (req, res) => {
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const query = /^[0-9a-fA-F]{24}$/.test(rawId) ? { _id: rawId } : { email: new RegExp('^' + rawId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
+  const p = await Pandit.findOne(query).lean();
+  if (!p) return res.status(404).json({ error: 'Pandit not found' });
+  res.json(p.unavailableDates || []);
+}));
+
+// Pandit Marks Non-Availability for a day (enforcing minimum 12 hours advance notice, cannot select same date)
+app.post('/api/pandits/:id/unavailable-dates', wrap(async (req, res) => {
+  const { date, reason } = req.body;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())) {
+    return res.status(400).json({ error: 'Please provide a valid ceremony date in YYYY-MM-DD format.' });
+  }
+
+  const dateStr = String(date).trim();
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const query = /^[0-9a-fA-F]{24}$/.test(rawId) ? { _id: rawId } : { email: new RegExp('^' + rawId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
+  const p = await Pandit.findOne(query);
+  if (!p) return res.status(404).json({ error: 'Pandit not found' });
+
+  // 12 Hours advance notice validation
+  // Rule: Cannot select same date (today) or past dates. Must be marked at least 12 hours in advance.
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (dateStr <= todayStr) {
+    return res.status(400).json({
+      error: 'Non-availability cannot be selected for today (same date) or past dates. Platform policy requires marking non-availability at least 12 hours in advance.'
+    });
+  }
+
+  const parts = dateStr.split('-');
+  const selectedDateStart = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0);
+  const diffHours = (selectedDateStart.getTime() - now.getTime()) / (1000 * 60 * 60);
+  if (diffHours < 12) {
+    return res.status(400).json({
+      error: 'Non-availability must be marked at least 12 hours in advance before the date begins.'
+    });
+  }
+
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayName = dayNames[selectedDateStart.getDay()];
+
+  const existingList = Array.isArray(p.unavailableDates) ? p.unavailableDates : [];
+  const alreadyIndex = existingList.findIndex(x => (typeof x === 'string' ? x === dateStr : (x && x.date === dateStr)));
+
+  const entry = {
+    date: dateStr,
+    day: dayName,
+    reason: (reason && String(reason).trim()) || 'Personal Commitment',
+    markedAt: new Date()
+  };
+
+  if (alreadyIndex >= 0) {
+    existingList[alreadyIndex] = entry;
+  } else {
+    existingList.push(entry);
+  }
+
+  p.unavailableDates = existingList;
+  p.markModified('unavailableDates');
+  await p.save();
+
+  res.json({ ok: true, unavailableDates: p.unavailableDates, message: `Successfully marked ${dateStr} (${dayName}) as unavailable.` });
+}));
+
+// Remove Non-Availability
+app.delete('/api/pandits/:id/unavailable-dates/:date', wrap(async (req, res) => {
+  const dateStr = String(req.params.date).trim();
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const query = /^[0-9a-fA-F]{24}$/.test(rawId) ? { _id: rawId } : { email: new RegExp('^' + rawId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
+  const p = await Pandit.findOne(query);
+  if (!p) return res.status(404).json({ error: 'Pandit not found' });
+
+  const currentList = Array.isArray(p.unavailableDates) ? p.unavailableDates : [];
+  p.unavailableDates = currentList.filter(x => (typeof x === 'string' ? x !== dateStr : (x && x.date !== dateStr)));
+  p.markModified('unavailableDates');
+  await p.save();
+
+  res.json({ ok: true, unavailableDates: p.unavailableDates, message: `Date ${dateStr} is now marked available again.` });
 }));
 
 // Centralized Platform Bank Details (Managed exclusively by Admin)
@@ -1280,6 +1416,14 @@ app.post('/api/bookings', wrap(async (req, res) => {
   let preferredPandit = null;
   if (b.panditEmail && lc(b.panditEmail) !== 'any' && lc(b.panditEmail) !== '') {
     preferredPandit = await Pandit.findOne({ email: lc(b.panditEmail), verified: true });
+    if (preferredPandit) {
+      const avail = isPanditAvailableOnDate(preferredPandit, b.date);
+      if (!avail.available) {
+        return res.status(400).json({
+          error: `Pandit ${preferredPandit.name} is not available on ${b.date} (${avail.reason}). Please choose another date or select 'Any Available Verified Pandit'.`
+        });
+      }
+    }
   }
 
   let fee = Number(b.fee) || 0;
@@ -1380,6 +1524,12 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
   const pRegex = new RegExp('^' + lc(panditEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
   const pandit = (await Pandit.findOne({ email: pRegex, $or: [{ verified: true }, { status: 'Verified' }] })) || (await Pandit.findOne({ email: pRegex }));
   if (!pandit) return res.status(404).json({ error: 'Selected Pandit does not exist' });
+
+  // Availability check (non-availability marked by pandit and availableDays)
+  const avail = isPanditAvailableOnDate(pandit, b.date);
+  if (!avail.available) {
+    return res.status(400).json({ error: `Pandit ${pandit.name} is not available on ${b.date} (${avail.reason}). Please select another Pandit.` });
+  }
 
   // Slot clash check
   const clash = await Booking.findOne({
@@ -2912,6 +3062,17 @@ app.put('/api/long-puja-requests/:id/assign', adminOnly, wrap(async (req, res) =
   const query = mongoose.Types.ObjectId.isValid(req.params.id)
     ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
     : { id: req.params.id };
+
+  const existingRequest = await LongPujaRequest.findOne(query);
+  if (!existingRequest) return res.status(404).json({ error: 'Request not found' });
+
+  // Verify availability on ceremony start date
+  for (const pandit of found) {
+    const avail = isPanditAvailableOnDate(pandit, existingRequest.fromDate);
+    if (!avail.available) {
+      return res.status(400).json({ error: `Pandit ${pandit.name} is not available on ceremony date ${existingRequest.fromDate} (${avail.reason}). Please select another Pandit.` });
+    }
+  }
 
   const r = await LongPujaRequest.findOneAndUpdate(
     query,
