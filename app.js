@@ -137,6 +137,15 @@ function bookingFindQuery(param) {
   };
 }
 
+function longPujaFindQuery(param) {
+  const cleanId = String(param || '').trim();
+  const conds = [{ id: cleanId }, { id: new RegExp('^' + cleanId + '$', 'i') }];
+  if (mongoose.Types.ObjectId.isValid(cleanId)) {
+    conds.push({ _id: cleanId });
+  }
+  return { $or: conds };
+}
+
 app.post('/api/auth/register', wrap(async (req, res) => {
   const { name, email, phone, state, district, city } = req.body;
   if (!email || !name || !phone) return res.status(400).json({ error: 'Name, email and phone are required' });
@@ -2292,10 +2301,7 @@ app.post('/api/bookings/:id/pay-pandit', adminOnly, wrap(async (req, res) => {
   
   // If not found in regular bookings, check if this is a LongPujaRequest
   if (!b) {
-    const lQuery = mongoose.Types.ObjectId.isValid(req.params.id)
-      ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
-      : { id: req.params.id };
-    const r = await LongPujaRequest.findOne(lQuery);
+    const r = await LongPujaRequest.findOne(longPujaFindQuery(req.params.id));
     if (!r) return res.status(404).json({ error: 'Ceremony booking not found' });
     return handleLongPujaPayPandit(r, req, res);
   }
@@ -2492,10 +2498,7 @@ async function handleLongPujaPayPandit(r, req, res) {
 
 // Dedicated endpoint for Long Puja Request Pandit Payouts
 app.post('/api/long-puja-requests/:id/pay-pandit', adminOnly, wrap(async (req, res) => {
-  const query = mongoose.Types.ObjectId.isValid(req.params.id)
-    ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
-    : { id: req.params.id };
-  const r = await LongPujaRequest.findOne(query);
+  const r = await LongPujaRequest.findOne(longPujaFindQuery(req.params.id));
   if (!r) return res.status(404).json({ error: 'Multi-day ritual request not found' });
   return handleLongPujaPayPandit(r, req, res);
 }));
