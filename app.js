@@ -1120,13 +1120,16 @@ app.get('/api/bookings', wrap(async (req, res) => {
   if (req.query.status) q.status = req.query.status;
   if (req.query.paymentStatus) q.paymentStatus = req.query.paymentStatus;
   if (req.query.bookingId) q.bookingId = req.query.bookingId;
-  res.json(await Booking.find(q).sort({ transactionDate: -1 }).lean());
+  const list = await Booking.find(q).sort({ transactionDate: -1 });
+  const updated = await autoUpdatePassedSlots(list);
+  res.json(updated);
 }));
 
 app.get('/api/bookings/:id', wrap(async (req, res) => {
-  const b = await Booking.findOne(bookingFindQuery(req.params.id)).lean();
+  const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
-  res.json(b);
+  const updated = await autoUpdatePassedSlots([b]);
+  res.json(updated[0] || b);
 }));
 
 app.delete('/api/bookings/:id', adminOnly, wrap(async (req, res) => {
@@ -1648,6 +1651,131 @@ function parsePujaStartDateTime(dateStr, timeStr) {
   return new Date(year, month - 1, day, hour, minute, 0);
 }
 
+// Parse ceremony slot end date & time into Date object
+function parsePujaEndDateTime(dateStr, timeStr) {
+  if (!dateStr) return new Date();
+  let year, month, day;
+  const str = String(dateStr).trim();
+  const sep = str.includes('/') ? '/' : str.includes('.') ? '.' : '-';
+  const parts = str.split(sep);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    } else if (parts[2].length === 4) {
+      day = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      year = parseInt(parts[2], 10);
+    } else {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    }
+  } else {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      year = d.getFullYear();
+      month = d.getMonth() + 1;
+      day = d.getDate();
+    } else {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth() + 1;
+      day = now.getDate();
+    }
+  }
+
+  if (timeStr && String(timeStr).includes('-')) {
+    const timeParts = String(timeStr).split('-');
+    const endPart = timeParts[1].trim();
+    const match = endPart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (match) {
+      let h = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10);
+      const ampm = (match[3] || '').toUpperCase();
+      if (ampm === 'PM' && h < 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      return new Date(year, month - 1, day, h, m, 0);
+    }
+  }
+
+  const startDt = parsePujaStartDateTime(dateStr, timeStr);
+  return new Date(startDt.getTime() + 3 * 60 * 60 * 1000);
+}
+
+function isPujaSlotPassed(dateStr, timeStr) {
+  try {
+    const endDt = parsePujaEndDateTime(dateStr, timeStr);
+    return Date.now() >= endDt.getTime();
+  } catch (e) {
+    return false;
+  }
+}
+
+async function autoUpdatePassedSlots(bookings) {
+  if (!bookings || !bookings.length) return bookings;
+  const toCompleteIds = [];
+  const toRestoreConfirmedIds = [];
+  const results = [];
+
+  for (const item of bookings) {
+    const b = (item && typeof item.toObject === 'function') ? item.toObject() : { ...item };
+    if (!b) continue;
+
+    const isCancelled = b.status === 'Cancelled' || b.status === 'Rejected';
+    const slotPassed = isPujaSlotPassed(b.date, b.time);
+
+    if (!isCancelled && slotPassed && b.status !== 'Completed') {
+      b.status = 'Completed';
+      if (item.status !== undefined) item.status = 'Completed';
+      toCompleteIds.push(b._id || b.bookingId);
+    } else if (!isCancelled && !slotPassed && b.status === 'Completed' && !b.havanConducted) {
+      b.status = 'Confirmed';
+      if (item.status !== undefined) item.status = 'Confirmed';
+      toRestoreConfirmedIds.push(b._id || b.bookingId);
+    }
+    results.push(b);
+  }
+
+  if (toCompleteIds.length > 0) {
+    try {
+      await Booking.updateMany(
+        {
+          $or: [
+            { _id: { $in: toCompleteIds } },
+            { bookingId: { $in: toCompleteIds } }
+          ],
+          status: { $nin: ['Cancelled', 'Rejected'] }
+        },
+        { $set: { status: 'Completed' } }
+      );
+    } catch (err) {
+      console.warn('Error auto-updating completed bookings in DB:', err.message);
+    }
+  }
+
+  if (toRestoreConfirmedIds.length > 0) {
+    try {
+      await Booking.updateMany(
+        {
+          $or: [
+            { _id: { $in: toRestoreConfirmedIds } },
+            { bookingId: { $in: toRestoreConfirmedIds } }
+          ],
+          status: 'Completed',
+          havanConducted: { $ne: true }
+        },
+        { $set: { status: 'Confirmed' } }
+      );
+    } catch (err) {
+      console.warn('Error reverting premature completed bookings in DB:', err.message);
+    }
+  }
+
+  return results;
+}
+
 // Calculate Cancellation & Refund terms according to platform rules:
 // 1. Pandit cancels anytime -> 100% full refund to devotee.
 // 2. Devotee cancels > 18h before start -> 100% full refund (₹0 fee). If unpaid, no payment required.
@@ -2015,6 +2143,11 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
   b.paymentMethod = paymentMethod || 'UPI/Bank Transfer';
   b.paymentDate = new Date();
   b.paymentRejectionReason = '';
+  if (isPujaSlotPassed(b.date, b.time) && b.status !== 'Cancelled' && b.status !== 'Rejected') {
+    b.status = 'Completed';
+  } else if (b.status !== 'Cancelled' && b.status !== 'Rejected' && b.status !== 'In Progress') {
+    b.status = 'Confirmed';
+  }
   await b.save();
 
   res.json({
@@ -2028,15 +2161,22 @@ app.post('/api/bookings/:id/verify-payment', wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
-  // When Admin verifies payment, devotee is marked 'Paid & Verified' and ceremony is marked Completed!
+  // When Admin verifies payment, devotee is marked 'Paid & Verified'.
+  // Do NOT mark ceremony as 'Completed' if ceremony date & time slot is in the future.
+  // The ceremony only becomes 'Completed' after the scheduled date & time slot has passed without cancellation!
   b.paymentStatus = 'Paid & Verified';
-  b.status = 'Completed';
   b.advanceAmount = b.fee;
   b.advancePaid = true;
   b.paymentRejectionReason = '';
   if (!b.invoiceId) {
     b.invoiceId = 'INV-' + b.bookingId.replace('PUJA-', '') + '-' + Date.now().toString().slice(-4);
     b.invoiceGeneratedAt = new Date();
+  }
+
+  if (isPujaSlotPassed(b.date, b.time) && b.status !== 'Cancelled' && b.status !== 'Rejected') {
+    b.status = 'Completed';
+  } else if (b.status !== 'Cancelled' && b.status !== 'Rejected' && b.status !== 'In Progress') {
+    b.status = 'Confirmed';
   }
   await b.save();
 
@@ -2313,7 +2453,46 @@ app.get('/api/long-puja-requests', wrap(async (req, res) => {
 
 app.post('/api/long-puja-requests', wrap(async (req, res) => {
   const b = req.body;
-  if (!b.userEmail || !b.pujaName || !b.district || !b.fromDate || !b.toDate) return res.status(400).json({ error: 'Missing required fields' });
+  if (!b.userEmail || !b.pujaName || !b.district || !b.fromDate || !b.toDate) {
+    return res.status(400).json({ error: 'Missing required fields (userEmail, pujaName, district, fromDate, toDate)' });
+  }
+
+  // Parse structured Venue of Puja fields
+  const venueType = (b.venueType || 'Home / Private Residence').trim();
+  const venueName = (b.venueName || '').trim();
+  const venueAddress = (b.venueAddress || b.address || b.venue || '').trim();
+  const venueLandmark = (b.venueLandmark || '').trim();
+  const venuePincode = (b.venuePincode || '').trim();
+  const venueFacilities = Array.isArray(b.venueFacilities) ? b.venueFacilities : (typeof b.venueFacilities === 'string' && b.venueFacilities ? [b.venueFacilities] : []);
+  const venueNotes = (b.venueNotes || '').trim();
+  const startTime = (b.startTime || b.time || '08:00 AM').trim();
+
+  // Formulate compiled venue description for comprehensive display
+  const venueParts = [];
+  if (venueType) venueParts.push(`[${venueType}]`);
+  if (venueName) venueParts.push(venueName);
+  if (venueAddress) venueParts.push(venueAddress);
+  if (venueLandmark) venueParts.push(`Near ${venueLandmark}`);
+  if (b.district) venueParts.push(b.district);
+  if (venuePincode) venueParts.push(`PIN: ${venuePincode}`);
+  const compiledVenue = venueParts.join(', ') || venueAddress || (b.venue || '').trim();
+
+  if (!compiledVenue || (!venueName && !venueAddress && !(b.venue || '').trim())) {
+    return res.status(400).json({ error: 'Venue of Puja is required. Please specify Ceremony Location, Mandap / Building Name, and Address.' });
+  }
+
+  if (b.termsAccepted === false) {
+    return res.status(400).json({ error: 'You must accept the 48-Hour Advance Notice and Cancellation & Refund Policy terms to request a multi-day ceremony.' });
+  }
+
+  // Enforce minimum 48 hours advance notice requirement
+  const ceremonyStartDt = parsePujaStartDateTime(b.fromDate, startTime);
+  const hoursUntilCeremony = (ceremonyStartDt.getTime() - Date.now()) / (1000 * 60 * 60);
+  if (hoursUntilCeremony < 48) {
+    return res.status(400).json({
+      error: 'Multi-day ceremony bookings must be scheduled at least 48 hours in advance to allow verified Vedic Pandits and Acharyas to prepare sacred samagri, rituals, and travel. Please choose a start date at least 48 hours from now.'
+    });
+  }
 
   // Enforce devotee locked district: devotee cannot change district
   const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
@@ -2331,13 +2510,180 @@ app.post('/api/long-puja-requests', wrap(async (req, res) => {
   const reqDoc = await LongPujaRequest.create({
     id: await uniqueId(LongPujaRequest, 'id', 'LP'),
     userEmail: lc(b.userEmail), userName: b.userName || 'Devotee', phone: b.phone || '',
-    pujaName: b.pujaName, district: b.district, fromDate: b.fromDate, toDate: b.toDate,
+    pujaName: b.pujaName, district: b.district,
+    address: compiledVenue,
+    venue: compiledVenue,
+    venueType,
+    venueName,
+    venueAddress,
+    venueLandmark,
+    venuePincode,
+    venueFacilities,
+    venueNotes,
+    fromDate: b.fromDate, toDate: b.toDate,
+    startTime,
     totalDays: days, dailyHours, totalHours, requiredPandits, estimatedCost,
-    advancePaid: advanceAmount > 0, advanceAmount
+    advancePaid: advanceAmount > 0, advanceAmount,
+    termsAccepted: Boolean(b.termsAccepted !== undefined ? b.termsAccepted : true)
   });
   await sendSafe('LONG_PUJA_SUBMITTED', reqDoc.userEmail, reqDoc.toObject());
   if (advanceAmount > 0) await sendSafe('PAYMENT_RECEIPT', reqDoc.userEmail, { userName: reqDoc.userName, reference: reqDoc.id, service: reqDoc.pujaName, total: estimatedCost, advanceAmount });
   res.status(201).json(reqDoc);
+}));
+
+// Multi-day Cancellation Preview (Devotee or Admin)
+app.get('/api/long-puja-requests/:id/cancellation-preview', wrap(async (req, res) => {
+  const r = await LongPujaRequest.findOne({ id: req.params.id });
+  if (!r) return res.status(404).json({ error: 'Multi-day request not found' });
+
+  const ceremonyStartDt = parsePujaStartDateTime(r.fromDate, r.startTime || '08:00 AM');
+  const now = new Date();
+  const diffMs = ceremonyStartDt.getTime() - now.getTime();
+  const rawHours = diffMs / (1000 * 60 * 60);
+  const hoursBefore = Math.round(rawHours * 10) / 10;
+  const cancelledBy = req.query.cancelledBy === 'admin' ? 'admin' : 'devotee';
+
+  let tier = '', tierLabel = '', refundPercent = 0, cancellationFeePercent = 0;
+  if (cancelledBy === 'admin') {
+    tier = 'platform_cancelled';
+    tierLabel = 'Cancelled by Platform / Pandit (100% Full Refund Guarantee)';
+    refundPercent = 100;
+    cancellationFeePercent = 0;
+  } else if (hoursBefore >= 18) {
+    tier = 'more_than_18h';
+    tierLabel = 'More than 18 hours before ceremony (100% Full Refund / ₹0 Fee)';
+    refundPercent = 100;
+    cancellationFeePercent = 0;
+  } else if (hoursBefore >= 1 && hoursBefore < 18) {
+    tier = '18h_to_1h';
+    tierLabel = 'Between 18 hours and 1 hour before ceremony (40% Refund, 60% Fee)';
+    refundPercent = 40;
+    cancellationFeePercent = 60;
+  } else {
+    tier = 'less_than_1h';
+    tierLabel = 'Less than 1 hour before ceremony (Non-refundable / 100% Retained Fee)';
+    refundPercent = 0;
+    cancellationFeePercent = 100;
+  }
+
+  const adv = Number(r.advanceAmount) || 0;
+  const baseAmount = (r.advancePaid && adv > 0) ? adv : (Number(r.estimatedCost) || 0);
+  const refundAmount = (r.advancePaid && adv > 0) ? Math.round((adv * refundPercent) / 100) : 0;
+  const cancellationFee = (r.advancePaid && adv > 0) ? (adv - refundAmount) : 0;
+
+  const devoteeUser = await User.findOne({ email: lc(r.userEmail) }).lean();
+  const rPayout = r.refundAccountDetails || {};
+
+  res.json({
+    ok: true,
+    id: r.id,
+    pujaName: r.pujaName,
+    fromDate: r.fromDate,
+    toDate: r.toDate,
+    startTime: r.startTime || '08:00 AM',
+    totalDays: r.totalDays,
+    dailyHours: r.dailyHours,
+    venue: r.venue || r.address || '',
+    venueType: r.venueType || 'Home / Private Residence',
+    venueName: r.venueName || '',
+    venueAddress: r.venueAddress || '',
+    venueLandmark: r.venueLandmark || '',
+    district: r.district,
+    status: r.status,
+    advancePaid: r.advancePaid,
+    advanceAmount: adv,
+    estimatedCost: r.estimatedCost,
+    terms: {
+      cancelledBy,
+      hoursBefore,
+      tier,
+      tierLabel,
+      refundPercent,
+      cancellationFeePercent,
+      refundAmount,
+      cancellationFee,
+      isPaid: Boolean(r.advancePaid && adv > 0)
+    },
+    userPayoutDetails: {
+      upiId: (devoteeUser && devoteeUser.upiId) || rPayout.upiId || '',
+      bankAccount: (devoteeUser && devoteeUser.bankAccount) || rPayout.bankAccount || '',
+      ifscCode: (devoteeUser && devoteeUser.ifscCode) || rPayout.ifscCode || '',
+      accountHolder: (devoteeUser && devoteeUser.accountHolder) || rPayout.accountHolder || r.userName || '',
+      bankName: (devoteeUser && devoteeUser.bankName) || rPayout.bankName || ''
+    }
+  });
+}));
+
+app.post('/api/long-puja-requests/:id/cancel', wrap(async (req, res) => {
+  const r = await LongPujaRequest.findOne({ id: req.params.id });
+  if (!r) return res.status(404).json({ error: 'Multi-day request not found' });
+  if (r.status === 'Cancelled') return res.status(400).json({ error: 'This ceremony request has already been cancelled' });
+  if (r.status === 'Completed') return res.status(400).json({ error: 'Completed multi-day ceremonies cannot be cancelled' });
+
+  const ceremonyStartDt = parsePujaStartDateTime(r.fromDate, r.startTime || '08:00 AM');
+  const hoursUntilCeremony = (ceremonyStartDt.getTime() - Date.now()) / (1000 * 60 * 60);
+  if (hoursUntilCeremony < 1) {
+    return res.status(400).json({ error: 'Ceremonies cannot be cancelled less than 1 hour before scheduled start time.' });
+  }
+
+  const reason = (req.body && req.body.reason ? String(req.body.reason) : 'Cancelled by devotee').trim();
+  const cancelledBy = (req.body && req.body.cancelledBy) || 'devotee';
+
+  let refundPercent = 0;
+  if (cancelledBy === 'admin' || cancelledBy === 'pandit') {
+    refundPercent = 100;
+  } else if (hoursUntilCeremony >= 18) {
+    refundPercent = 100;
+  } else {
+    refundPercent = 40;
+  }
+
+  const adv = Number(r.advanceAmount) || 0;
+  const refundAmount = (r.advancePaid && adv > 0) ? Math.round((adv * refundPercent) / 100) : 0;
+  const refundStatus = refundAmount > 0 ? 'Pending Refund' : 'N/A';
+
+  // Save refund payout details
+  const payout = (req.body && req.body.refundAccountDetails) || {};
+  if (payout && (payout.upiId || payout.bankAccount)) {
+    r.refundAccountDetails = {
+      upiId: String(payout.upiId || '').trim(),
+      bankAccount: String(payout.bankAccount || '').trim(),
+      ifscCode: String(payout.ifscCode || '').trim().toUpperCase(),
+      accountHolder: String(payout.accountHolder || '').trim(),
+      bankName: String(payout.bankName || '').trim()
+    };
+    // Also save to devotee user profile for future use
+    const devoteeUser = await User.findOne({ email: lc(r.userEmail) });
+    if (devoteeUser) {
+      if (payout.upiId) devoteeUser.upiId = String(payout.upiId).trim();
+      if (payout.bankAccount) devoteeUser.bankAccount = String(payout.bankAccount).trim();
+      if (payout.ifscCode) devoteeUser.ifscCode = String(payout.ifscCode).trim().toUpperCase();
+      if (payout.accountHolder) devoteeUser.accountHolder = String(payout.accountHolder).trim();
+      if (payout.bankName) devoteeUser.bankName = String(payout.bankName).trim();
+      await devoteeUser.save();
+    }
+  }
+
+  r.status = 'Cancelled';
+  r.cancelledBy = cancelledBy;
+  r.cancelledAt = new Date();
+  r.cancellationReason = reason;
+  r.refundEligiblePercent = refundPercent;
+  r.refundAmount = refundAmount;
+  r.refundStatus = refundStatus;
+  await r.save();
+
+  await sendSafe('LONG_PUJA_CANCELLED', r.userEmail, {
+    ...r.toObject(),
+    refundPercent,
+    refundAmount
+  });
+
+  res.json({
+    ok: true,
+    request: r,
+    message: `Multi-day ceremony request ${r.id} cancelled. ${refundAmount > 0 ? `Refund of ₹${refundAmount} will be processed to your account within 24 hours.` : 'No payment deductions incurred.'}`
+  });
 }));
 
 app.put('/api/long-puja-requests/:id/assign', adminOnly, wrap(async (req, res) => {
@@ -2405,11 +2751,12 @@ app.post('/api/send-email', wrap(async (req, res) => {
 
 // ---- Admin analytics ----
 app.get('/api/admin/stats', adminOnly, wrap(async (req, res) => {
-  const [users, pandits, verified, pending, bookings, longReqs, pendingLong] = await Promise.all([
+  const [users, pandits, verified, pending, rawBookings, longReqs, pendingLong] = await Promise.all([
     User.countDocuments({ role: 'user' }), Pandit.countDocuments(), Pandit.countDocuments({ verified: true }),
-    Pandit.countDocuments({ status: 'Pending Review' }), Booking.find({}, { fee: 1, status: 1 }).lean(), LongPujaRequest.countDocuments(),
+    Pandit.countDocuments({ status: 'Pending Review' }), Booking.find({}, { fee: 1, status: 1, date: 1, time: 1, havanConducted: 1 }), LongPujaRequest.countDocuments(),
     LongPujaRequest.countDocuments({ status: 'Pending Admin' })
   ]);
+  const bookings = await autoUpdatePassedSlots(rawBookings);
   const active = bookings.filter((b) => b.status !== 'Cancelled');
   res.json({
     users, pandits, verifiedPandits: verified, pendingPandits: pending,

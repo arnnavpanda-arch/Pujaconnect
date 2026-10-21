@@ -244,6 +244,69 @@ function parsePujaStartDateTime(dateStr, timeStr) {
 
   return new Date(year, month - 1, day, hour, minute, 0);
 }
+
+// Parse ceremony slot end date & time into Date object
+function parsePujaEndDateTime(dateStr, timeStr) {
+  if (!dateStr) return new Date();
+  let year, month, day;
+  const str = String(dateStr).trim();
+  const sep = str.includes('/') ? '/' : str.includes('.') ? '.' : '-';
+  const parts = str.split(sep);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    } else if (parts[2].length === 4) {
+      day = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      year = parseInt(parts[2], 10);
+    } else {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    }
+  } else {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      year = d.getFullYear();
+      month = d.getMonth() + 1;
+      day = d.getDate();
+    } else {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth() + 1;
+      day = now.getDate();
+    }
+  }
+
+  if (timeStr && String(timeStr).includes('-')) {
+    const timeParts = String(timeStr).split('-');
+    const endPart = timeParts[1].trim();
+    const match = endPart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (match) {
+      let h = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10);
+      const ampm = (match[3] || '').toUpperCase();
+      if (ampm === 'PM' && h < 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      return new Date(year, month - 1, day, h, m, 0);
+    }
+  }
+
+  const startDt = parsePujaStartDateTime(dateStr, timeStr);
+  return new Date(startDt.getTime() + 3 * 60 * 60 * 1000);
+}
+
+function isPujaSlotPassed(dateStr, timeStr) {
+  try {
+    const endDt = parsePujaEndDateTime(dateStr, timeStr);
+    return Date.now() >= endDt.getTime();
+  } catch (e) {
+    return false;
+  }
+}
+
 const dayName = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
 const opts = (arr, sel, ph) => (ph !== undefined ? `<option value="">${esc(ph)}</option>` : '') + arr.map((a) => `<option ${a === sel ? 'selected' : ''}>${esc(a)}</option>`).join('');
 
@@ -2188,29 +2251,367 @@ function renderLongForm() {
   const u = S.user;
   const lockedDistrict = (u && u.district) ? u.district.trim() : '';
   const lockedState = (u && u.state) ? u.state.trim() : 'Odisha';
+  const minDate48h = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().split('T')[0];
 
+  const selectedPujaObj = longs.find((p) => p.name === pre) || longs[0] || {};
+  const initialRate = Number(selectedPujaObj.perHourFee) || 500;
+
+  f.className = 'card customizer-container';
   f.innerHTML = `
-    <div class="full"><label>Puja / Mahayajna</label><select id="l-puja">${opts(longs.map((p) => p.name), pre)}</select></div>
-    <div><label>Start Date</label><input type="date" id="l-from" min="${today()}" required></div>
-    <div><label>End Date</label><input type="date" id="l-to" min="${today()}" required></div>
-    <div><label>Daily Duration (hours)</label><input type="number" id="l-hours" min="1" max="12" value="4"></div>
-    <div><label>Pandits Required</label><input type="number" id="l-count" min="1" max="21" value="1"></div>
-    ${lockedDistrict ? `
-      <div>
-        <label>State (Locked)</label>
-        <input type="text" id="l-state" value="${esc(lockedState)}" readonly style="background:#fcf8f0;cursor:not-allowed;font-weight:600">
+    <!-- 48-Hour Advance Booking Requirement & Verification Notice -->
+    <div class="notice-48h-banner">
+      <div class="notice-48h-icon">
+        <span class="material-icons">event_upcoming</span>
       </div>
-      <div>
-        <label>District (Locked)</label>
-        <input type="text" id="l-district" value="${esc(lockedDistrict)}" readonly style="background:#fcf8f0;cursor:not-allowed;font-weight:600">
-        <small class="muted" style="font-size:11px;color:var(--ochre);display:block;margin-top:2px"><span class="material-icons" style="font-size:12px;vertical-align:middle">lock</span> Locked to your registered account location</small>
+      <div style="flex:1">
+        <div class="notice-48h-title">
+          <span>48-Hour Advance Notice Booking Requirement</span>
+          <span class="badge" style="background:#d99a19;color:#fff;font-size:11px;padding:3px 8px">Mandatory Vedic Policy</span>
+        </div>
+        <div class="notice-48h-text">
+          Grand Multi-Day Ceremonies, Mahayajnas, and Vedic Pathas require a strict minimum <strong>48 hours advance notice</strong>. This mandatory buffer enables verified Vedic Acharyas, Purohits, and Pandits to prepare authentic sacred samagri, fast, perform sankalpam preparation, and coordinate travel to your ceremony location.
+        </div>
+        <div id="l-advance-status" style="margin-top:10px">
+          <span class="badge green" style="font-size:12px;padding:6px 12px;display:inline-flex;align-items:center;gap:6px">
+            <span class="material-icons" style="font-size:16px">verified</span>
+            Scheduled 48+ hours in advance – Meets the Vedic Advance Preparation Requirement
+          </span>
+        </div>
       </div>
-    ` : `
-      <div><label>State</label><select id="l-state">${opts(Object.keys(LOCATIONS), 'Odisha')}</select></div>
-      <div><label>District</label><select id="l-district"></select></div>
-    `}
-    <div class="full"><button class="btn btn-gold" type="submit">Submit Request</button></div>`;
+    </div>
 
+    <!-- Section 1: Sacred Ritual & Schedule Configuration -->
+    <div class="customizer-section-card">
+      <div class="customizer-section-header">
+        <div>
+          <h3 class="customizer-section-title">
+            <span class="material-icons" style="color:var(--ochre)">auto_stories</span>
+            1. Select Sacred Ritual &amp; Schedule
+          </h3>
+          <div class="customizer-section-subtitle">Choose the Mahayajna or multi-day ceremony and your desired daily schedule.</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:18px">
+        <label style="font-weight:700;font-size:14px;color:#351605;display:block;margin-bottom:6px">Sacred Puja / Mahayajna *</label>
+        <select id="l-puja" style="width:100%;font-size:15px;padding:12px 14px;border-radius:10px;border:1.5px solid var(--border)">
+          ${opts(longs.map((p) => p.name), pre)}
+        </select>
+        <div id="l-puja-preview" style="margin-top:10px;background:#fcf8f0;border-radius:8px;padding:12px 16px;border:1px solid #ebd9c2">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <strong id="l-puja-desc-title" style="color:var(--mahogany);font-size:14px">${esc(selectedPujaObj.name || '')}</strong>
+            <span id="l-puja-rate-badge" class="badge" style="background:#fff2dc;color:#8d2800;font-weight:700;font-size:12px;border:1px solid #d99a19">
+              Standard Dakshina: ${inr(initialRate)} / Pandit / Hour
+            </span>
+          </div>
+          <p id="l-puja-desc-text" class="muted" style="margin:6px 0 0;font-size:13px">${esc(selectedPujaObj.desc || 'Vedic multi-day anushthan conducted by verified Acharyas.')}</p>
+        </div>
+      </div>
+
+      <div class="form-grid" style="padding:0;gap:16px">
+        <div>
+          <label style="font-weight:700;font-size:13px;color:#351605">Ceremony Start Date (Min. 48h Advance) *</label>
+          <input type="date" id="l-from" min="${minDate48h}" value="${minDate48h}" required style="width:100%;padding:11px 12px">
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Earliest permitted date: 48 hours from now</small>
+        </div>
+
+        <div>
+          <label style="font-weight:700;font-size:13px;color:#351605">Daily Ceremony Start Time *</label>
+          <select id="l-time" style="width:100%;padding:11px 12px">
+            ${opts(['06:00 AM', '06:30 AM', '07:00 AM', '07:30 AM', '08:00 AM', '08:30 AM', '09:00 AM', '09:30 AM', '10:00 AM', '03:00 PM', '04:00 PM', '05:00 PM'], '08:00 AM')}
+          </select>
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Auspicious Muhurat start hour</small>
+        </div>
+
+        <div>
+          <label style="font-weight:700;font-size:13px;color:#351605">Ceremony End Date (Conclusion) *</label>
+          <input type="date" id="l-to" min="${minDate48h}" value="${minDate48h}" required style="width:100%;padding:11px 12px">
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Must be on or after start date</small>
+        </div>
+
+        <div>
+          <label style="font-weight:700;font-size:13px;color:#351605">Daily Duration (Hours / Day) *</label>
+          <select id="l-hours" style="width:100%;padding:11px 12px">
+            ${opts(['2 hours / day', '3 hours / day', '4 hours / day (Recommended)', '5 hours / day', '6 hours / day', '8 hours / day (Full Day Mahayajna)', '10 hours / day', '12 hours / day'], '4 hours / day (Recommended)')}
+          </select>
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Consecutive ritual hours per day</small>
+        </div>
+
+        <div>
+          <label style="font-weight:700;font-size:13px;color:#351605">Number of Vedic Pandits Required *</label>
+          <select id="l-count" style="width:100%;padding:11px 12px">
+            ${[1, 2, 3, 5, 7, 9, 11, 21].map((n) => `<option value="${n}" ${n === 1 ? 'selected' : ''}>${n} Vedic Pandit${n > 1 ? 's (Acharya Team)' : ' (Lead Purohit)'}</option>`).join('')}
+          </select>
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Scholars assigned according to ritual scale</small>
+        </div>
+
+        ${lockedDistrict ? `
+          <div>
+            <label style="font-weight:700;font-size:13px;color:#351605">Ceremony District (Locked to Profile)</label>
+            <input type="text" id="l-district" value="${esc(lockedDistrict)}" readonly style="background:#fcf8f0;cursor:not-allowed;font-weight:600;width:100%;padding:11px 12px">
+            <small class="muted" style="font-size:11px;color:var(--ochre);display:block;margin-top:3px">
+              <span class="material-icons" style="font-size:12px;vertical-align:middle">lock</span> Registered account district (${esc(lockedState)})
+            </small>
+          </div>
+        ` : `
+          <div>
+            <label style="font-weight:700;font-size:13px;color:#351605">State</label>
+            <select id="l-state" style="width:100%;padding:11px 12px">${opts(Object.keys(LOCATIONS), 'Odisha')}</select>
+          </div>
+          <div>
+            <label style="font-weight:700;font-size:13px;color:#351605">District *</label>
+            <select id="l-district" style="width:100%;padding:11px 12px"></select>
+          </div>
+        `}
+      </div>
+    </div>
+
+    <!-- Section 2: First-Class Venue of Puja (Ceremony Location & Mandap Arrangements) -->
+    <div class="customizer-section-card">
+      <div class="customizer-section-header">
+        <div>
+          <h3 class="customizer-section-title">
+            <span class="material-icons" style="color:var(--ochre)">temple_hindu</span>
+            2. Venue of Puja (Mandap &amp; Ceremony Location)
+          </h3>
+          <div class="customizer-section-subtitle">
+            Provide the sacred location where verified Vedic Pandits and Acharyas will arrive to conduct the multi-day ritual.
+          </div>
+        </div>
+      </div>
+
+      <!-- Venue Type Selection Cards -->
+      <label style="font-weight:700;font-size:14px;color:#351605;display:block;margin-bottom:10px">
+        Select Venue Type *
+      </label>
+      <div class="venue-type-grid" id="venue-type-options">
+        <label class="venue-type-card selected">
+          <input type="radio" name="venueType" value="Home / Private Residence" checked style="margin-top:4px;accent-color:#d99a19">
+          <div>
+            <div class="venue-type-name">🏠 Home / Private Residence</div>
+            <div class="venue-type-desc">Devotee's home, puja room, courtyard, or private terrace.</div>
+          </div>
+        </label>
+
+        <label class="venue-type-card">
+          <input type="radio" name="venueType" value="Temple Premises / Mandir" style="margin-top:4px;accent-color:#d99a19">
+          <div>
+            <div class="venue-type-name">🛕 Temple Premises / Mandir</div>
+            <div class="venue-type-desc">Temple mandap, sacred shrine, or dharmashala trust premises.</div>
+          </div>
+        </label>
+
+        <label class="venue-type-card">
+          <input type="radio" name="venueType" value="Kalyana Mandapam / Banquet / Hall" style="margin-top:4px;accent-color:#d99a19">
+          <div>
+            <div class="venue-type-name">🏛️ Kalyana Mandapam / Hall</div>
+            <div class="venue-type-desc">Marriage hall, community banquet, or society function hall.</div>
+          </div>
+        </label>
+
+        <label class="venue-type-card">
+          <input type="radio" name="venueType" value="Ashram / Spiritual Center" style="margin-top:4px;accent-color:#d99a19">
+          <div>
+            <div class="venue-type-name">🕉️ Ashram / Spiritual Center</div>
+            <div class="venue-type-desc">Spiritual retreat, matha, vedic ashram, or prayer grounds.</div>
+          </div>
+        </label>
+
+        <label class="venue-type-card">
+          <input type="radio" name="venueType" value="Outdoor Sacred Site / Other" style="margin-top:4px;accent-color:#d99a19">
+          <div>
+            <div class="venue-type-name">📍 Outdoor Sacred Site / Other</div>
+            <div class="venue-type-desc">Riverbank, ancestral village, garden mandap, or open pavilion.</div>
+          </div>
+        </label>
+      </div>
+
+      <!-- Specific Venue Address Fields -->
+      <div class="form-grid" style="padding:0;gap:14px;margin-top:16px">
+        <div class="full">
+          <label style="font-weight:700;font-size:13px;color:#351605">Venue / Mandap / House Name *</label>
+          <input type="text" id="l-venue-name" placeholder="e.g. Radhe Krishna Kalyana Mandapam, or House / Flat / Society Name" required style="width:100%;padding:11px 12px">
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Prominent name of the ceremony venue or building</small>
+        </div>
+
+        <div>
+          <label style="font-weight:700;font-size:13px;color:#351605">Street Address / Locality / Village *</label>
+          <input type="text" id="l-venue-address" placeholder="e.g. Plot No. 42, Gayatri Vihar, Old Town Road" required style="width:100%;padding:11px 12px">
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Exact street or road address for navigation</small>
+        </div>
+
+        <div>
+          <label style="font-weight:700;font-size:13px;color:#351605">Nearby Landmark *</label>
+          <input type="text" id="l-venue-landmark" placeholder="e.g. Opposite State Bank, Near Jagannath Temple" required style="width:100%;padding:11px 12px">
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Recognizable reference point for Pandits</small>
+        </div>
+
+        <div>
+          <label style="font-weight:700;font-size:13px;color:#351605">Pincode *</label>
+          <input type="text" id="l-venue-pincode" placeholder="e.g. 751002" maxlength="6" pattern="[0-9]{6}" required style="width:100%;padding:11px 12px">
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">6-digit postal code</small>
+        </div>
+
+        <div>
+          <label style="font-weight:700;font-size:13px;color:#351605">Devotee Contact Phone *</label>
+          <input type="tel" id="l-phone" value="${esc((u && u.phone) || '')}" placeholder="e.g. 9876543210" required style="width:100%;padding:11px 12px">
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:3px">Lead Pandit will coordinate venue arrival on this phone</small>
+        </div>
+      </div>
+
+      <!-- Venue Facilities Checklist -->
+      <div style="margin-top:20px;border-top:1px dashed #ebd9c2;padding-top:16px">
+        <label style="font-weight:700;font-size:13.5px;color:#351605;display:flex;align-items:center;gap:6px">
+          <span class="material-icons" style="font-size:18px;color:var(--ochre)">checklist</span>
+          Mandap Setup &amp; Venue Facilities Available:
+        </label>
+        <div class="facilities-checklist">
+          <label class="facility-chip-label">
+            <input type="checkbox" name="venueFacility" value="Dedicated Havan Kund / Fire Ritual Area" checked>
+            <span>🔥 Dedicated Havan Kund / Fire Ritual Space</span>
+          </label>
+          <label class="facility-chip-label">
+            <input type="checkbox" name="venueFacility" value="Covered Mandap / Shamiana Available" checked>
+            <span>🎪 Covered Mandap / Shamiana Setup</span>
+          </label>
+          <label class="facility-chip-label">
+            <input type="checkbox" name="venueFacility" value="Clean Water & Achamana Facilities Ready" checked>
+            <span>💧 Clean Water &amp; Achamana Facilities</span>
+          </label>
+          <label class="facility-chip-label">
+            <input type="checkbox" name="venueFacility" value="Pandit Chowki / Wooden Platforms Arranged" checked>
+            <span>🪑 Raised Chowki / Wooden Asana Platform</span>
+          </label>
+          <label class="facility-chip-label">
+            <input type="checkbox" name="venueFacility" value="Pandit Accommodation / Resting Room Provided">
+            <span>🛏️ Pandit Accommodation (for outstation Acharyas)</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Special Access Notes -->
+      <div style="margin-top:16px">
+        <label style="font-weight:600;font-size:13px;color:#351605;display:block;margin-bottom:4px">Special Venue Instructions &amp; Directions (Optional):</label>
+        <textarea id="l-venue-notes" rows="2" placeholder="e.g. 2nd floor with elevator access, mandap arranged on open terrace, gate security pass provided at entrance" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:13px"></textarea>
+      </div>
+    </div>
+
+    <!-- Section 3: Live Ceremony Dakshina & Schedule Breakdown -->
+    <div class="ceremony-breakdown-box">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-weight:800;color:#351605;font-size:16px;display:flex;align-items:center;gap:8px">
+          <span class="material-icons" style="color:#d99a19">calculate</span>
+          Ceremony Dakshina &amp; Duration Breakdown (Transparent)
+        </div>
+        <span class="badge green" style="font-size:11.5px;padding:3px 10px">Zero Advance Deduction Today</span>
+      </div>
+
+      <div class="breakdown-row">
+        <span>Ceremony Duration:</span>
+        <b id="l-calc-days">1 Day (4 hours/day)</b>
+      </div>
+      <div class="breakdown-row">
+        <span>Total Ritual Hours:</span>
+        <b id="l-calc-hours">4 Hours</b>
+      </div>
+      <div class="breakdown-row">
+        <span>Vedic Scholar Team:</span>
+        <b id="l-calc-pandits">1 Lead Vedic Pandit</b>
+      </div>
+      <div class="breakdown-row">
+        <span>Standard Dakshina Rate:</span>
+        <b id="l-calc-rate">${inr(initialRate)} / Pandit / Hour</b>
+      </div>
+
+      <div class="breakdown-row total">
+        <div>
+          <span>Estimated Total Dakshina:</span>
+          <div style="font-size:12px;font-weight:normal;color:#6b4d3a">Full ceremony dakshina honoring verified Vedic Acharyas</div>
+        </div>
+        <div class="breakdown-total-dakshina" id="l-calc-total">${inr(4 * initialRate)}</div>
+      </div>
+      <small class="muted" style="font-size:12px;display:block;margin-top:8px">
+        ✨ <em>Note:</em> Devotee payment is verified upon Pandit assignment and schedule confirmation. No advance payment is charged during customizer submission.
+      </small>
+    </div>
+
+    <!-- Section 4: Transparent Multi-Day Cancellation & Refund Policy (Uncompacted) -->
+    <div class="customizer-section-card" style="border-color:#d99a19;background:#fffcf7">
+      <div class="customizer-section-header" style="border-bottom-color:#edd8be">
+        <div>
+          <h3 class="customizer-section-title" style="color:#351605">
+            <span class="material-icons" style="color:#d99a19">policy</span>
+            3. Multi-Day Cancellation &amp; Refund Policy (Guaranteed Terms)
+          </h3>
+          <div class="customizer-section-subtitle">
+            Because multi-day rituals require Pandits to reserve consecutive days, transparent tiered cancellation policies apply.
+          </div>
+        </div>
+      </div>
+
+      <div class="policy-tiers-list">
+        <div class="policy-tier-item">
+          <span class="policy-tier-badge green">Tier 1 · 100% Refund</span>
+          <div>
+            <strong>More than 18 Hours before Ceremony Start:</strong>
+            <div style="color:#5a3825;font-size:12.5px;margin-top:2px">
+              100% Full Refund (₹0 Cancellation Fee). Full refund processed to your UPI / Bank account within 24 hours.
+            </div>
+          </div>
+        </div>
+
+        <div class="policy-tier-item">
+          <span class="policy-tier-badge amber">Tier 2 · 40% Refund</span>
+          <div>
+            <strong>Between 18 Hours to 1 Hour before Ceremony Start:</strong>
+            <div style="color:#5a3825;font-size:12.5px;margin-top:2px">
+              40% Refund (60% Cancellation Fee). The retained fee compensates the assigned Vedic Pandits who blocked their multi-day calendar and procured samagri.
+            </div>
+          </div>
+        </div>
+
+        <div class="policy-tier-item">
+          <span class="policy-tier-badge red">Tier 3 · Non-Refundable</span>
+          <div>
+            <strong>Less than 1 Hour before Ceremony Start:</strong>
+            <div style="color:#5a3825;font-size:12.5px;margin-top:2px">
+              Non-refundable. Assigned Acharyas have arrived at the venue or are in active ritual transit with consecrated samagri.
+            </div>
+          </div>
+        </div>
+
+        <div class="policy-tier-item">
+          <span class="policy-tier-badge green">Guarantee</span>
+          <div>
+            <strong>Cancelled by Pandit or PujaConnect Administration:</strong>
+            <div style="color:#5a3825;font-size:12.5px;margin-top:2px">
+              100% Immediate Full Refund Guaranteed under all circumstances without any deductions.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;margin-top:14px;padding:12px 14px;background:#ffffff;border:1.5px solid #d99a19;border-radius:10px;font-size:13.5px;color:#351605">
+        <input type="checkbox" id="l-agree-policy" checked style="margin-top:3px;transform:scale(1.25);accent-color:#d99a19;cursor:pointer">
+        <div>
+          <strong>I have read, understood, and accept the 48-Hour Advance Notice Requirement and the Multi-Day Cancellation &amp; Refund Policy *</strong>
+          <div class="muted" style="font-size:12px;margin-top:2px">I acknowledge that the venue of puja provided is accurate and that cancellations are governed by the transparent tiered policy above.</div>
+        </div>
+      </label>
+    </div>
+
+    <!-- Section 5: Submit Action -->
+    <div style="margin-top:8px">
+      <button class="btn btn-gold btn-lg" type="submit" id="l-submit-btn" style="width:100%;font-size:16px;padding:16px;font-weight:800;letter-spacing:0.02em;box-shadow:0 6px 20px rgba(217, 154, 25, 0.35)">
+        <span class="material-icons">send</span> Submit Multi-Day Puja Request
+      </button>
+      <div style="text-align:center;margin-top:10px;font-size:12.5px;color:#7a553e">
+        🕊️ PujaConnect Vedic Administration verifies Acharyas within 24 hours. Confirmation sent to your registered email.
+      </div>
+    </div>
+  `;
+
+  // State & District Selectors
   const stateSel = $('#l-state');
   const distSel = $('#l-district');
   if (stateSel && stateSel.tagName === 'SELECT') {
@@ -2223,22 +2624,210 @@ function renderLongForm() {
     stateSel.onchange = fillD;
   }
 
+  // Radio card active highlighting for Venue Type
+  const venueOptions = f.querySelectorAll('.venue-type-card');
+  venueOptions.forEach((card) => {
+    card.onclick = () => {
+      venueOptions.forEach((c) => c.classList.remove('selected'));
+      card.classList.add('selected');
+      const rad = card.querySelector('input[type="radio"]');
+      if (rad) rad.checked = true;
+    };
+  });
+
+  // Dynamic 48-Hour Status and Calculation Updates
+  const updateCalculations = () => {
+    const fromInp = $('#l-from');
+    const toInp = $('#l-to');
+    const timeInp = $('#l-time');
+    const hoursInp = $('#l-hours');
+    const countInp = $('#l-count');
+    const pujaInp = $('#l-puja');
+    if (!fromInp || !toInp) return;
+
+    const fromVal = fromInp.value;
+    const toVal = toInp.value || fromVal;
+    const timeVal = (timeInp && timeInp.value) ? timeInp.value : '08:00 AM';
+
+    // Ensure To Date is not earlier than From Date
+    toInp.min = fromVal;
+    if (toVal < fromVal) toInp.value = fromVal;
+
+    // Check 48-Hour Advance Rule
+    const statEl = $('#l-advance-status');
+    if (fromVal && statEl) {
+      const startDt = parsePujaStartDateTime(fromVal, timeVal);
+      const diffHours = (startDt.getTime() - Date.now()) / (1000 * 60 * 60);
+      const roundedHours = Math.round(diffHours * 10) / 10;
+
+      if (diffHours >= 48) {
+        statEl.innerHTML = `
+          <span class="badge green" style="font-size:12.5px;padding:6px 14px;display:inline-flex;align-items:center;gap:6px">
+            <span class="material-icons" style="font-size:16px">verified</span>
+            Scheduled <b>${roundedHours} hours</b> in advance – Fully meets the 48-Hour Vedic Preparation Requirement ✓
+          </span>
+        `;
+      } else {
+        statEl.innerHTML = `
+          <span class="badge red" style="font-size:12.5px;padding:6px 14px;display:inline-flex;align-items:center;gap:6px">
+            <span class="material-icons" style="font-size:16px">error_outline</span>
+            Ineligible: Ceremony start is only <b>${Math.max(0, roundedHours)} hours</b> away. Must be at least 48 hours in advance.
+          </span>
+        `;
+      }
+    }
+
+    // Calculate days & hours
+    const days = Math.max(1, Math.round((new Date(toInp.value || fromVal) - new Date(fromVal)) / 86400000) + 1);
+    const dailyHoursRaw = (hoursInp && hoursInp.value) ? parseInt(hoursInp.value, 10) : 4;
+    const dailyHours = isNaN(dailyHoursRaw) || dailyHoursRaw < 1 ? 4 : dailyHoursRaw;
+    const pandits = (countInp && countInp.value) ? Math.max(1, parseInt(countInp.value, 10)) : 1;
+
+    const currentPuja = longs.find((p) => p.name === (pujaInp ? pujaInp.value : '')) || selectedPujaObj;
+    const rate = Number(currentPuja.perHourFee) || 500;
+
+    const totalHours = days * dailyHours;
+    const totalCost = totalHours * rate * pandits;
+
+    const calcDays = $('#l-calc-days');
+    const calcHours = $('#l-calc-hours');
+    const calcPandits = $('#l-calc-pandits');
+    const calcRate = $('#l-calc-rate');
+    const calcTotal = $('#l-calc-total');
+
+    if (calcDays) calcDays.textContent = `${days} Day${days > 1 ? 's' : ''} (${dailyHours} hrs/day, Start: ${timeVal})`;
+    if (calcHours) calcHours.textContent = `${totalHours} Ritual Hours (${days} days × ${dailyHours} hrs)`;
+    if (calcPandits) calcPandits.textContent = `${pandits} Vedic Pandit${pandits > 1 ? 's' : ' (Lead Purohit)'}`;
+    if (calcRate) calcRate.textContent = `${inr(rate)} / Pandit / Hour`;
+    if (calcTotal) calcTotal.textContent = inr(totalCost);
+
+    // Update Puja Description Preview
+    const descTitle = $('#l-puja-desc-title');
+    const descText = $('#l-puja-desc-text');
+    const rateBadge = $('#l-puja-rate-badge');
+    if (descTitle) descTitle.textContent = currentPuja.name || '';
+    if (descText) descText.textContent = currentPuja.desc || 'Vedic multi-day anushthan conducted by verified Acharyas.';
+    if (rateBadge) rateBadge.textContent = `Standard Dakshina: ${inr(rate)} / Pandit / Hour`;
+  };
+
+  // Attach event listeners for real-time recalculation
+  ['l-puja', 'l-from', 'l-to', 'l-time', 'l-hours', 'l-count'].forEach((id) => {
+    const el = $('#' + id);
+    if (el) {
+      el.onchange = updateCalculations;
+      el.oninput = updateCalculations;
+    }
+  });
+
+  // Initial calculation run
+  updateCalculations();
+
+  // Form submission handling
   f.onsubmit = async (e) => {
     e.preventDefault();
     if (!requireLogin(() => { renderLongForm(); f.requestSubmit(); })) return;
-    const from = $('#l-from').value, to = $('#l-to').value;
-    if (!from || !to || to < from) return toast('Please choose valid start and end dates', true);
-    const finalDistrict = (S.user && S.user.district) ? S.user.district : $('#l-district').value;
+
+    const from = $('#l-from').value;
+    const to = $('#l-to').value;
+    const time = ($('#l-time') ? $('#l-time').value : '08:00 AM');
+
+    if (!from || !to || to < from) {
+      return toast('Please choose valid ceremony start and end dates', true);
+    }
+
+    // Strict 48 hours advance notice check
+    const startDt = parsePujaStartDateTime(from, time);
+    const diffHours = (startDt.getTime() - Date.now()) / (1000 * 60 * 60);
+    if (diffHours < 48) {
+      return toast('Multi-day ceremony bookings must be scheduled at least 48 hours in advance to allow verified Vedic Pandits to prepare and confirm. Please choose a start date at least 48 hours from now.', true);
+    }
+
+    // Gather Venue of Puja details
+    const selectedVenueTypeEl = f.querySelector('input[name="venueType"]:checked');
+    const venueType = selectedVenueTypeEl ? selectedVenueTypeEl.value : 'Home / Private Residence';
+    const venueName = ($('#l-venue-name') ? $('#l-venue-name').value : '').trim();
+    const venueAddress = ($('#l-venue-address') ? $('#l-venue-address').value : '').trim();
+    const venueLandmark = ($('#l-venue-landmark') ? $('#l-venue-landmark').value : '').trim();
+    const venuePincode = ($('#l-venue-pincode') ? $('#l-venue-pincode').value : '').trim();
+    const venueNotes = ($('#l-venue-notes') ? $('#l-venue-notes').value : '').trim();
+    const phone = ($('#l-phone') ? $('#l-phone').value : (S.user ? S.user.phone : '')).trim();
+
+    if (!venueName && !venueAddress) {
+      return toast('Please specify the Venue / Mandap Name and Address for the puja *', true);
+    }
+    if (!venueLandmark) {
+      return toast('Please provide a nearby landmark for the ceremony venue *', true);
+    }
+    if (!venuePincode || venuePincode.length < 6) {
+      return toast('Please provide a valid 6-digit Pincode *', true);
+    }
+
+    // Facilities selected
+    const venueFacilities = [...f.querySelectorAll('input[name="venueFacility"]:checked')].map((el) => el.value);
+
+    // Formulate compiled venue text
+    const venueParts = [`[${venueType}]`];
+    if (venueName) venueParts.push(venueName);
+    if (venueAddress) venueParts.push(venueAddress);
+    if (venueLandmark) venueParts.push(`Near ${venueLandmark}`);
+    const finalDistrict = (S.user && S.user.district) ? S.user.district : ($('#l-district') ? $('#l-district').value : 'Cuttack');
+    if (finalDistrict) venueParts.push(finalDistrict);
+    if (venuePincode) venueParts.push(`PIN: ${venuePincode}`);
+    const compiledVenue = venueParts.join(', ');
+
+    // Cancellation policy acceptance check
+    const agreePolicy = $('#l-agree-policy');
+    if (agreePolicy && !agreePolicy.checked) {
+      return toast('Please accept the 48-Hour Advance Notice and Cancellation & Refund Policy terms to proceed 🙏', true);
+    }
+
+    const rawHours = ($('#l-hours') && $('#l-hours').value) ? parseInt($('#l-hours').value, 10) : 4;
+    const dailyHours = isNaN(rawHours) || rawHours < 1 ? 4 : rawHours;
+    const requiredPandits = ($('#l-count') && $('#l-count').value) ? Math.max(1, parseInt($('#l-count').value, 10)) : 1;
+
+    const submitBtn = $('#l-submit-btn');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Submitting Multi-Day Request...';
+    }
+
     try {
-      const r = await api('/long-puja-requests', { method: 'POST', body: {
-        userEmail: S.user.email, userName: S.user.name, phone: S.user.phone, pujaName: $('#l-puja').value,
-        district: finalDistrict, fromDate: from, toDate: to,
-        dailyHours: +$('#l-hours').value, requiredPandits: +$('#l-count').value,
-        advanceAmount: 0
-      } });
-      toast(`Request ${r.id} submitted. Confirmation email sent.`);
+      const r = await api('/long-puja-requests', {
+        method: 'POST',
+        body: {
+          userEmail: S.user.email,
+          userName: S.user.name,
+          phone: phone || S.user.phone || '',
+          pujaName: $('#l-puja').value,
+          district: finalDistrict,
+          address: compiledVenue,
+          venue: compiledVenue,
+          venueType,
+          venueName,
+          venueAddress,
+          venueLandmark,
+          venuePincode,
+          venueFacilities,
+          venueNotes,
+          fromDate: from,
+          toDate: to,
+          startTime: time,
+          dailyHours,
+          requiredPandits,
+          advanceAmount: 0,
+          termsAccepted: true
+        }
+      });
+      toast(`Multi-day ceremony request ${r.id} submitted! Confirmation email sent with 48h advance verification. 🙏`);
+      S.dashTab = 'long';
       showView('dashboard');
-    } catch (err) { toast(err.message, true); }
+    } catch (err) {
+      toast(err.message || 'Error submitting request', true);
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span class="material-icons">send</span> Submit Multi-Day Puja Request';
+      }
+    }
   };
 }
 
@@ -2807,10 +3396,15 @@ async function openBookingTimeline(arg) {
   }
 
   // Stage 5: Sacred Ceremony Day & Blessings
+  const slotPassed = isPujaSlotPassed(b.date, b.time);
+  const isCancelled = b.status === 'Cancelled';
+  const isRejected = b.status === 'Rejected' || b.panditApproval === 'Rejected';
+  const isCompleted = b.status === 'Completed' || (!isCancelled && !isRejected && slotPassed);
+
   let step5State = 'pending';
   let step5Tag = 'Upcoming';
   let step5Desc = `Scheduled for ${esc(b.date)} at ${esc(b.time || '10:00 AM')} in ${esc(b.district)}.`;
-  if (b.status === 'Completed') {
+  if (isCompleted) {
     step5State = 'completed';
     step5Tag = 'Ceremony Completed 🙏';
     step5Desc = `Sacred Vedic ritual completed successfully on ${esc(b.date)}. May Lord shower peace, health, and prosperity to you and your family! ✨`;
@@ -2818,11 +3412,11 @@ async function openBookingTimeline(arg) {
     step5State = 'active';
     step5Tag = 'In Progress Today 🪔';
     step5Desc = `Ceremony is in progress today (${esc(b.time)}). Pandit ji is performing sacred Vedic rituals at your venue.`;
-  } else if (b.status === 'Confirmed') {
+  } else if (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved') {
     step5State = 'scheduled';
     step5Tag = 'Confirmed & Scheduled 📅';
     step5Desc = `All confirmations complete! Pandit ${esc(b.panditName)} will arrive at your venue on ${esc(b.date)} for the ${esc(b.time)} slot.`;
-  } else if (b.status === 'Cancelled') {
+  } else if (isCancelled) {
     step5State = 'rejected';
     step5Tag = 'Cancelled';
     step5Desc = 'Ceremony booking was cancelled.';
@@ -2843,7 +3437,7 @@ async function openBookingTimeline(arg) {
             </div>
           </div>
           <div>
-            ${isSlotRejected ? `<span class="badge red"><span class="material-icons" style="font-size:12px">event_busy</span> Rejected – Slot Unavailable</span>` : statusBadge(b.status)}
+            ${isSlotRejected ? `<span class="badge red"><span class="material-icons" style="font-size:12px">event_busy</span> Rejected – Slot Unavailable</span>` : statusBadge(isCompleted ? 'Completed' : b.status)}
           </div>
         </div>
         ${b.address ? `<div style="font-size:12.5px;color:#7a5030;margin-top:8px;border-top:1px dashed #ebd9c2;padding-top:8px"><b>Ceremony Venue:</b> ${esc(b.address)}</div>` : ''}
@@ -2985,14 +3579,18 @@ function renderDevoteeBookingsTab(bookings) {
       ${bookings.map((b) => {
         const isSlotRejected = isBookingRejected(b);
         const fee = Number(b.fee) || 0;
+        const slotPassed = isPujaSlotPassed(b.date, b.time);
+        const isCancelled = b.status === 'Cancelled' || b.status === 'Rejected';
+        const isCompleted = b.status === 'Completed' || (!isCancelled && !isSlotRejected && slotPassed);
+        const effectiveStatus = isCompleted ? 'Completed' : b.status;
 
         let badgeHtml = '';
         if (isSlotRejected) {
           badgeHtml = `<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a"><span class="material-icons" style="font-size:12px;vertical-align:middle">event_busy</span> Rejected – No Pandit Available</span>`;
-        } else if (b.status === 'Pending Assignment') {
+        } else if (effectiveStatus === 'Pending Assignment') {
           badgeHtml = `<span class="badge amber"><span class="material-icons" style="font-size:12px;vertical-align:middle">hourglass_top</span> Pending Pandit Assignment</span>`;
         } else {
-          badgeHtml = statusBadge(b.status);
+          badgeHtml = statusBadge(effectiveStatus);
         }
 
         return `
@@ -3080,10 +3678,10 @@ function renderDevoteeBookingsTab(bookings) {
               ` : ''}
             </div>
             <div style="display:flex;gap:6px">
-              ${['Confirmed', 'In Progress'].includes(b.status) ? `
+              ${(['Confirmed', 'In Progress'].includes(effectiveStatus) && !isCompleted) ? `
                 <button class="btn btn-outline dark btn-sm" data-action="reschedule" data-id="${esc(b.bookingId)}">Reschedule</button>
               ` : ''}
-              ${!['Completed', 'Cancelled', 'Rejected'].includes(b.status) ? `
+              ${(!['Completed', 'Cancelled', 'Rejected'].includes(effectiveStatus) && !isCompleted) ? `
                 <button class="btn btn-red btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>
               ` : ''}
             </div>
@@ -3160,40 +3758,92 @@ function renderDevoteeLongTab(longs) {
       <div class="panel empty" style="padding:48px 20px">
         <span class="material-icons" style="font-size:48px;color:var(--ochre)">event_note</span>
         <h3 style="margin:12px 0 6px">No multi-day ritual requests yet</h3>
-        <p class="muted">Planning a multi-day ceremony like Chandi Path, Bhagavat Katha, or Mahayajna?</p>
+        <p class="muted">Planning a grand multi-day ceremony like Chandi Path, Bhagavat Katha, or Mahayajna?</p>
         <button class="btn btn-gold" data-action="nav" data-view="long" style="margin-top:8px"><span class="material-icons">add</span> Customize Multi-Day Puja</button>
       </div>
     `;
   }
   return `
     <div class="booking-cards-grid">
-      ${longs.map((l) => `
-        <div class="booking-card">
+      ${longs.map((l) => {
+        const isCancelled = l.status === 'Cancelled';
+        const isCompleted = l.status === 'Completed';
+        const venueDisplay = l.venue || l.address || '';
+        const assignedCount = (l.assignedPandits && Array.isArray(l.assignedPandits)) ? l.assignedPandits.length : 0;
+        return `
+        <div class="booking-card" style="${isCancelled ? 'border:1.5px solid #ef9a9a;background:#fffaf9;' : ''}">
           <div>
             <div class="booking-card-top">
               <span class="booking-id-tag">${esc(l.id)}</span>
               ${statusBadge(l.status)}
             </div>
             <h4>${esc(l.pujaName)}</h4>
+
             <div class="booking-meta-row" style="margin-top:8px">
               <span class="material-icons">calendar_today</span>
-              <span>${esc(l.fromDate)} → ${esc(l.toDate)} <small class="muted">(${l.totalDays} days × ${l.dailyHours}h/day)</small></span>
+              <span><b>${esc(l.fromDate)} → ${esc(l.toDate)}</b> <small class="muted">(${l.totalDays} days × ${l.dailyHours}h/day, Daily Start: <b>${esc(l.startTime || '08:00 AM')}</b>)</small></span>
             </div>
+
+            <!-- Venue of Puja Details -->
+            <div class="booking-meta-row" style="align-items:flex-start">
+              <span class="material-icons" style="color:var(--ochre)">temple_hindu</span>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span class="venue-badge-pill"><span class="material-icons" style="font-size:14px">place</span> ${esc(l.venueType || 'Ceremony Venue')}</span>
+                  ${l.venueName ? `<strong style="color:#351605">${esc(l.venueName)}</strong>` : ''}
+                </div>
+                <div style="font-size:13px;color:#4a2b16;margin-top:3px;line-height:1.4">
+                  ${esc(l.venueAddress || venueDisplay || 'Address not specified')}
+                  ${l.venueLandmark ? `<br><small class="muted">Landmark: <em>${esc(l.venueLandmark)}</em></small>` : ''}
+                  ${l.venuePincode ? ` <small class="muted">(PIN: ${esc(l.venuePincode)})</small>` : ''}
+                </div>
+                ${(l.venueFacilities && l.venueFacilities.length) ? `
+                  <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
+                    ${l.venueFacilities.map((f) => `<span class="badge" style="background:#f9f2e7;color:#5a3825;font-size:11px;padding:2px 7px">✓ ${esc(f)}</span>`).join('')}
+                  </div>
+                ` : ''}
+                ${l.venueNotes ? `
+                  <small class="muted" style="display:block;margin-top:4px;font-style:italic">Notes: "${esc(l.venueNotes)}"</small>
+                ` : ''}
+              </div>
+            </div>
+
             <div class="booking-meta-row">
               <span class="material-icons">place</span>
               <span>District: <b>${esc(l.district)}</b></span>
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">groups</span>
-              <span>Pandits: <b>${l.assignedPandits.length}/${l.requiredPandits} assigned</b></span>
+              <span>Pandits: <b>${assignedCount}/${l.requiredPandits} assigned</b></span>
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">payments</span>
-              <span>Estimated Dakshina: <b>${inr(l.estimatedCost)}</b> ${l.advancePaid ? '<span class="badge green">Advance Paid</span>' : ''}</span>
+              <span>Estimated Total Dakshina: <b>${inr(l.estimatedCost)}</b> ${l.advancePaid ? '<span class="badge green">Advance Paid</span>' : '<span class="badge" style="background:#f5ece1;color:#6d4833">Pay on Confirmation</span>'}</span>
             </div>
+
+            ${isCancelled ? `
+              <div style="background:#ffebee;border:1px solid #ffcdd2;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12.5px;color:#b71c1c">
+                <strong>🚫 Ceremony Cancelled:</strong>
+                <div>• Cancelled By: <b>${esc(l.cancelledBy || 'Devotee')}</b></div>
+                <div>• Reason: <em>${esc(l.cancellationReason || 'Cancelled upon request')}</em></div>
+                <div>• Refund Status: <b>${esc(l.refundStatus || 'N/A')}</b> ${l.refundAmount > 0 ? `(${inr(l.refundAmount)} - ${l.refundEligiblePercent || 0}% tier)` : ''}</div>
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="booking-card-footer" style="margin-top:14px;padding-top:12px;border-top:1px solid #f2e4d2;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span class="muted" style="font-size:11.5px">
+              <span class="material-icons" style="font-size:13px;vertical-align:middle;color:var(--ochre)">verified</span> 48h Advance Notice Verified
+            </span>
+            ${(!isCancelled && !isCompleted) ? `
+              <button class="btn btn-outline dark btn-sm" data-action="cancelLongPuja" data-id="${esc(l.id)}" style="color:#c62828;border-color:#ef9a9a">
+                <span class="material-icons" style="font-size:14px">cancel</span> Cancel Ceremony / View Policy
+              </button>
+            ` : ''}
           </div>
         </div>
-      `).join('')}
+        `;
+      }).join('')}
     </div>
   `;
 }
@@ -3701,7 +4351,8 @@ function renderPanditCeremoniesTab(bookings) {
         const isUserPaid = b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified';
         const isUnderProcessing = b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending';
         const isAdminPaid = b.panditPayoutStatus === 'Paid';
-        const isCeremonyEnded = b.status === 'Completed';
+        const slotPassed = isPujaSlotPassed(b.date, b.time);
+        const isCeremonyEnded = b.status === 'Completed' || (b.status !== 'Cancelled' && b.status !== 'Rejected' && slotPassed);
 
         const mainFee = Number(b.fee) || 1500;
         const feePercent = Number(b.adminFeePercent !== undefined ? b.adminFeePercent : 10);
@@ -3865,6 +4516,7 @@ function renderPanditLongTab(longs, email) {
     <div class="booking-cards-grid">
       ${longs.map((l) => {
         const st = (l.panditStatuses || {})[email] || 'Assigned';
+        const venueDisplay = l.venue || l.address || '';
         return `
           <div class="booking-card">
             <div>
@@ -3875,11 +4527,44 @@ function renderPanditLongTab(longs, email) {
               <h4>${esc(l.pujaName)}</h4>
               <div class="booking-meta-row" style="margin-top:8px">
                 <span class="material-icons">calendar_today</span>
-                <span>${esc(l.fromDate)} → ${esc(l.toDate)} (${l.dailyHours}h/day)</span>
+                <span><b>${esc(l.fromDate)} → ${esc(l.toDate)}</b> (${l.dailyHours}h/day, Daily Start: <b>${esc(l.startTime || '08:00 AM')}</b>)</span>
               </div>
+
+              <!-- Venue of Puja for Pandit -->
+              <div class="booking-meta-row" style="align-items:flex-start">
+                <span class="material-icons" style="color:var(--ochre)">temple_hindu</span>
+                <div style="flex:1">
+                  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                    <span class="venue-badge-pill"><span class="material-icons" style="font-size:14px">place</span> ${esc(l.venueType || 'Ceremony Venue')}</span>
+                    ${l.venueName ? `<strong style="color:#351605">${esc(l.venueName)}</strong>` : ''}
+                  </div>
+                  <div style="font-size:13px;color:#4a2b16;margin-top:3px;line-height:1.4">
+                    ${esc(l.venueAddress || venueDisplay || 'Address provided by devotee')}
+                    ${l.venueLandmark ? `<br><small class="muted">Landmark: <em>${esc(l.venueLandmark)}</em></small>` : ''}
+                    ${l.venuePincode ? ` <small class="muted">(PIN: ${esc(l.venuePincode)})</small>` : ''}
+                  </div>
+                  ${(l.venueFacilities && l.venueFacilities.length) ? `
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
+                      ${l.venueFacilities.map((f) => `<span class="badge" style="background:#f9f2e7;color:#5a3825;font-size:11px;padding:2px 7px">✓ ${esc(f)}</span>`).join('')}
+                    </div>
+                  ` : ''}
+                  ${l.venueNotes ? `
+                    <small class="muted" style="display:block;margin-top:4px;font-style:italic">Devotee Instructions: "${esc(l.venueNotes)}"</small>
+                  ` : ''}
+                </div>
+              </div>
+
               <div class="booking-meta-row">
                 <span class="material-icons">place</span>
                 <span>District: <b>${esc(l.district)}</b></span>
+              </div>
+              <div class="booking-meta-row">
+                <span class="material-icons">person</span>
+                <span>Devotee: <b>${esc(l.userName)}</b> ${l.phone ? `· 📞 ${esc(l.phone)}` : ''}</span>
+              </div>
+              <div class="booking-meta-row">
+                <span class="material-icons">payments</span>
+                <span>Ceremony Dakshina: <b>${inr(l.estimatedCost)}</b></span>
               </div>
             </div>
             <div class="booking-card-footer">
@@ -4416,8 +5101,9 @@ async function adminDash(root) {
       <td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid var(--ochre)"></td>
       <td>${esc(p.name)}<br><small>${esc(p.email)} · ${esc(p.phone)}</small></td><td>${esc(p.location || p.district)}</td><td>${inr(p.fee)}</td>
       <td><button class="btn btn-green btn-sm" data-action="panditStatus" data-id="${esc(p._id)}" data-status="Verified">Approve</button><button class="btn btn-red btn-sm" data-action="panditStatus" data-id="${esc(p._id)}" data-status="Rejected">Reject</button></td></tr>`).join('')}</table>` : '<p class="muted">No Pandits awaiting review.</p>'}</div>
-    <div class="panel"><h3>Multi-Day Requests</h3>${longs.length ? `<table><tr><th>ID</th><th>Devotee</th><th>Ritual</th><th>Dates</th><th>Pandits</th><th>Status</th><th></th></tr>${longs.map((l) => `<tr><td>${esc(l.id)}</td><td>${esc(l.userName)}<br><small>${esc(l.userEmail)}</small></td><td>${esc(l.pujaName)}<br><small>${esc(l.district)}</small></td><td>${esc(l.fromDate)} → ${esc(l.toDate)}</td>
-      <td>${l.assignedPandits.length}/${l.requiredPandits}</td><td>${statusBadge(l.status)}</td><td>${['Pending Admin', 'Assigned'].includes(l.status) ? `<button class="btn btn-dark btn-sm" data-action="assign" data-id="${esc(l.id)}">${l.status === 'Assigned' ? 'Re-assign' : 'Assign'}</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">No requests.</p>'}
+    <div class="panel"><h3>Multi-Day Requests</h3>${longs.length ? `<table><tr><th>ID</th><th>Devotee</th><th>Ritual</th><th>Dates &amp; Schedule</th><th>Venue of Puja</th><th>Pandits</th><th>Status</th><th></th></tr>${longs.map((l) => `<tr><td>${esc(l.id)}</td><td>${esc(l.userName)}<br><small>${esc(l.userEmail)} · ${esc(l.phone || '')}</small></td><td>${esc(l.pujaName)}<br><small>${esc(l.district)}</small></td><td>${esc(l.fromDate)} → ${esc(l.toDate)}<br><small class="muted">${l.totalDays}d × ${l.dailyHours}h (Start: ${esc(l.startTime || '08:00 AM')})</small></td>
+      <td><span class="venue-badge-pill" style="font-size:10px">${esc(l.venueType || 'Venue')}</span><br><b>${esc(l.venueName || '')}</b><br><small class="muted">${esc(l.venueAddress || l.venue || l.address || '')}${l.venueLandmark ? ` (Nr: ${esc(l.venueLandmark)})` : ''}</small></td>
+      <td>${(l.assignedPandits || []).length}/${l.requiredPandits}</td><td>${statusBadge(l.status)}</td><td>${['Pending Admin', 'Assigned'].includes(l.status) ? `<button class="btn btn-dark btn-sm" data-action="assign" data-id="${esc(l.id)}">${l.status === 'Assigned' ? 'Re-assign' : 'Assign'}</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">No requests.</p>'}
       ${unassigned.length ? `<p class="muted">${unassigned.length} request(s) need Pandit assignment.</p>` : ''}</div>
     <div class="panel"><div class="row"><h3>Service Catalog</h3><button class="btn btn-gold btn-sm" data-action="editPuja" data-id="">+ Add Puja</button></div><table><tr><th>Name</th><th>Type</th><th>Fee</th><th></th></tr>${pujas.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${p.type === 'Long' ? inr(p.perHourFee) + '/hr' : inr(p.baseFee)}</td><td><button class="btn btn-outline dark btn-sm" data-action="editPuja" data-id="${esc(p._id)}">Edit</button><button class="btn btn-red btn-sm" data-action="delPuja" data-id="${esc(p._id)}">Delete</button></td></tr>`).join('')}</table></div>
     <div class="panel"><h3>All Pandits</h3><table><tr><th>Photo</th><th>Name</th><th>District</th><th>Experience</th><th>Status</th></tr>${pandits.map((p) => `<tr><td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid var(--ochre)"></td><td>${esc(p.name)}<br><small>${esc(p.email)}</small></td><td>${esc(p.district)}</td><td>${esc(p.exp)}</td><td>${statusBadge(p.status)}</td></tr>`).join('')}</table></div>
@@ -4456,9 +5142,15 @@ function openAssign(id) {
   const l = S.adminLongs.find((x) => x.id === id);
   const eligible = S.adminPandits.filter((p) => p.verified && ((p.workingDistricts || []).includes(l.district) || p.district === l.district));
   const list = eligible.length ? eligible : S.adminPandits.filter((p) => p.verified);
-  openModal('Assign Pandits – ' + l.id, `<p class="muted" style="margin:0">${esc(l.pujaName)} · ${esc(l.district)} · needs <b>${l.requiredPandits}</b> Pandit(s)${eligible.length ? '' : ' (no Pandits serve this district; showing all verified)'}</p>
+  openModal('Assign Pandits – ' + l.id, `
+    <div style="background:#fcf8f0;border:1px solid #ebd9c2;border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px">
+      <div style="font-weight:700;color:#351605;font-size:14px">${esc(l.pujaName)} · ${esc(l.district)}</div>
+      <div style="margin-top:4px">🏛️ <b>Venue:</b> ${esc(l.venueName ? `${l.venueName}, ` : '')}${esc(l.venueAddress || l.venue || l.address || '')}${l.venueLandmark ? ` (Nr: ${esc(l.venueLandmark)})` : ''}</div>
+      <div style="margin-top:2px">⏱️ <b>Schedule:</b> ${esc(l.fromDate)} → ${esc(l.toDate)} (${l.totalDays}d × ${l.dailyHours}h, Start: ${esc(l.startTime || '08:00 AM')})</div>
+      <div style="margin-top:2px">👥 <b>Team Required:</b> ${l.requiredPandits} Pandit(s)</div>
+    </div>
     <div class="checks" style="flex-direction:column;align-items:stretch">${list.map((p) => `<label class="check"><input type="checkbox" name="as" value="${esc(p.email)}" ${l.assignedPandits.includes(p.email) ? 'checked' : ''}>${esc(p.name)} · ${esc(p.district)} · ${esc(p.exp)}</label>`).join('') || '<span class="muted">No verified Pandits available.</span>'}</div>
-    <button class="btn btn-gold" id="as-go">Assign Selected</button>`, (m) => {
+    <button class="btn btn-gold" id="as-go" style="margin-top:14px;width:100%">Assign Selected Pandits</button>`, (m) => {
     $('#as-go', m).onclick = async () => {
       const emails = [...m.querySelectorAll('input[name="as"]:checked')].map((i) => i.value);
       if (!emails.length) return toast('Select at least one Pandit', true);
@@ -4710,6 +5402,142 @@ async function openDevoteeCancellationModal(bookingId) {
   });
 }
 
+async function openDevoteeLongCancellationModal(requestId) {
+  let preview = null;
+  try {
+    preview = await api('/long-puja-requests/' + encodeURIComponent(requestId) + '/cancellation-preview?cancelledBy=devotee');
+  } catch (e) {
+    return toast(e.message || 'Error fetching cancellation terms', true);
+  }
+  if (!preview || !preview.terms) return toast('Could not calculate cancellation terms', true);
+
+  const t = preview.terms;
+  const u = preview.userPayoutDetails || {};
+  const estCost = Number(preview.estimatedCost) || 0;
+  const advAmount = Number(preview.advanceAmount) || 0;
+  const isPaid = preview.advancePaid && advAmount > 0;
+
+  openModal(`Cancel Multi-Day Ceremony – ${esc(preview.pujaName || 'Mahayajna')}`, `
+    <div style="padding:4px 0">
+      <div style="background:#fff8ed;border:1.5px solid #d99a19;border-radius:10px;padding:16px 18px;margin-bottom:18px">
+        <div style="font-weight:700;color:#351605;font-size:15px;margin-bottom:6px;display:flex;align-items:center;gap:6px">
+          <span class="material-icons" style="color:#d99a19;font-size:20px">schedule</span>
+          Multi-Day Schedule &amp; Cancellation Policy Assessment:
+        </div>
+        <div style="font-size:13.5px;color:#4a2b16;line-height:1.6">
+          • <strong>Ceremony Schedule:</strong> ${esc(preview.fromDate)} to ${esc(preview.toDate)} (Daily Start: <b>${esc(preview.startTime || '08:00 AM')}</b>)<br>
+          • <strong>Venue of Puja:</strong> ${esc(preview.venue || 'Ceremony Venue Specified')}<br>
+          • <strong>Hours Before Start:</strong> <b style="color:#c62828;font-size:15px">${t.hoursBefore > 0 ? `${t.hoursBefore} hours remaining` : 'Ceremony time has passed / imminent'}</b><br>
+          • <strong>Applicable Policy Tier:</strong> <span class="badge ${t.refundPercent === 100 ? 'green' : (t.refundPercent === 40 ? 'amber' : 'red')}">${esc(t.tierLabel)}</span>
+        </div>
+      </div>
+
+      <div style="background:#ffffff;border:1.5px solid #ebd9c2;border-radius:10px;padding:18px 20px;margin-bottom:18px">
+        <div style="font-weight:700;color:#351605;font-size:15px;margin-bottom:10px">💰 Financial &amp; Refund Summary (Uncompacted):</div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px">
+          <span>Estimated Ceremony Dakshina:</span>
+          <b>${inr(estCost)}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px">
+          <span>Devotee Advance Payment:</span>
+          <b style="color:${isPaid ? '#2e7d32' : '#7a553e'}">${isPaid ? `${inr(advAmount)} (Paid &amp; Verified ✅)` : '₹0 (Pay on Confirmation)'}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;color:#c62828">
+          <span>Cancellation Fee (${t.cancellationFeePercent}%):</span>
+          <b>-${inr(t.cancellationFee)}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:10px 0 4px;border-top:1.5px dashed #d99a19;margin-top:6px;font-size:16px;color:#2e7d32">
+          <span><strong>Net Refund Amount Due to Devotee:</strong></span>
+          <strong style="font-size:20px">${inr(t.refundAmount)} (${t.refundPercent}%)</strong>
+        </div>
+        ${!isPaid ? `
+          <div style="margin-top:8px;padding:8px 12px;background:#f9f5ed;border-radius:6px;font-size:12.5px;color:#5a3825">
+            ℹ️ No advance payment was charged for this request. Your multi-day ceremony reservation will be cancelled without any deduction.
+          </div>
+        ` : ''}
+      </div>
+
+      ${isPaid && t.refundAmount > 0 ? `
+        <div style="background:#f9f5ed;border:1.5px solid #ebd9c2;border-radius:10px;padding:16px 18px;margin-bottom:18px">
+          <div style="font-weight:700;color:#351605;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+            <span class="material-icons" style="font-size:18px;color:#2e7d32">account_balance</span>
+            Devotee Refund Payout Details (Confirm Destination):
+          </div>
+          <div class="form-grid" style="padding:0;gap:10px">
+            <div>
+              <label style="font-size:12px;font-weight:600">UPI ID / Number (Direct Credit) *</label>
+              <input id="can-long-upi" class="input" style="width:100%" placeholder="e.g. mobile@upi or username@okaxis" value="${esc(u.upiId || '')}">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600">Bank Account Number</label>
+              <input id="can-long-acc" class="input" style="width:100%" placeholder="e.g. 1234567890" value="${esc(u.bankAccount || '')}">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600">IFSC Code</label>
+              <input id="can-long-ifsc" class="input" style="width:100%;text-transform:uppercase" placeholder="e.g. SBIN0001234" value="${esc(u.ifscCode || '')}">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600">Account Holder Name</label>
+              <input id="can-long-holder" class="input" style="width:100%" placeholder="Name as per bank" value="${esc(u.accountHolder || '')}">
+            </div>
+          </div>
+          <small class="muted" style="font-size:11.5px;display:block;margin-top:6px">
+            PujaConnect Administration will credit your refund of <strong>${inr(t.refundAmount)}</strong> to these details within 24 hours.
+          </small>
+        </div>
+      ` : ''}
+
+      <div style="margin-bottom:18px">
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Reason for Cancellation (Optional):</label>
+        <textarea id="can-long-reason" rows="2" class="input" style="width:100%" placeholder="e.g. Personal emergency, family dates rescheduled, venue postponed"></textarea>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">Keep My Ceremony</button>
+        <button type="button" class="btn btn-red" id="btn-submit-long-cancellation">
+          <span class="material-icons">cancel</span> Confirm Cancellation &amp; Process Refund
+        </button>
+      </div>
+    </div>
+  `, (m) => {
+    $('#btn-submit-long-cancellation', m).onclick = async () => {
+      const upiId = ($('#can-long-upi', m) ? $('#can-long-upi', m).value : '').trim();
+      const bankAccount = ($('#can-long-acc', m) ? $('#can-long-acc', m).value : '').trim();
+      const ifscCode = ($('#can-long-ifsc', m) ? $('#can-long-ifsc', m).value : '').trim();
+      const accountHolder = ($('#can-long-holder', m) ? $('#can-long-holder', m).value : '').trim();
+      const reason = ($('#can-long-reason', m) ? $('#can-long-reason', m).value : '').trim();
+
+      const btn = $('#btn-submit-long-cancellation', m);
+      btn.disabled = true;
+      btn.innerHTML = '<span class="material-icons spin">sync</span> Processing...';
+
+      try {
+        await api('/long-puja-requests/' + encodeURIComponent(requestId) + '/cancel', {
+          method: 'POST',
+          body: {
+            cancelledBy: 'devotee',
+            reason,
+            refundAccountDetails: { upiId, bankAccount, ifscCode, accountHolder }
+          }
+        });
+        closeModal();
+        toast('Multi-day ceremony request cancelled. Confirmation email sent. 🙏');
+        if (S.user) {
+          S.user.upiId = upiId || S.user.upiId;
+          S.user.bankAccount = bankAccount || S.user.bankAccount;
+          S.user.ifscCode = ifscCode || S.user.ifscCode;
+          S.user.accountHolder = accountHolder || S.user.accountHolder;
+        }
+        await renderDashboard();
+      } catch (err) {
+        toast(err.message || 'Error cancelling ceremony request', true);
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-icons">cancel</span> Confirm Cancellation &amp; Process Refund';
+      }
+    };
+  });
+}
+
 async function openPanditCancellationModal(bookingId) {
   let preview = null;
   try {
@@ -4857,6 +5685,7 @@ const ACTIONS = {
   },
   slip: (d) => printSlip(S.bookings.find((b) => b.bookingId === d.id)),
   cancelBooking: (d) => openDevoteeCancellationModal(d.id),
+  cancelLongPuja: (d) => openDevoteeLongCancellationModal(d.id),
   panditCancelBooking: (d) => openPanditCancellationModal(d.id),
   reschedule: (d) => {
     const b = S.bookings.find((x) => x.bookingId === d.id);
