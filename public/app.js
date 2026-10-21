@@ -233,45 +233,8 @@ function updatePublicFooterSystemInfo() {
   }
 }
 
-function renderOfficialContactFooterSnippet(isPandit = false) {
-  const settings = S.systemSettings || DEFAULT_SYSTEM_SETTINGS;
-  const phone = settings.contactNumber || '+91 94370 12345';
-  const address = settings.officeAddress || 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024';
-  const logo = settings.logo || '';
-
-  const cleanPhone = phone.replace(/[^0-9+]/g, '');
-
-  return `
-    <div class="dash-official-footer-card">
-      <div class="dash-official-footer-logo-col">
-        ${logo ? `
-          <img src="${esc(logo)}" class="dash-official-footer-logo" alt="PujaConnect Official Logo">
-        ` : `
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:32px;color:#f5b942;line-height:1">ॐ</span>
-            <span style="font-size:18px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
-          </div>
-        `}
-        <div class="dash-official-title">${isPandit ? 'PujaConnect Administrative Secretariat' : 'PujaConnect Central Headquarters'}</div>
-        <div class="dash-official-sub">${isPandit ? 'Official Acharya Liaison &amp; Purohit Coordination Desk' : 'Devotee Assistance, Booking Verification &amp; Ritual Guidance'}</div>
-      </div>
-      <div class="dash-official-contact-col">
-        <div class="dash-official-label">${isPandit ? 'Official Pandit Support Helpline' : 'Official Devotee Helpline'}</div>
-        <a href="tel:${esc(cleanPhone)}" class="dash-official-phone-badge">
-          <span class="material-icons" style="font-size:16px">${isPandit ? 'phone_in_talk' : 'support_agent'}</span>
-          <span>${esc(phone)}</span>
-        </a>
-        <div class="dash-official-note">${isPandit ? 'Direct administrative priority line for ritual schedules &amp; payouts' : 'Toll-free customer support &amp; ceremony scheduling assistance'}</div>
-      </div>
-      <div class="dash-official-address-col">
-        <div class="dash-official-label">Main Office Address</div>
-        <div class="dash-official-address-val">
-          <span class="material-icons">${isPandit ? 'temple_hindu' : 'location_on'}</span>
-          <span>${esc(address)}</span>
-        </div>
-      </div>
-    </div>
-  `;
+function renderOfficialContactFooterSnippet() {
+  return '';
 }
 
 function showLogoSplash({ durationSec = 4, title = '', subtitle = '', onFinish = null } = {}) {
@@ -4054,9 +4017,6 @@ function renderDevoteeDashboardUI(root, bookings, longs, verifiedList) {
       ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
       ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
     </div>
-
-    <!-- Official Platform Support & Main Headquarters Details -->
-    ${renderOfficialContactFooterSnippet(false)}
   `;
   if (tab === 'refunds') {
     setupDevoteeRefundListeners();
@@ -5818,9 +5778,6 @@ async function panditDash(root) {
       ${tab === 'bank' ? renderPanditBankTab(me) : ''}
       ${tab === 'profile' ? renderPanditProfileTab(me) : ''}
     </div>
-
-    <!-- Official Platform Secretariat & Headquarters Details -->
-    ${renderOfficialContactFooterSnippet(true)}
   `;
   if (tab === 'avail') {
     setupAvailTabListeners(me);
