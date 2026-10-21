@@ -347,6 +347,9 @@
       <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">
         <span class="material-icons">group</span> Devotees
       </button>
+      <button class="admin-tab" data-tab="media" onclick="switchAdminTab('media')">
+        <span class="material-icons">campaign</span> Media &amp; Offers <span id="badge-media-count" class="admin-tab-pill">0</span>
+      </button>
     </div>
 
     <div id="admin-view-root">
@@ -596,20 +599,23 @@
       }
     }
 
-    let S = { adminPandits: [], adminLongs: [], pujas: [], users: [], bookings: [], stats: {}, commissionPercent: 10 };
+    let S = { adminPandits: [], adminLongs: [], pujas: [], users: [], bookings: [], stats: {}, commissionPercent: 10, mediaOffers: [], mediaAnnouncements: [], mediaDevotees: null };
 
     async function loadData() {
       // Run DB status check concurrently in parallel so it never delays data fetching
       checkDb().catch(() => {});
       try {
-        const [stats, pandits, longs, users, pujas, bookings, commissionData] = await Promise.all([
+        const [stats, pandits, longs, users, pujas, bookings, commissionData, offers, announcements, mediaDevotees] = await Promise.all([
           api('/admin/stats').catch(() => ({ users: 0, pandits: 0, verifiedPandits: 0, pendingPandits: 0, bookings: 0, completed: 0, revenue: 0, longRequests: 0, pendingLong: 0 })),
           api('/pandits').catch(() => []),
           api('/long-puja-requests').catch(() => []),
           api('/users').catch(() => []),
           api('/pujas').catch(() => []),
           api('/bookings').catch(() => []),
-          api('/platform-commission').catch(() => ({ commissionPercent: 10 }))
+          api('/platform-commission').catch(() => ({ commissionPercent: 10 })),
+          api('/media/offers').catch(() => []),
+          api('/media/announcements').catch(() => []),
+          api('/admin/media/devotees').catch(() => ({ totalDevotees: 0, states: {} }))
         ]);
         S.stats = stats || {};
         S.adminPandits = Array.isArray(pandits) ? pandits : [];
@@ -618,6 +624,9 @@
         S.pujas = Array.isArray(pujas) ? pujas : [];
         S.bookings = Array.isArray(bookings) ? bookings : [];
         S.commissionPercent = (commissionData && (typeof commissionData.percent === 'number' ? commissionData.percent : commissionData.commissionPercent)) ?? 10;
+        S.mediaOffers = Array.isArray(offers) ? offers : [];
+        S.mediaAnnouncements = Array.isArray(announcements) ? announcements : [];
+        S.mediaDevotees = mediaDevotees || { totalDevotees: 0, states: {} };
 
         renderKpis();
         renderActiveTab();
@@ -793,6 +802,11 @@
       if (payoutBadge) payoutBadge.textContent = pendPanditPayouts;
       const paymentsBadge = document.getElementById('badge-payments-count');
       if (paymentsBadge) paymentsBadge.textContent = (pendPayments + pendRefunds);
+      const mediaBadge = document.getElementById('badge-media-count');
+      if (mediaBadge) {
+        const activeOffers = (S.mediaOffers || []).filter(o => o.status === 'Active').length;
+        mediaBadge.textContent = activeOffers;
+      }
 
       const kpis = [
         { label: 'Pending Pandit Assignment', val: pendBookings, icon: 'person_search', alert: pendBookings > 0 },
@@ -839,6 +853,7 @@
       else if (CURRENT_TAB === 'pandit-payouts') renderPanditPaymentsSection(root);
       else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(root);
       else if (CURRENT_TAB === 'users') renderDevoteesDirectory(root);
+      else if (CURRENT_TAB === 'media') renderMediaSection(root);
     }
 
     // 0. Bookings & Pandit Assignments
@@ -1923,6 +1938,887 @@
         };
       });
     }
+
+    // ==========================================
+    // MEDIA SECTION, FESTIVE OFFERS & ANNOUNCEMENTS
+    // ==========================================
+    let MEDIA_SUBTAB = 'offers'; // 'offers' | 'announcements' | 'devotees'
+    let MEDIA_SEARCH = '';
+    let PREFILLED_REGION = { state: 'Odisha', district: 'ALL' };
+
+    const INDIAN_LOCATIONS = {
+      'Odisha': ['Khordha', 'Cuttack', 'Puri', 'Bhadrak', 'Balasore', 'Sambalpur', 'Angul', 'Balangir', 'Bargarh', 'Boudh', 'Deogarh', 'Dhenkanal', 'Gajapati', 'Ganjam', 'Jagatsinghpur', 'Jajpur', 'Jharsuguda', 'Kalahandi', 'Kandhamal', 'Kendrapara', 'Kendujhar', 'Koraput', 'Malkangiri', 'Mayurbhanj', 'Nabarangpur', 'Nayagarh', 'Nuapada', 'Rayagada', 'Subarnapur', 'Sundargarh'],
+      'West Bengal': ['Kolkata', 'Howrah', 'North 24 Parganas', 'South 24 Parganas', 'Hooghly', 'Darjeeling', 'Nadia', 'Murshidabad', 'Birbhum', 'Bankura', 'Purba Medinipur', 'Paschim Medinipur', 'Malda', 'Jalpaiguri'],
+      'Bihar': ['Patna', 'Gaya', 'Bhagalpur', 'Muzaffarpur', 'Darbhanga', 'Purnia', 'Rohtas', 'Vaishali', 'Saran', 'Begusarai'],
+      'Jharkhand': ['Ranchi', 'Dhanbad', 'Jamshedpur (East Singhbhum)', 'Bokaro', 'Deoghar', 'Hazaribagh', 'Giridih', 'Dumka'],
+      'Uttar Pradesh': ['Varanasi', 'Ayodhya', 'Mathura', 'Prayagraj', 'Lucknow', 'Kanpur', 'Noida', 'Ghaziabad', 'Agra', 'Gorakhpur', 'Meerut', 'Bareilly', 'Aligarh'],
+      'Delhi (NCR)': ['Central Delhi', 'East Delhi', 'New Delhi', 'North Delhi', 'North East Delhi', 'North West Delhi', 'South Delhi', 'South East Delhi', 'South West Delhi', 'West Delhi', 'Noida', 'Gurugram', 'Faridabad', 'Ghaziabad'],
+      'Maharashtra': ['Mumbai City', 'Mumbai Suburban', 'Pune', 'Nagpur', 'Thane', 'Nashik', 'Chhatrapati Sambhajinagar', 'Solapur', 'Kolhapur'],
+      'Karnataka': ['Bengaluru Urban', 'Bengaluru Rural', 'Mysuru', 'Mangaluru (Dakshina Kannada)', 'Hubballi-Dharwad', 'Belagavi', 'Udupi'],
+      'Telangana': ['Hyderabad', 'Warangal', 'Nizamabad', 'Khammam', 'Karimnagar', 'Rangareddy', 'Medchal-Malkajgiri'],
+      'Andhra Pradesh': ['Visakhapatnam', 'Vijayawada (NTR)', 'Tirupati', 'Guntur', 'Kurnool', 'Nellore', 'Kakinada'],
+      'Tamil Nadu': ['Chennai', 'Coimbatore', 'Madurai', 'Tiruchirappalli', 'Salem', 'Tirunelveli', 'Kanchipuram'],
+      'Gujarat': ['Ahmedabad', 'Surat', 'Vadodara', 'Rajkot', 'Bhavnagar', 'Jamnagar', 'Gandhinagar'],
+      'Rajasthan': ['Jaipur', 'Jodhpur', 'Udaipur', 'Kota', 'Ajmer', 'Bikaner', 'Bhilwara', 'Alwar'],
+      'Madhya Pradesh': ['Bhopal', 'Indore', 'Jabalpur', 'Gwalior', 'Ujjain', 'Sagar', 'Rewa'],
+      'Punjab': ['Amritsar', 'Ludhiana', 'Jalandhar', 'Patiala', 'Bathinda', 'SAS Nagar (Mohali)'],
+      'Haryana': ['Gurugram', 'Faridabad', 'Panipat', 'Ambala', 'Karnal', 'Hisar', 'Rohtak'],
+      'Chhattisgarh': ['Raipur', 'Bhilai (Durg)', 'Bilaspur', 'Korba', 'Rajnandgaon'],
+      'Assam': ['Guwahati (Kamrup Metro)', 'Dibrugarh', 'Silchar (Cachar)', 'Jorhat', 'Nagaon']
+    };
+
+    function setMediaSubtab(sub) {
+      MEDIA_SUBTAB = sub;
+      renderActiveTab();
+    }
+
+    function renderMediaSection(root) {
+      const offers = S.mediaOffers || [];
+      const announcements = S.mediaAnnouncements || [];
+      const mediaDevotees = S.mediaDevotees || { totalDevotees: (S.users || []).length, states: {} };
+      const nowStr = new Date().toISOString().split('T')[0];
+
+      const activeOffersCount = offers.filter(o => o.status === 'Active' && (!o.endDate || o.endDate >= nowStr)).length;
+      const activeAnnCount = announcements.filter(a => a.status === 'Active' && (!a.endDate || a.endDate >= nowStr)).length;
+
+      // Ensure devotees grouped structure exists
+      let statesMap = mediaDevotees.states || {};
+      if (!Object.keys(statesMap).length && S.users && S.users.length) {
+        statesMap = {};
+        S.users.forEach(u => {
+          const st = (u.state || 'Odisha').trim() || 'Odisha';
+          const dist = (u.district || u.city || 'Unspecified').trim() || 'Unspecified';
+          if (!statesMap[st]) statesMap[st] = { state: st, count: 0, districts: {} };
+          statesMap[st].count++;
+          if (!statesMap[st].districts[dist]) statesMap[st].districts[dist] = [];
+          statesMap[st].districts[dist].push({
+            name: u.name,
+            email: u.email,
+            phone: u.phone,
+            district: dist,
+            state: st,
+            createdAt: u.createdAt
+          });
+        });
+      }
+
+      const totalDevoteesCount = mediaDevotees.totalDevotees || (S.users || []).length;
+      const totalStatesCount = Object.keys(statesMap).length;
+
+      root.innerHTML = `
+        <div class="admin-panel">
+          <div class="admin-panel-head" style="flex-wrap:wrap;gap:14px;border-bottom:1.5px solid #ebd9c2;padding-bottom:16px;">
+            <div>
+              <h3 style="display:flex;align-items:center;gap:8px;margin:0;font-size:20px;color:var(--admin-dark)">
+                <span class="material-icons" style="color:var(--admin-gold);font-size:26px">campaign</span>
+                Media &amp; Festive Offers Center
+              </h3>
+              <p class="muted" style="font-size:13px;margin:4px 0 0">
+                Puja seasonal discounts, ad broadcasts, devotee emails, registered pandit announcements &amp; geo-directory.
+              </p>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:8px;padding:6px 14px;font-size:12.5px;color:#5a3825">
+                👥 <b>${totalDevoteesCount}</b> Registered Devotees (${totalStatesCount} States)
+              </div>
+              <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:6px 14px;font-size:12.5px;color:#2e7d32">
+                🪔 <b>${activeOffersCount}</b> Active Discounts
+              </div>
+              <div style="background:#e1f5fe;border:1px solid #90caf9;border-radius:8px;padding:6px 14px;font-size:12.5px;color:#0277bd">
+                📢 <b>${activeAnnCount}</b> Active Notices
+              </div>
+            </div>
+          </div>
+
+          <!-- Section Subtabs Navigation -->
+          <div style="display:flex;gap:8px;margin:18px 0;border-bottom:2px solid #ebd9c2;padding-bottom:10px;flex-wrap:wrap">
+            <button class="btn btn-sm ${MEDIA_SUBTAB === 'offers' ? 'btn-gold' : 'btn-outline dark'}" onclick="setMediaSubtab('offers')">
+              <span class="material-icons" style="font-size:16px;vertical-align:middle">local_offer</span> 1. Discounts of any Puja (${offers.length})
+            </button>
+            <button class="btn btn-sm ${MEDIA_SUBTAB === 'announcements' ? 'btn-gold' : 'btn-outline dark'}" onclick="setMediaSubtab('announcements')">
+              <span class="material-icons" style="font-size:16px;vertical-align:middle">campaign</span> 2. Announcements (${announcements.length})
+            </button>
+            <button class="btn btn-sm ${MEDIA_SUBTAB === 'devotees' ? 'btn-gold' : 'btn-outline dark'}" onclick="setMediaSubtab('devotees')">
+              <span class="material-icons" style="font-size:16px;vertical-align:middle">folder_shared</span> 3. Devotees Geo-Directory (State &amp; District Wise)
+            </button>
+          </div>
+
+          <div id="media-subtab-content">
+            ${MEDIA_SUBTAB === 'offers' ? renderMediaOffersSubtab(offers, nowStr) :
+              MEDIA_SUBTAB === 'announcements' ? renderMediaAnnouncementsSubtab(announcements, nowStr) :
+              renderMediaDevoteesSubtab(statesMap, totalDevoteesCount, totalStatesCount)}
+          </div>
+        </div>
+      `;
+
+      bindMediaEvents();
+    }
+
+    // 1. Subtab: Puja Discounts & Offers
+    function renderMediaOffersSubtab(offers, nowStr) {
+      const defaultState = PREFILLED_REGION.state || 'Odisha';
+      const defaultDist = PREFILLED_REGION.district || 'ALL';
+      const pujas = S.pujas || [];
+
+      return `
+        <!-- Create Offer Card -->
+        <div style="background:#fffcf7;border:1.5px solid #ebd9c2;border-radius:12px;padding:22px;margin-bottom:28px;box-shadow:0 4px 16px rgba(53,22,5,0.04)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+            <h4 style="margin:0;font-size:16.5px;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="color:var(--admin-gold)">add_circle</span>
+              Create &amp; Broadcast Puja Festive Discount Offer
+            </h4>
+            <span style="font-size:12px;background:#fff8ed;border:1px solid #ebd9c2;padding:4px 10px;border-radius:6px;color:#8a5d3b">
+              Auto-calculates real fee, admin cut &amp; pandit payout upon booking confirmation
+            </span>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:14px;margin-bottom:14px">
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Offer Title / Ad Headline *</label>
+              <input type="text" id="mo-title" placeholder="e.g. Diwali Dhamaka 40% Off on Satyanarayan Puja" style="margin-top:4px" />
+            </div>
+
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Target Sacred Ritual / Puja *</label>
+              <select id="mo-puja" style="margin-top:4px">
+                <option value="ALL">🌟 All Sacred Vedic Pujas (Entire Catalog)</option>
+                ${pujas.map(p => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price || inr(p.baseFee || 1199))})</option>`).join('')}
+              </select>
+            </div>
+
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Discount Percentage (%) *</label>
+              <div style="position:relative;margin-top:4px">
+                <input type="number" id="mo-discount" min="1" max="100" value="40" placeholder="e.g. 40" style="padding-right:32px" />
+                <span style="position:absolute;right:12px;top:9px;color:var(--muted);font-weight:700">%</span>
+              </div>
+            </div>
+
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Applicable Start Date *</label>
+              <input type="date" id="mo-start-date" value="${nowStr}" style="margin-top:4px" />
+            </div>
+
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Offer End Date (Last Date of Offer) *</label>
+              <input type="date" id="mo-end-date" value="${getFutureDateStr(14)}" style="margin-top:4px" />
+              <small class="muted" style="font-size:11px">Auto-removes from active popups &amp; bookings after this date</small>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Target State *</label>
+              <select id="mo-state" onchange="onOfferStateChange(this.value)" style="margin-top:4px">
+                <option value="ALL">🇮🇳 All States (Pan-India)</option>
+                ${Object.keys(INDIAN_LOCATIONS).map(st => `<option value="${esc(st)}" ${st === defaultState ? 'selected' : ''}>${esc(st)}</option>`).join('')}
+              </select>
+            </div>
+
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Target District *</label>
+              <select id="mo-district" style="margin-top:4px">
+                <option value="ALL">All Districts in State</option>
+                ${(INDIAN_LOCATIONS[defaultState] || []).map(d => `<option value="${esc(d)}" ${d === defaultDist ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-bottom:14px">
+            <label style="font-weight:600;font-size:12.5px">Ad Message / Festive Details for Devotees</label>
+            <textarea id="mo-desc" rows="2" placeholder="Write auspicious festive message, ritual benefits, and promo details sent in emails and displayed in full-screen popup..." style="margin-top:4px"></textarea>
+          </div>
+
+          <div style="background:#fff;border:1px dashed #d99a19;border-radius:8px;padding:14px;margin-bottom:16px">
+            <label style="font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:16px;color:var(--admin-gold)">image</span>
+              Optionally Attach Festive Banner
+            </label>
+            <div style="display:flex;gap:12px;margin-top:6px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="mo-banner-url" placeholder="Paste Banner Image URL or select local image file below..." style="flex:1;min-width:260px" oninput="updateBannerPreview('mo-banner-url', 'mo-banner-preview')" />
+              <label class="btn btn-outline dark btn-sm" style="cursor:pointer;margin:0">
+                <span class="material-icons" style="font-size:14px;vertical-align:middle">upload</span> Upload Image File
+                <input type="file" accept="image/*" style="display:none" onchange="handleFileToDataUrl(this, 'mo-banner-url', 'mo-banner-preview')" />
+              </label>
+            </div>
+            <div id="mo-banner-preview" style="display:none;margin-top:10px;text-align:center">
+              <img src="" style="max-height:140px;border-radius:8px;border:1px solid #ebd9c2;box-shadow:0 2px 8px rgba(0,0,0,0.08)" alt="Banner Preview" />
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;padding-top:12px;border-top:1px solid #ebd9c2">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13px;color:#2b1406">
+              <input type="checkbox" id="mo-send-mail" checked style="width:17px;height:17px" />
+              <span>✉️ <b>Send Mail to All:</b> Broadcast this festive offer email to all registered devotees of selected State/District immediately</span>
+            </label>
+            <button class="btn btn-gold btn-lg" onclick="submitCreateOffer()">
+              <span class="material-icons">campaign</span> Publish &amp; Launch Festive Offer
+            </button>
+          </div>
+        </div>
+
+        <!-- Active & Expired Offers List -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <h4 style="margin:0;font-size:16px;color:var(--admin-dark)">
+              Puja Festive Discounts &amp; Ad Campaigns (${offers.length})
+            </h4>
+            <span class="muted" style="font-size:12px">Offers remain live until last date or when admin removes</span>
+          </div>
+
+          ${offers.length ? `
+            <div class="table-responsive">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>Banner</th>
+                    <th>Offer Title &amp; Message</th>
+                    <th>Applicable Puja</th>
+                    <th>Discount</th>
+                    <th>Region (State / District)</th>
+                    <th>Validity Dates</th>
+                    <th>Status</th>
+                    <th>Devotee Emails</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${offers.map(o => {
+                    const isExpired = o.status === 'Expired' || (o.endDate && o.endDate < nowStr);
+                    const isActive = o.status === 'Active' && !isExpired;
+                    const statusBadgeHtml = isActive
+                      ? '<span class="badge green">Active 🟢</span>'
+                      : isExpired
+                      ? '<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a">Expired ⏰</span>'
+                      : '<span class="badge amber">Disabled ⏸️</span>';
+
+                    const regionText = (!o.targetState || o.targetState === 'ALL')
+                      ? 'Pan-India (All States)'
+                      : `${o.targetState}${o.targetDistricts && o.targetDistricts.length && !o.targetDistricts.includes('ALL') ? ' (' + o.targetDistricts.join(', ') + ')' : ' (All Districts)'}`;
+
+                    return `
+                      <tr>
+                        <td>
+                          ${o.bannerImage ? `
+                            <img src="${esc(o.bannerImage)}" style="width:58px;height:38px;object-fit:cover;border-radius:6px;border:1px solid #ebd9c2" alt="Banner">
+                          ` : '<span class="muted" style="font-size:11px">No Banner</span>'}
+                        </td>
+                        <td>
+                          <b>${esc(o.title)}</b>
+                          ${o.description ? `<br><small class="muted" style="font-size:11.5px;max-width:280px;display:inline-block">${esc(o.description.slice(0, 100))}${o.description.length > 100 ? '…' : ''}</small>` : ''}
+                        </td>
+                        <td><b>${esc(o.pujaName === 'ALL' ? '🌟 All Pujas' : o.pujaName)}</b></td>
+                        <td>
+                          <span class="badge" style="background:#b71c1c;color:#fff;font-weight:800;font-size:12px">
+                            ${o.discountPercent}% OFF
+                          </span>
+                        </td>
+                        <td><small>${esc(regionText)}</small></td>
+                        <td>
+                          <small style="display:block">From: <b>${esc(o.startDate)}</b></small>
+                          <small style="display:block">Till: <b>${esc(o.endDate)}</b></small>
+                        </td>
+                        <td>${statusBadgeHtml}</td>
+                        <td>
+                          <span style="font-size:12px">✉️ Sent: <b>${o.emailsSentCount || 0}</b></span>
+                        </td>
+                        <td>
+                          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                            <button class="btn btn-gold btn-sm" onclick="triggerSendOfferEmail('${esc(o.offerId)}')" title="Send offer email to target devotees">
+                              <span class="material-icons" style="font-size:13px;vertical-align:middle">send</span> Email
+                            </button>
+                            ${isActive ? `
+                              <button class="btn btn-outline dark btn-sm" onclick="setOfferStatus('${esc(o.offerId)}', 'Disabled')" title="Pause this offer">
+                                Pause
+                              </button>
+                            ` : `
+                              <button class="btn btn-green btn-sm" onclick="setOfferStatus('${esc(o.offerId)}', 'Active')" title="Activate this offer">
+                                Activate
+                              </button>
+                            `}
+                            <button class="btn btn-red btn-sm" onclick="deleteMediaOffer('${esc(o.offerId)}', '${esc(o.title)}')" title="Remove this offer at any time">
+                              <span class="material-icons" style="font-size:13px;vertical-align:middle">delete</span> Remove
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : '<div class="empty">No festive discounts created yet. Create your first seasonal puja offer above.</div>'}
+        </div>
+      `;
+    }
+
+    // 2. Subtab: Announcements (User & Pandit)
+    function renderMediaAnnouncementsSubtab(announcements, nowStr) {
+      return `
+        <!-- Create Announcement Form -->
+        <div style="background:#fffcf7;border:1.5px solid #ebd9c2;border-radius:12px;padding:22px;margin-bottom:28px">
+          <h4 style="margin:0 0 16px;font-size:16.5px;color:var(--admin-dark);display:flex;align-items:center;gap:6px">
+            <span class="material-icons" style="color:var(--admin-gold)">add_alert</span>
+            Create Official Platform Announcement
+          </h4>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:14px;margin-bottom:14px">
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Announcement Title *</label>
+              <input type="text" id="ann-title" placeholder="e.g. Ritual Guidelines for Auspicious Havan &amp; Shanti Puja" style="margin-top:4px" />
+            </div>
+
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Audience Type *</label>
+              <select id="ann-audience" onchange="onAnnouncementAudienceChange(this.value)" style="margin-top:4px">
+                <option value="user">👥 Devotees (Customer Users)</option>
+                <option value="pandit">🕉️ Registered Pandits (Verified Vedic Purohits Only)</option>
+              </select>
+              <div id="ann-pandit-hint" style="display:none;margin-top:4px;font-size:11.5px;color:#0277bd;background:#e1f5fe;padding:4px 8px;border-radius:4px">
+                🔒 Pandit Notice: Only registered &amp; verified Pandits will receive this email and view it on their Pandit Dashboard.
+              </div>
+            </div>
+
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Target State</label>
+              <select id="ann-state" onchange="onAnnouncementStateChange(this.value)" style="margin-top:4px">
+                <option value="ALL">🇮🇳 All States (Pan-India)</option>
+                ${Object.keys(INDIAN_LOCATIONS).map(st => `<option value="${esc(st)}">${esc(st)}</option>`).join('')}
+              </select>
+            </div>
+
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Target District</label>
+              <select id="ann-district" style="margin-top:4px">
+                <option value="ALL">All Districts in State</option>
+                ${(INDIAN_LOCATIONS['Odisha'] || []).map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Start Date</label>
+              <input type="date" id="ann-start-date" value="${nowStr}" style="margin-top:4px" />
+            </div>
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Expiry End Date</label>
+              <input type="date" id="ann-end-date" value="${getFutureDateStr(30)}" style="margin-top:4px" />
+            </div>
+          </div>
+
+          <div style="margin-bottom:14px">
+            <label style="font-weight:600;font-size:12.5px">Announcement Message Content *</label>
+            <textarea id="ann-content" rows="3" placeholder="Write official announcement details, policy notices, or festive guidelines..." style="margin-top:4px"></textarea>
+          </div>
+
+          <div style="background:#fff;border:1px dashed #d99a19;border-radius:8px;padding:14px;margin-bottom:16px">
+            <label style="font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px">
+              <span class="material-icons" style="font-size:16px;color:var(--admin-gold)">image</span>
+              Optionally Attach Announcement Banner
+            </label>
+            <div style="display:flex;gap:12px;margin-top:6px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="ann-banner-url" placeholder="Paste Announcement Banner URL or select image file..." style="flex:1;min-width:260px" oninput="updateBannerPreview('ann-banner-url', 'ann-banner-preview')" />
+              <label class="btn btn-outline dark btn-sm" style="cursor:pointer;margin:0">
+                <span class="material-icons" style="font-size:14px;vertical-align:middle">upload</span> Upload Image File
+                <input type="file" accept="image/*" style="display:none" onchange="handleFileToDataUrl(this, 'ann-banner-url', 'ann-banner-preview')" />
+              </label>
+            </div>
+            <div id="ann-banner-preview" style="display:none;margin-top:10px;text-align:center">
+              <img src="" style="max-height:140px;border-radius:8px;border:1px solid #ebd9c2" alt="Banner Preview" />
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;padding-top:12px;border-top:1px solid #ebd9c2">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13px;color:#2b1406">
+              <input type="checkbox" id="ann-send-mail" checked style="width:17px;height:17px" />
+              <span id="ann-mail-label">✉️ <b>Send Mail to All:</b> Email this notice to all registered Devotees immediately</span>
+            </label>
+            <button class="btn btn-gold btn-lg" onclick="submitCreateAnnouncement()">
+              <span class="material-icons">send</span> Publish Announcement
+            </button>
+          </div>
+        </div>
+
+        <!-- Announcements Table -->
+        <div>
+          <h4 style="margin:0 0 14px;font-size:16px;color:var(--admin-dark)">
+            Live &amp; Past Announcements (${announcements.length})
+          </h4>
+
+          ${announcements.length ? `
+            <div class="table-responsive">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>Audience</th>
+                    <th>Banner</th>
+                    <th>Title &amp; Notice Body</th>
+                    <th>Region</th>
+                    <th>Effective Dates</th>
+                    <th>Status</th>
+                    <th>Emails Sent</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${announcements.map(a => {
+                    const isPandit = a.audienceType === 'pandit';
+                    const isExpired = a.status === 'Expired' || (a.endDate && a.endDate < nowStr);
+                    const regionText = (!a.targetState || a.targetState === 'ALL')
+                      ? 'Pan-India'
+                      : `${a.targetState}${a.targetDistricts && a.targetDistricts.length && !a.targetDistricts.includes('ALL') ? ' (' + a.targetDistricts.join(', ') + ')' : ''}`;
+
+                    return `
+                      <tr>
+                        <td>
+                          ${isPandit ? `
+                            <span class="badge" style="background:#283593;color:#fff;font-weight:700">🕉️ Registered Pandits</span>
+                          ` : `
+                            <span class="badge" style="background:#2e7d32;color:#fff;font-weight:700">👥 Devotees</span>
+                          `}
+                        </td>
+                        <td>
+                          ${a.bannerImage ? `
+                            <img src="${esc(a.bannerImage)}" style="width:58px;height:38px;object-fit:cover;border-radius:6px;border:1px solid #ebd9c2" alt="Banner">
+                          ` : '<span class="muted" style="font-size:11px">None</span>'}
+                        </td>
+                        <td>
+                          <b>${esc(a.title)}</b>
+                          <div style="font-size:12px;color:var(--muted);margin-top:2px;max-width:300px">${esc(a.content.slice(0, 110))}${a.content.length > 110 ? '…' : ''}</div>
+                        </td>
+                        <td><small>${esc(regionText)}</small></td>
+                        <td><small>${esc(a.startDate || 'Immediate')} to ${esc(a.endDate || 'Ongoing')}</small></td>
+                        <td>
+                          ${isExpired ? '<span class="badge red">Expired ⏰</span>' : '<span class="badge green">Active 🟢</span>'}
+                        </td>
+                        <td><small>✉️ ${a.emailsSentCount || 0}</small></td>
+                        <td>
+                          <button class="btn btn-red btn-sm" onclick="deleteMediaAnnouncement('${esc(a.announcementId)}', '${esc(a.title)}')">
+                            <span class="material-icons" style="font-size:13px;vertical-align:middle">delete</span> Remove
+                          </button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : '<div class="empty">No announcements created yet.</div>'}
+        </div>
+      `;
+    }
+
+    // 3. Subtab: Devotees Geo-Directory (State then District Wise)
+    function renderMediaDevoteesSubtab(statesMap, totalDevotees, totalStates) {
+      let q = (MEDIA_SEARCH || '').toLowerCase().trim();
+      const stateKeys = Object.keys(statesMap).sort();
+
+      return `
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px">
+            <div>
+              <h4 style="margin:0;font-size:16.5px;color:var(--admin-dark)">
+                Devotee Geographical Directory (State-wise &amp; District-wise)
+              </h4>
+              <p class="muted" style="font-size:12.5px;margin:3px 0 0">
+                Organized view of registered devotee Email IDs grouped by State then District for targeted festive ad campaigns.
+              </p>
+            </div>
+            <div class="search-box" style="width:280px">
+              <span class="material-icons">search</span>
+              <input type="text" placeholder="Search by email, name, district..." value="${esc(MEDIA_SEARCH)}" oninput="MEDIA_SEARCH=this.value; renderActiveTab();" />
+            </div>
+          </div>
+
+          ${stateKeys.length ? `
+            <div style="display:grid;gap:18px">
+              ${stateKeys.map(stName => {
+                const stateData = statesMap[stName];
+                const districts = stateData.districts || {};
+                const distKeys = Object.keys(districts).sort();
+
+                // Check search filter matches
+                let totalStateMatches = 0;
+                distKeys.forEach(dName => {
+                  (districts[dName] || []).forEach(u => {
+                    if (!q || (u.email || '').toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q) || dName.toLowerCase().includes(q) || stName.toLowerCase().includes(q)) {
+                      totalStateMatches++;
+                    }
+                  });
+                });
+
+                if (q && totalStateMatches === 0) return '';
+
+                return `
+                  <div style="background:#fff;border:1.5px solid #ebd9c2;border-radius:12px;overflow:hidden;box-shadow:0 4px 14px rgba(53,22,5,0.03)">
+                    <!-- State Header -->
+                    <div style="background:#fff8ed;border-bottom:1.5px solid #ebd9c2;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+                      <div style="display:flex;align-items:center;gap:10px">
+                        <span style="font-size:20px">🇮🇳</span>
+                        <h4 style="margin:0;font-size:16px;color:var(--admin-dark)">
+                          State: <b>${esc(stName)}</b>
+                        </h4>
+                        <span class="admin-tab-pill green" style="font-size:12px;padding:3px 9px">
+                          ${stateData.count} Devotees
+                        </span>
+                        <span style="font-size:12px;color:var(--muted)">(${distKeys.length} Districts)</span>
+                      </div>
+                      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <button class="btn btn-gold btn-sm" onclick="quickCreateOfferForRegion('${esc(stName)}', 'ALL')">
+                          <span class="material-icons" style="font-size:13px;vertical-align:middle">local_offer</span> Create Festive Offer for ${esc(stName)}
+                        </button>
+                        <button class="btn btn-outline dark btn-sm" onclick="copyStateEmails('${esc(stName)}')">
+                          <span class="material-icons" style="font-size:13px;vertical-align:middle">content_copy</span> Copy State Emails
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Districts in State -->
+                    <div style="padding:16px 20px;display:grid;gap:16px">
+                      ${distKeys.map(dName => {
+                        let devList = districts[dName] || [];
+                        if (q) {
+                          devList = devList.filter(u => (u.email || '').toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q) || dName.toLowerCase().includes(q) || stName.toLowerCase().includes(q));
+                          if (!devList.length) return '';
+                        }
+
+                        return `
+                          <div style="background:#fffcf7;border:1px solid #f0e2d0;border-radius:8px;padding:12px 16px">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+                              <div style="display:flex;align-items:center;gap:8px">
+                                <span class="material-icons" style="font-size:17px;color:var(--admin-gold)">place</span>
+                                <b style="font-size:14px;color:#351605">District: ${esc(dName)}</b>
+                                <span class="badge" style="background:#ebd9c2;color:#351605;font-weight:700;font-size:11px">
+                                  ${devList.length} Devotees
+                                </span>
+                              </div>
+                              <div style="display:flex;gap:6px;align-items:center">
+                                <button class="btn btn-outline dark btn-sm" style="padding:3px 8px;font-size:11.5px" onclick="quickCreateOfferForRegion('${esc(stName)}', '${esc(dName)}')">
+                                  🪔 Offer for ${esc(dName)}
+                                </button>
+                                <button class="btn btn-outline dark btn-sm" style="padding:3px 8px;font-size:11.5px" onclick="copyDistrictEmails('${esc(stName)}', '${esc(dName)}')">
+                                  📋 Copy Emails
+                                </button>
+                              </div>
+                            </div>
+
+                            <!-- Devotees Email IDs Table -->
+                            <div class="table-responsive">
+                              <table class="admin-table" style="font-size:13px">
+                                <thead>
+                                  <tr style="background:#fcf6ec">
+                                    <th>Devotee Name</th>
+                                    <th>Registered Email ID</th>
+                                    <th>Phone</th>
+                                    <th>Registered Date</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  ${devList.map(u => `
+                                    <tr>
+                                      <td><b>${esc(u.name || 'Devotee')}</b></td>
+                                      <td>
+                                        <code style="background:#fff;border:1px solid #ddd;padding:2px 6px;border-radius:4px;font-size:12.5px;color:#2e1305;font-weight:700">
+                                          ${esc(u.email)}
+                                        </code>
+                                      </td>
+                                      <td>📞 ${esc(u.phone || 'N/A')}</td>
+                                      <td><small>${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-IN') : 'N/A'}</small></td>
+                                      <td><span class="badge green" style="font-size:10.5px">Active Devotee</span></td>
+                                      <td>
+                                        <button class="btn btn-gold btn-sm" style="padding:3px 8px;font-size:11px" onclick="openDevoteeRebookModal('${esc(u.email)}', '${esc(u.name)}', '${esc(u.phone || '')}', '${esc(dName)}', '${esc(stName)}')">
+                                          Rebook Ceremony
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  `).join('')}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          ` : '<div class="empty">No registered devotees available to display.</div>'}
+        </div>
+      `;
+    }
+
+    // Helper: update district options based on selected state
+    function onOfferStateChange(selectedState) {
+      const distSelect = document.getElementById('mo-district');
+      if (!distSelect) return;
+      const dists = INDIAN_LOCATIONS[selectedState] || [];
+      distSelect.innerHTML = `<option value="ALL">All Districts in ${selectedState === 'ALL' ? 'Selected State' : selectedState}</option>` +
+        dists.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+    }
+
+    function onAnnouncementStateChange(selectedState) {
+      const distSelect = document.getElementById('ann-district');
+      if (!distSelect) return;
+      const dists = INDIAN_LOCATIONS[selectedState] || [];
+      distSelect.innerHTML = `<option value="ALL">All Districts in ${selectedState === 'ALL' ? 'Selected State' : selectedState}</option>` +
+        dists.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+    }
+
+    function onAnnouncementAudienceChange(val) {
+      const hint = document.getElementById('ann-pandit-hint');
+      const mailLabel = document.getElementById('ann-mail-label');
+      if (val === 'pandit') {
+        if (hint) hint.style.display = 'block';
+        if (mailLabel) mailLabel.innerHTML = '✉️ <b>Send Mail to All:</b> Broadcast this notice only to registered verified Pandits';
+      } else {
+        if (hint) hint.style.display = 'none';
+        if (mailLabel) mailLabel.innerHTML = '✉️ <b>Send Mail to All:</b> Email this notice to all registered Devotees immediately';
+      }
+    }
+
+    function handleFileToDataUrl(input, textInputId, previewContainerId) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target.result;
+        const txtInput = document.getElementById(textInputId);
+        if (txtInput) txtInput.value = dataUrl;
+        updateBannerPreview(textInputId, previewContainerId);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function updateBannerPreview(textInputId, previewContainerId) {
+      const txtInput = document.getElementById(textInputId);
+      const container = document.getElementById(previewContainerId);
+      if (!txtInput || !container) return;
+      const val = txtInput.value.trim();
+      if (val) {
+        container.style.display = 'block';
+        const img = container.querySelector('img');
+        if (img) img.src = val;
+      } else {
+        container.style.display = 'none';
+      }
+    }
+
+    function getFutureDateStr(daysAhead = 14) {
+      const d = new Date();
+      d.setDate(d.getDate() + daysAhead);
+      return d.toISOString().split('T')[0];
+    }
+
+    // Submit Create Offer
+    async function submitCreateOffer() {
+      const title = (document.getElementById('mo-title')?.value || '').trim();
+      const pujaName = document.getElementById('mo-puja')?.value || 'ALL';
+      const discountPercent = Number(document.getElementById('mo-discount')?.value) || 0;
+      const startDate = document.getElementById('mo-start-date')?.value;
+      const endDate = document.getElementById('mo-end-date')?.value;
+      const targetState = document.getElementById('mo-state')?.value || 'ALL';
+      const targetDistVal = document.getElementById('mo-district')?.value || 'ALL';
+      const description = (document.getElementById('mo-desc')?.value || '').trim();
+      const bannerImage = (document.getElementById('mo-banner-url')?.value || '').trim();
+      const sendMailToAll = Boolean(document.getElementById('mo-send-mail')?.checked);
+
+      if (!title) return toast('Please enter an Offer Title / Headline', true);
+      if (discountPercent <= 0 || discountPercent > 100) return toast('Please enter a valid discount percentage (1% to 100%)', true);
+      if (!startDate || !endDate) return toast('Please select Start Date and Offer End Date', true);
+
+      try {
+        const payload = {
+          title,
+          pujaName,
+          discountPercent,
+          startDate,
+          endDate,
+          targetState,
+          targetDistricts: targetDistVal === 'ALL' ? ['ALL'] : [targetDistVal],
+          description,
+          bannerImage,
+          sendMailToAll
+        };
+        const res = await api('/admin/media/offers', {
+          method: 'POST',
+          body: payload
+        });
+        toast(res.message || 'Festive offer created successfully! 🪔');
+        await loadData();
+        renderActiveTab();
+      } catch (err) {
+        toast('Failed creating offer: ' + err.message, true);
+      }
+    }
+
+    // Delete Offer
+    async function deleteMediaOffer(offerId, title) {
+      const ok = await adminConfirm({
+        title: 'Remove Festive Offer',
+        message: `Permanently remove "${title || offerId}"?`,
+        detail: 'This offer will be removed immediately. The discount will no longer appear on Devotee Dashboards or be applied to new bookings.',
+        confirmText: 'Remove Offer',
+        confirmClass: 'btn-red',
+        icon: 'delete_forever'
+      });
+      if (!ok) return;
+
+      try {
+        await api('/admin/media/offers/' + encodeURIComponent(offerId), { method: 'DELETE' });
+        toast('Festive offer removed successfully.');
+        await loadData();
+        renderActiveTab();
+      } catch (err) {
+        toast('Error removing offer: ' + err.message, true);
+      }
+    }
+
+    // Set Offer Status
+    async function setOfferStatus(offerId, status) {
+      try {
+        await api('/admin/media/offers/' + encodeURIComponent(offerId) + '/status', {
+          method: 'PUT',
+          body: { status }
+        });
+        toast(`Offer marked as ${status}`);
+        await loadData();
+        renderActiveTab();
+      } catch (err) {
+        toast('Error updating status: ' + err.message, true);
+      }
+    }
+
+    // Send / Broadcast Offer Email
+    async function triggerSendOfferEmail(offerId) {
+      const ok = await adminConfirm({
+        title: 'Broadcast Festive Offer Email',
+        message: 'Send this festive offer email to all registered devotees in the target state / district?',
+        detail: 'All matching active devotees will receive a sacred Vedic invitation with your discount details and banner.',
+        confirmText: 'Send Broadcast Email',
+        confirmClass: 'btn-gold',
+        icon: 'send'
+      });
+      if (!ok) return;
+
+      try {
+        const res = await api('/admin/media/offers/' + encodeURIComponent(offerId) + '/send-email', { method: 'POST' });
+        toast(res.message || `Broadcast sent to ${res.sentCount || 0} devotees! ✉️`);
+        await loadData();
+        renderActiveTab();
+      } catch (err) {
+        toast('Broadcast email failed: ' + err.message, true);
+      }
+    }
+
+    // Submit Create Announcement
+    async function submitCreateAnnouncement() {
+      const title = (document.getElementById('ann-title')?.value || '').trim();
+      const audienceType = document.getElementById('ann-audience')?.value || 'user';
+      const targetState = document.getElementById('ann-state')?.value || 'ALL';
+      const targetDistVal = document.getElementById('ann-district')?.value || 'ALL';
+      const startDate = document.getElementById('ann-start-date')?.value;
+      const endDate = document.getElementById('ann-end-date')?.value;
+      const content = (document.getElementById('ann-content')?.value || '').trim();
+      const bannerImage = (document.getElementById('ann-banner-url')?.value || '').trim();
+      const sendMailToAll = Boolean(document.getElementById('ann-send-mail')?.checked);
+
+      if (!title) return toast('Please enter Announcement Title', true);
+      if (!content) return toast('Please enter Announcement content', true);
+
+      try {
+        const res = await api('/admin/media/announcements', {
+          method: 'POST',
+          body: {
+            title,
+            audienceType,
+            targetState,
+            targetDistricts: targetDistVal === 'ALL' ? ['ALL'] : [targetDistVal],
+            startDate,
+            endDate,
+            content,
+            bannerImage,
+            sendMailToAll
+          }
+        });
+        toast(res.message || 'Announcement published successfully! 📢');
+        await loadData();
+        renderActiveTab();
+      } catch (err) {
+        toast('Failed publishing announcement: ' + err.message, true);
+      }
+    }
+
+    // Delete Announcement
+    async function deleteMediaAnnouncement(annId, title) {
+      const ok = await adminConfirm({
+        title: 'Delete Announcement',
+        message: `Delete announcement "${title || annId}"?`,
+        detail: 'This will remove the announcement from the system and all dashboards.',
+        confirmText: 'Delete Announcement',
+        confirmClass: 'btn-red',
+        icon: 'delete'
+      });
+      if (!ok) return;
+
+      try {
+        await api('/admin/media/announcements/' + encodeURIComponent(annId), { method: 'DELETE' });
+        toast('Announcement removed.');
+        await loadData();
+        renderActiveTab();
+      } catch (err) {
+        toast('Error deleting announcement: ' + err.message, true);
+      }
+    }
+
+    // Quick prefill offer form for state/district
+    function quickCreateOfferForRegion(state, district) {
+      PREFILLED_REGION = { state, district: district || 'ALL' };
+      setMediaSubtab('offers');
+      setTimeout(() => {
+        const stSelect = document.getElementById('mo-state');
+        if (stSelect) {
+          stSelect.value = state;
+          onOfferStateChange(state);
+        }
+        const distSelect = document.getElementById('mo-district');
+        if (distSelect && district) {
+          distSelect.value = district;
+        }
+        window.scrollTo({ top: 300, behavior: 'smooth' });
+      }, 50);
+    }
+
+    // Copy district emails
+    function copyDistrictEmails(state, district) {
+      const statesMap = (S.mediaDevotees && S.mediaDevotees.states) || {};
+      const devList = (statesMap[state] && statesMap[state].districts && statesMap[state].districts[district]) || [];
+      const emails = devList.map(u => u.email).filter(Boolean);
+      if (!emails.length) return toast('No devotee emails found in ' + district, true);
+      navigator.clipboard.writeText(emails.join(', '));
+      toast(`Copied ${emails.length} email(s) for ${district} to clipboard! 📋`);
+    }
+
+    // Copy state emails
+    function copyStateEmails(state) {
+      const statesMap = (S.mediaDevotees && S.mediaDevotees.states) || {};
+      const districts = (statesMap[state] && statesMap[state].districts) || {};
+      const emails = [];
+      Object.keys(districts).forEach(d => {
+        (districts[d] || []).forEach(u => {
+          if (u.email && !emails.includes(u.email)) emails.push(u.email);
+        });
+      });
+      if (!emails.length) return toast('No devotee emails found in ' + state, true);
+      navigator.clipboard.writeText(emails.join(', '));
+      toast(`Copied ${emails.length} email(s) for ${state} to clipboard! 📋`);
+    }
+
+    function bindMediaEvents() {}
 
     function viewPanditModal(id) {
       const p = S.adminPandits.find(x => x._id === id);

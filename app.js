@@ -6,7 +6,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { connectDB } = require('./lib/db');
-const { User, Pandit, Booking, LongPujaRequest, Puja, AppSetting } = require('./lib/models');
+const { User, Pandit, Booking, LongPujaRequest, Puja, AppSetting, MediaOffer, MediaAnnouncement } = require('./lib/models');
 const { sendTemplate, sendSafe } = require('./lib/mailer');
 
 const app = express();
@@ -1064,6 +1064,91 @@ app.put('/api/platform-commission', adminOnly, wrap(async (req, res) => {
   });
 }));
 
+// --- Media Offer Discount & Real Fee Recalculator Engine ---
+async function findApplicableOffer({ service = '', district = '', state = '', date = '' } = {}) {
+  try {
+    const nowStr = new Date().toISOString().split('T')[0];
+    const queryDate = date ? String(date).split('T')[0] : nowStr;
+
+    // Auto-expire past offers
+    await MediaOffer.updateMany(
+      { status: 'Active', endDate: { $lt: nowStr } },
+      { $set: { status: 'Expired' } }
+    ).catch(() => {});
+
+    const offers = await MediaOffer.find({
+      status: 'Active',
+      startDate: { $lte: queryDate },
+      endDate: { $gte: queryDate }
+    }).sort({ discountPercent: -1 }).lean();
+
+    const sNorm = service ? service.trim().toLowerCase() : '';
+    const dNorm = district ? district.trim().toLowerCase() : '';
+    const stNorm = state ? state.trim().toLowerCase() : '';
+
+    for (const offer of offers) {
+      // Check puja match
+      if (offer.pujaName && offer.pujaName !== 'ALL' && sNorm) {
+        if (offer.pujaName.trim().toLowerCase() !== sNorm) continue;
+      }
+      // Check state match
+      if (offer.targetState && offer.targetState !== 'ALL' && stNorm) {
+        if (offer.targetState.trim().toLowerCase() !== stNorm) continue;
+      }
+      // Check district match
+      if (offer.targetDistricts && offer.targetDistricts.length > 0 && !offer.targetDistricts.includes('ALL')) {
+        if (dNorm) {
+          const matches = offer.targetDistricts.some(d => d.trim().toLowerCase() === dNorm);
+          if (!matches) continue;
+        }
+      }
+      return offer;
+    }
+  } catch (e) {
+    console.error('[findApplicableOffer Error]:', e.message);
+  }
+  return null;
+}
+
+function calculateFeeWithDiscount(baseDakshina, offer, commPct = DEFAULT_PLATFORM_COMMISSION) {
+  const originalFee = Number(baseDakshina) || 0;
+  if (!offer || !originalFee) {
+    const adminFeeAmount = Math.round((originalFee * commPct) / 100);
+    const panditNetPayout = Math.max(0, originalFee - adminFeeAmount);
+    return {
+      originalFee,
+      discountPercent: 0,
+      discountAmount: 0,
+      finalFee: originalFee,
+      adminFeePercent: commPct,
+      adminFeeAmount,
+      panditNetPayout,
+      offerId: '',
+      offerTitle: ''
+    };
+  }
+
+  const discountPercent = Math.max(1, Math.min(100, Number(offer.discountPercent) || 0));
+  const discountAmount = Math.round((originalFee * discountPercent) / 100);
+  const finalFee = Math.max(0, originalFee - discountAmount);
+  // Admin fee is calculated on the NEW final fee (e.g., 10% of 1800 = 180, NOT 10% of 3000)
+  const adminFeeAmount = Math.round((finalFee * commPct) / 100);
+  // Pandit payment is calculated on the NEW final fee (e.g., 1800 - 180 = 1620, NOT 3000 - 300 = 2700)
+  const panditNetPayout = Math.max(0, finalFee - adminFeeAmount);
+
+  return {
+    originalFee,
+    discountPercent,
+    discountAmount,
+    finalFee,
+    adminFeePercent: commPct,
+    adminFeeAmount,
+    panditNetPayout,
+    offerId: offer.offerId || '',
+    offerTitle: offer.title || ''
+  };
+}
+
 // Helper to check if Pandit is available on a specific date (considers unavailableDates and availableDays)
 function isPanditAvailableOnDate(pandit, dateStr) {
   if (!pandit || !dateStr) return { available: true };
@@ -1296,6 +1381,29 @@ app.get('/api/bookings/:id', wrap(async (req, res) => {
     if (longDoc) return res.json(longDoc);
     return res.status(404).json({ error: 'Booking not found' });
   }
+
+  // Recalculate discount if offer became active after booking creation and payment is still pending
+  if (b.paymentStatus === 'Pending' && !b.discountAmount && b.fee > 0) {
+    const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
+    const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
+    const applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
+    if (applicableOffer) {
+      const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
+      const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
+      const feeCalc = calculateFeeWithDiscount(b.originalFee || b.fee, applicableOffer, commPct);
+      b.fee = feeCalc.finalFee;
+      b.originalFee = feeCalc.originalFee;
+      b.discountPercent = feeCalc.discountPercent;
+      b.discountAmount = feeCalc.discountAmount;
+      b.discountOfferId = feeCalc.offerId;
+      b.discountOfferTitle = feeCalc.offerTitle;
+      b.adminFeePercent = commPct;
+      b.adminFeeAmount = feeCalc.adminFeeAmount;
+      b.panditNetPayout = feeCalc.panditNetPayout;
+      await b.save();
+    }
+  }
+
   const updated = await autoUpdatePassedSlots([b]);
   res.json(updated[0] || b);
 }));
@@ -1435,10 +1543,12 @@ app.post('/api/bookings', wrap(async (req, res) => {
   const advanceAmount = Number(b.advanceAmount) || 0;
   const bookingId = await uniqueId(Booking, 'bookingId', 'PUJA');
 
+  const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
+  const applicableOffer = fee > 0 ? await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date }) : null;
   const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
   const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : DEFAULT_PLATFORM_COMMISSION;
-  const adminFeeAmount = Math.round((fee * commPct) / 100);
-  const panditNetPayout = Math.max(0, fee - adminFeeAmount);
+
+  const feeCalc = calculateFeeWithDiscount(fee, applicableOffer, commPct);
 
   const booking = await Booking.create({
     bookingId,
@@ -1459,10 +1569,15 @@ app.post('/api/bookings', wrap(async (req, res) => {
     adminApproval: 'Pending',
     rejectedPandits: [],
     rejectionReason: '',
-    fee,
+    fee: feeCalc.finalFee,
+    originalFee: feeCalc.originalFee,
+    discountPercent: feeCalc.discountPercent,
+    discountAmount: feeCalc.discountAmount,
+    discountOfferId: feeCalc.offerId,
+    discountOfferTitle: feeCalc.offerTitle,
     adminFeePercent: commPct,
-    adminFeeAmount,
-    panditNetPayout,
+    adminFeeAmount: feeCalc.adminFeeAmount,
+    panditNetPayout: feeCalc.panditNetPayout,
     advanceAmount,
     advancePaid: advanceAmount > 0,
     paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= fee ? 'Paid' : 'Partial',
@@ -1543,18 +1658,27 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
     return res.status(409).json({ error: `Pandit ${pandit.name} is already booked on ${b.date} at ${b.time}. Please select another Pandit.` });
   }
 
-  const fee = (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || (b.fee > 0 ? b.fee : 1500);
+  const rawBaseFee = (pandit.districtPrices && pandit.districtPrices[b.district]) || pandit.fee || (b.originalFee > 0 ? b.originalFee : (b.fee > 0 ? b.fee : 1500));
+  const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
+  const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
+  const applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
+
   const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
   const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
-  const adminFeeAmount = Math.round((fee * commPct) / 100);
-  const panditNetPayout = Math.max(0, fee - adminFeeAmount);
+
+  const feeCalc = calculateFeeWithDiscount(rawBaseFee, applicableOffer, commPct);
 
   b.panditEmail = pandit.email;
   b.panditName = pandit.name;
-  b.fee = fee;
+  b.fee = feeCalc.finalFee;
+  b.originalFee = feeCalc.originalFee;
+  b.discountPercent = feeCalc.discountPercent;
+  b.discountAmount = feeCalc.discountAmount;
+  b.discountOfferId = feeCalc.offerId;
+  b.discountOfferTitle = feeCalc.offerTitle;
   b.adminFeePercent = commPct;
-  b.adminFeeAmount = adminFeeAmount;
-  b.panditNetPayout = panditNetPayout;
+  b.adminFeeAmount = feeCalc.adminFeeAmount;
+  b.panditNetPayout = feeCalc.panditNetPayout;
   b.status = 'Pending Pandit Confirmation';
   b.panditApproval = 'Pending';
   b.adminApproval = 'Approved';
@@ -3506,6 +3630,399 @@ app.post('/api/send-email', wrap(async (req, res) => {
   } catch (e) {
     res.status(e.message.startsWith('Unknown') || e.message.includes('missing') ? 400 : 502).json({ ok: false, error: e.message });
   }
+}));
+
+// ==========================================
+// ---- Media Section & Festive Offers Engine ----
+// ==========================================
+
+// 1. Devotees Directory organized State-wise and District-wise
+app.get('/api/admin/media/devotees', adminOnly, wrap(async (req, res) => {
+  const users = await User.find({ role: { $ne: 'admin' } }).sort({ createdAt: -1 }).lean();
+  const grouped = {};
+  let totalDevotees = 0;
+
+  users.forEach(u => {
+    totalDevotees++;
+    const st = (u.state || 'Odisha').trim() || 'Odisha';
+    const dist = (u.district || u.city || 'Unspecified').trim() || 'Unspecified';
+    if (!grouped[st]) {
+      grouped[st] = {
+        state: st,
+        count: 0,
+        districts: {}
+      };
+    }
+    grouped[st].count++;
+    if (!grouped[st].districts[dist]) {
+      grouped[st].districts[dist] = [];
+    }
+    grouped[st].districts[dist].push({
+      _id: u._id,
+      name: u.name,
+      email: u.email,
+      phone: u.phone,
+      state: st,
+      district: dist,
+      city: u.city || '',
+      status: u.status || 'Active',
+      createdAt: u.createdAt
+    });
+  });
+
+  res.json({
+    ok: true,
+    totalDevotees,
+    totalStates: Object.keys(grouped).length,
+    states: grouped
+  });
+}));
+
+// 2. Media Offers: List
+app.get('/api/media/offers', wrap(async (req, res) => {
+  const nowStr = new Date().toISOString().split('T')[0];
+  // Auto-expire past offers
+  await MediaOffer.updateMany(
+    { status: 'Active', endDate: { $lt: nowStr } },
+    { $set: { status: 'Expired' } }
+  ).catch(() => {});
+
+  const offers = await MediaOffer.find().sort({ createdAt: -1 }).lean();
+  res.json(offers);
+}));
+
+// 3. Media Offers: Create Offer (with optional direct broadcast email)
+app.post('/api/admin/media/offers', adminOnly, wrap(async (req, res) => {
+  const { title, description, pujaName, discountPercent, startDate, endDate, targetState, targetDistricts, bannerImage, sendMailToAll } = req.body;
+  if (!title || !discountPercent || !startDate || !endDate) {
+    return res.status(400).json({ error: 'Title, discount percent, start date, and end date are required.' });
+  }
+
+  const dPct = Math.max(1, Math.min(100, Number(discountPercent)));
+  const offerId = await uniqueId(MediaOffer, 'offerId', 'OFFER');
+  const nowStr = new Date().toISOString().split('T')[0];
+  const isExpired = endDate < nowStr;
+
+  const targetDistList = Array.isArray(targetDistricts) && targetDistricts.length ? targetDistricts : ['ALL'];
+  const offer = await MediaOffer.create({
+    offerId,
+    title: String(title).trim(),
+    description: String(description || '').trim(),
+    pujaName: String(pujaName || 'ALL').trim(),
+    discountPercent: dPct,
+    startDate: String(startDate).trim(),
+    endDate: String(endDate).trim(),
+    targetState: String(targetState || 'ALL').trim(),
+    targetDistricts: targetDistList,
+    bannerImage: String(bannerImage || '').trim(),
+    status: isExpired ? 'Expired' : 'Active',
+    emailsSentCount: 0
+  });
+
+  let emailsSent = 0;
+  if (sendMailToAll && !isExpired) {
+    const q = { role: { $ne: 'admin' }, status: { $ne: 'Revoked' } };
+    if (offer.targetState && offer.targetState !== 'ALL') {
+      q.state = new RegExp('^' + offer.targetState.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+    }
+    if (offer.targetDistricts && offer.targetDistricts.length && !offer.targetDistricts.includes('ALL')) {
+      q.district = { $in: offer.targetDistricts.map(d => new RegExp('^' + d.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) };
+    }
+    const devotees = await User.find(q).lean();
+    for (const dev of devotees) {
+      if (!dev.email) continue;
+      try {
+        await sendSafe('MEDIA_PUJA_OFFER', dev.email, {
+          ...offer.toObject(),
+          userName: dev.name || 'Devotee',
+          userEmail: dev.email
+        });
+        emailsSent++;
+      } catch (e) {
+        console.error(`[Media Offer Email Error to ${dev.email}]:`, e.message);
+      }
+    }
+    offer.emailsSentCount = emailsSent;
+    offer.emailsSentAt = new Date();
+    await offer.save();
+  }
+
+  res.status(201).json({
+    ok: true,
+    offer,
+    emailsSent,
+    message: `Festive offer "${offer.title}" created successfully${sendMailToAll ? ` and emailed to ${emailsSent} devotees.` : '.'}`
+  });
+}));
+
+// 4. Media Offers: Delete (Admin can remove any time)
+app.delete('/api/admin/media/offers/:id', adminOnly, wrap(async (req, res) => {
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const q = mongoose.Types.ObjectId.isValid(rawId)
+    ? { $or: [{ offerId: rawId }, { _id: rawId }] }
+    : { offerId: rawId };
+  const offer = await MediaOffer.findOneAndDelete(q);
+  if (!offer) return res.status(404).json({ error: 'Festive offer not found' });
+  res.json({ ok: true, deletedId: offer.offerId, message: 'Festive offer successfully removed.' });
+}));
+
+// 5. Media Offers: Toggle status
+app.put('/api/admin/media/offers/:id/status', adminOnly, wrap(async (req, res) => {
+  const { status } = req.body;
+  if (!['Active', 'Disabled', 'Expired'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const q = mongoose.Types.ObjectId.isValid(rawId)
+    ? { $or: [{ offerId: rawId }, { _id: rawId }] }
+    : { offerId: rawId };
+  const offer = await MediaOffer.findOneAndUpdate(q, { status }, { new: true });
+  if (!offer) return res.status(404).json({ error: 'Festive offer not found' });
+  res.json({ ok: true, offer });
+}));
+
+// 6. Media Offers: Broadcast / Send Email to target devotees
+app.post('/api/admin/media/offers/:id/send-email', adminOnly, wrap(async (req, res) => {
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const q = mongoose.Types.ObjectId.isValid(rawId)
+    ? { $or: [{ offerId: rawId }, { _id: rawId }] }
+    : { offerId: rawId };
+  const offer = await MediaOffer.findOne(q);
+  if (!offer) return res.status(404).json({ error: 'Festive offer not found' });
+
+  const query = { role: { $ne: 'admin' }, status: { $ne: 'Revoked' } };
+  if (offer.targetState && offer.targetState !== 'ALL') {
+    query.state = new RegExp('^' + offer.targetState.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+  }
+  if (offer.targetDistricts && offer.targetDistricts.length && !offer.targetDistricts.includes('ALL')) {
+    query.district = { $in: offer.targetDistricts.map(d => new RegExp('^' + d.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) };
+  }
+  const devotees = await User.find(query).lean();
+  let sentCount = 0;
+  for (const dev of devotees) {
+    if (!dev.email) continue;
+    try {
+      await sendSafe('MEDIA_PUJA_OFFER', dev.email, {
+        ...offer.toObject(),
+        userName: dev.name || 'Devotee',
+        userEmail: dev.email
+      });
+      sentCount++;
+    } catch (e) {
+      console.error(`[Resend Offer Email Error to ${dev.email}]:`, e.message);
+    }
+  }
+
+  offer.emailsSentCount = (offer.emailsSentCount || 0) + sentCount;
+  offer.emailsSentAt = new Date();
+  await offer.save();
+
+  res.json({
+    ok: true,
+    sentCount,
+    totalTargeted: devotees.length,
+    message: `Offer broadcast sent to ${sentCount} devotees in ${offer.targetState || 'All States'}.`
+  });
+}));
+
+// 7. Media Announcements: List
+app.get('/api/media/announcements', wrap(async (req, res) => {
+  const nowStr = new Date().toISOString().split('T')[0];
+  // Auto-expire past announcements
+  await MediaAnnouncement.updateMany(
+    { status: 'Active', endDate: { $lt: nowStr } },
+    { $set: { status: 'Expired' } }
+  ).catch(() => {});
+
+  const filter = {};
+  if (req.query.audienceType) {
+    filter.audienceType = req.query.audienceType;
+  }
+  const list = await MediaAnnouncement.find(filter).sort({ createdAt: -1 }).lean();
+  res.json(list);
+}));
+
+// 8. Media Announcements: Create (with optional direct broadcast email)
+app.post('/api/admin/media/announcements', adminOnly, wrap(async (req, res) => {
+  const { title, content, audienceType, targetState, targetDistricts, bannerImage, startDate, endDate, sendMailToAll } = req.body;
+  if (!title || !content || !audienceType) {
+    return res.status(400).json({ error: 'Title, content, and audience type (user/pandit) are required.' });
+  }
+
+  const annId = await uniqueId(MediaAnnouncement, 'announcementId', 'ANN');
+  const nowStr = new Date().toISOString().split('T')[0];
+  const sDate = startDate || nowStr;
+  const eDate = endDate || '2099-12-31';
+  const isExpired = eDate < nowStr;
+
+  const targetDistList = Array.isArray(targetDistricts) && targetDistricts.length ? targetDistricts : ['ALL'];
+  const announcement = await MediaAnnouncement.create({
+    announcementId: annId,
+    title: String(title).trim(),
+    content: String(content).trim(),
+    audienceType: audienceType === 'pandit' ? 'pandit' : 'user',
+    targetState: String(targetState || 'ALL').trim(),
+    targetDistricts: targetDistList,
+    bannerImage: String(bannerImage || '').trim(),
+    startDate: sDate,
+    endDate: eDate,
+    status: isExpired ? 'Expired' : 'Active',
+    emailsSentCount: 0
+  });
+
+  let emailsSent = 0;
+  if (sendMailToAll && !isExpired) {
+    if (announcement.audienceType === 'pandit') {
+      // ONLY registered pandits receive the pandit announcement!
+      const pQuery = {
+        $or: [{ verified: true }, { status: 'Verified' }, { status: 'Pending Review' }]
+      };
+      if (announcement.targetState && announcement.targetState !== 'ALL') {
+        const sRegex = new RegExp('^' + announcement.targetState.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+        pQuery.$or = [{ state: sRegex }, { workingState: sRegex }];
+      }
+      const pandits = await Pandit.find(pQuery).lean();
+      for (const p of pandits) {
+        if (!p.email) continue;
+        try {
+          await sendSafe('MEDIA_ANNOUNCEMENT', p.email, {
+            ...announcement.toObject(),
+            recipientName: p.name || 'Pandit Ji',
+            recipientEmail: p.email
+          });
+          emailsSent++;
+        } catch (e) {
+          console.error(`[Pandit Announcement Email Error to ${p.email}]:`, e.message);
+        }
+      }
+    } else {
+      // Devotees announcement
+      const uQuery = { role: { $ne: 'admin' }, status: { $ne: 'Revoked' } };
+      if (announcement.targetState && announcement.targetState !== 'ALL') {
+        uQuery.state = new RegExp('^' + announcement.targetState.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+      }
+      if (announcement.targetDistricts && announcement.targetDistricts.length && !announcement.targetDistricts.includes('ALL')) {
+        uQuery.district = { $in: announcement.targetDistricts.map(d => new RegExp('^' + d.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) };
+      }
+      const devotees = await User.find(uQuery).lean();
+      for (const dev of devotees) {
+        if (!dev.email) continue;
+        try {
+          await sendSafe('MEDIA_ANNOUNCEMENT', dev.email, {
+            ...announcement.toObject(),
+            recipientName: dev.name || 'Devotee',
+            recipientEmail: dev.email
+          });
+          emailsSent++;
+        } catch (e) {
+          console.error(`[User Announcement Email Error to ${dev.email}]:`, e.message);
+        }
+      }
+    }
+    announcement.emailsSentCount = emailsSent;
+    announcement.emailsSentAt = new Date();
+    await announcement.save();
+  }
+
+  res.status(201).json({
+    ok: true,
+    announcement,
+    emailsSent,
+    message: `Announcement "${announcement.title}" published successfully${sendMailToAll ? ` and emailed to ${emailsSent} ${announcement.audienceType === 'pandit' ? 'Pandits' : 'Devotees'}.` : '.'}`
+  });
+}));
+
+// 9. Media Announcements: Delete
+app.delete('/api/admin/media/announcements/:id', adminOnly, wrap(async (req, res) => {
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  const q = mongoose.Types.ObjectId.isValid(rawId)
+    ? { $or: [{ announcementId: rawId }, { _id: rawId }] }
+    : { announcementId: rawId };
+  const ann = await MediaAnnouncement.findOneAndDelete(q);
+  if (!ann) return res.status(404).json({ error: 'Announcement not found' });
+  res.json({ ok: true, deletedId: ann.announcementId, message: 'Announcement successfully deleted.' });
+}));
+
+// 10. Active Popups API: Fetches online discount offers & announcements for Full-Screen popup on dashboard open
+app.get('/api/media/active-popups', wrap(async (req, res) => {
+  const role = req.query.role || 'user'; // 'user' | 'pandit'
+  const state = req.query.state ? String(req.query.state).trim().toLowerCase() : '';
+  const district = req.query.district ? String(req.query.district).trim().toLowerCase() : '';
+  const nowStr = new Date().toISOString().split('T')[0];
+
+  // Auto-expire
+  await Promise.all([
+    MediaOffer.updateMany({ status: 'Active', endDate: { $lt: nowStr } }, { $set: { status: 'Expired' } }),
+    MediaAnnouncement.updateMany({ status: 'Active', endDate: { $lt: nowStr } }, { $set: { status: 'Expired' } })
+  ]).catch(() => {});
+
+  let activeOffers = [];
+  let activeAnnouncements = [];
+
+  if (role === 'pandit') {
+    // Only Pandit announcements for Pandit dashboard
+    const anns = await MediaAnnouncement.find({
+      status: 'Active',
+      audienceType: 'pandit',
+      startDate: { $lte: nowStr },
+      endDate: { $gte: nowStr }
+    }).sort({ createdAt: -1 }).lean();
+
+    activeAnnouncements = anns.filter(a => {
+      if (a.targetState && a.targetState !== 'ALL' && state) {
+        if (a.targetState.trim().toLowerCase() !== state) return false;
+      }
+      if (a.targetDistricts && a.targetDistricts.length && !a.targetDistricts.includes('ALL') && district) {
+        const matches = a.targetDistricts.some(d => d.trim().toLowerCase() === district);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  } else {
+    // Devotee: Active Discount Offers + User Announcements
+    const [offers, anns] = await Promise.all([
+      MediaOffer.find({
+        status: 'Active',
+        startDate: { $lte: nowStr },
+        endDate: { $gte: nowStr }
+      }).sort({ discountPercent: -1, createdAt: -1 }).lean(),
+      MediaAnnouncement.find({
+        status: 'Active',
+        audienceType: 'user',
+        startDate: { $lte: nowStr },
+        endDate: { $gte: nowStr }
+      }).sort({ createdAt: -1 }).lean()
+    ]);
+
+    activeOffers = offers.filter(o => {
+      if (o.targetState && o.targetState !== 'ALL' && state) {
+        if (o.targetState.trim().toLowerCase() !== state) return false;
+      }
+      if (o.targetDistricts && o.targetDistricts.length && !o.targetDistricts.includes('ALL') && district) {
+        const matches = o.targetDistricts.some(d => d.trim().toLowerCase() === district);
+        if (!matches) return false;
+      }
+      return true;
+    });
+
+    activeAnnouncements = anns.filter(a => {
+      if (a.targetState && a.targetState !== 'ALL' && state) {
+        if (a.targetState.trim().toLowerCase() !== state) return false;
+      }
+      if (a.targetDistricts && a.targetDistricts.length && !a.targetDistricts.includes('ALL') && district) {
+        const matches = a.targetDistricts.some(d => d.trim().toLowerCase() === district);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }
+
+  res.json({
+    ok: true,
+    hasActivePopup: activeOffers.length > 0 || activeAnnouncements.length > 0,
+    offers: activeOffers,
+    announcements: activeAnnouncements
+  });
 }));
 
 // ---- Admin analytics ----

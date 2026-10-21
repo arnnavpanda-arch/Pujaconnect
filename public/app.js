@@ -2916,6 +2916,133 @@ const statusBadge = (s) => {
   return `<span class="badge ${cls}">${esc(s)}</span>`;
 };
 
+// ==========================================
+// Full-Screen Media & Festive Offer Popup
+// ==========================================
+async function checkAndShowMediaPopup(force = false) {
+  if (!S.user || S.user.role === 'admin') return;
+  const userKey = (S.user.email || 'guest').toLowerCase();
+  const sessionKey = 'pc_media_popup_dismissed_' + userKey;
+  if (!force && sessionStorage.getItem(sessionKey)) return;
+
+  try {
+    const role = S.user.role || 'user';
+    const state = S.user.state || 'Odisha';
+    const district = S.user.district || '';
+    const res = await api(`/media/active-popups?role=${role}&state=${encodeURIComponent(state)}&district=${encodeURIComponent(district)}`);
+    if (!res || !res.hasActivePopup) return;
+
+    renderFullScreenMediaPopup(res.offers || [], res.announcements || [], role);
+  } catch (e) {
+    console.error('[Media Popup Error]:', e);
+  }
+}
+
+function renderFullScreenMediaPopup(offers, announcements, role) {
+  const isPandit = role === 'pandit';
+  const hasOffers = offers && offers.length > 0;
+  const hasAnnouncements = announcements && announcements.length > 0;
+
+  if (!hasOffers && !hasAnnouncements) return;
+
+  const primaryOffer = hasOffers ? offers[0] : null;
+  const primaryAnn = hasAnnouncements ? announcements[0] : null;
+  const bannerImg = (primaryOffer && primaryOffer.bannerImage) || (primaryAnn && primaryAnn.bannerImage) || '';
+
+  const modalHtml = `
+    <div class="media-fullscreen-content" style="max-width:880px;margin:0 auto;color:#2b1406;position:relative">
+      <div style="position:absolute;top:-10px;right:-10px;z-index:10">
+        <button class="btn btn-outline dark" onclick="closeMediaPopupAndProceed()" style="background:#fff;border-radius:50%;width:38px;height:38px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15)" title="Cut and Go to Dashboard">
+          <span class="material-icons" style="font-size:22px">close</span>
+        </button>
+      </div>
+
+      ${bannerImg ? `
+        <div style="margin:-18px -18px 20px;text-align:center;overflow:hidden;border-top-left-radius:14px;border-top-right-radius:14px;background:#351605">
+          <img src="${esc(bannerImg)}" style="max-height:260px;width:100%;object-fit:cover;display:block" alt="Banner" />
+        </div>
+      ` : ''}
+
+      ${hasOffers ? `
+        <div style="background:linear-gradient(135deg, #fffcf5 0%, #fff8eb 100%);border:2px solid #d99a19;border-radius:14px;padding:24px 26px;text-align:center;margin-bottom:20px;box-shadow:0 6px 22px rgba(217,154,25,0.12)">
+          <div style="display:inline-flex;align-items:center;gap:6px;background:#b71c1c;color:#fff;padding:5px 16px;border-radius:20px;font-size:12.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px">
+            <span class="material-icons" style="font-size:15px">local_offer</span> Auspicious Puja Season Special
+          </div>
+
+          <h2 style="font-family:Georgia,serif;font-size:32px;color:#b71c1c;margin:6px 0 10px;font-weight:900;letter-spacing:-0.5px">
+            FLAT ${primaryOffer.discountPercent}% OFF
+          </h2>
+
+          <h3 style="font-size:20px;color:#351605;margin:0 0 10px;font-weight:700">
+            ${esc(primaryOffer.title)}
+          </h3>
+
+          <p style="font-size:15px;color:#5a3825;max-width:650px;margin:0 auto 16px;line-height:1.6">
+            ${esc(primaryOffer.description || 'Celebrate with sacred Vedic ceremonies performed authentically at your home by verified Vedic Scholars. Avail exclusive festive discounts on ritual Dakshina!')}
+          </p>
+
+          <div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:14px">
+            <div style="background:#fff;border:1px solid #ebd9c2;padding:6px 14px;border-radius:8px">
+              🌟 <b>Sacred Ritual:</b> ${esc(primaryOffer.pujaName === 'ALL' ? 'All Vedic Ceremonies' : primaryOffer.pujaName)}
+            </div>
+            <div style="background:#fff;border:1px solid #ebd9c2;padding:6px 14px;border-radius:8px">
+              📅 <b>Offer Validity:</b> ${esc(primaryOffer.startDate)} till <b>${esc(primaryOffer.endDate)}</b>
+            </div>
+            <div style="background:#fff;border:1px solid #ebd9c2;padding:6px 14px;border-radius:8px">
+              📍 <b>Applicable Area:</b> ${esc(primaryOffer.targetState || 'All States')}${primaryOffer.targetDistricts && primaryOffer.targetDistricts.length && !primaryOffer.targetDistricts.includes('ALL') ? ' (' + primaryOffer.targetDistricts.join(', ') + ')' : ''}
+            </div>
+          </div>
+
+          <div style="background:#fff8ed;border-left:4px solid #d99a19;padding:10px 14px;border-radius:6px;font-size:12.5px;color:#7a553e;text-align:left;max-width:650px;margin:0 auto">
+            ℹ️ <b>How it works:</b> When you book a ceremony in your district, the ${primaryOffer.discountPercent}% festive discount is automatically calculated on the dakshina before payment! Verified pandit payment and platform fee are adjusted accordingly.
+          </div>
+        </div>
+      ` : ''}
+
+      ${hasAnnouncements ? `
+        <div style="background:#fff;border:1.5px solid ${isPandit ? '#3949ab' : '#d99a19'};border-radius:14px;padding:20px 24px;margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <span class="badge" style="background:${isPandit ? '#283593' : '#2e7d32'};color:#fff;font-size:12px;font-weight:700">
+              ${isPandit ? '🕉️ Official Pandit Notice' : '📢 Devotee Announcement'}
+            </span>
+            <span style="font-size:12px;color:var(--muted)">Valid: ${esc(primaryAnn.startDate)} to ${esc(primaryAnn.endDate)}</span>
+          </div>
+
+          <h3 style="font-size:18px;color:#2b1406;margin:0 0 10px;font-weight:700">
+            ${esc(primaryAnn.title)}
+          </h3>
+
+          <div style="background:#fffcf7;border-left:3.5px solid ${isPandit ? '#3949ab' : '#d99a19'};padding:14px 18px;border-radius:6px;font-size:14.5px;line-height:1.7;color:#3b2115;white-space:pre-wrap">
+            ${esc(primaryAnn.content)}
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding-top:16px;border-top:1.5px solid #ebd9c2">
+        ${hasOffers ? `
+          <button class="btn btn-gold btn-lg" onclick="closeMediaPopupAndProceed();showView('pujas');" style="flex:1;min-width:220px">
+            <span class="material-icons">spa</span> Book Puja with ${primaryOffer.discountPercent}% Discount
+          </button>
+        ` : '<div></div>'}
+
+        <button class="btn btn-outline dark btn-lg" onclick="closeMediaPopupAndProceed()" style="flex:1;min-width:200px">
+          <span class="material-icons">dashboard</span> Cut &amp; Go to Dashboard ✕
+        </button>
+      </div>
+    </div>
+  `;
+
+  openModal(hasOffers ? `🪔 Festive Season Special Offer – ${primaryOffer.discountPercent}% OFF` : `📢 Official ${isPandit ? 'Pandit' : 'Devotee'} Announcement`, modalHtml, null, 'fullscreen');
+}
+
+function closeMediaPopupAndProceed() {
+  if (S.user) {
+    const userKey = (S.user.email || 'guest').toLowerCase();
+    sessionStorage.setItem('pc_media_popup_dismissed_' + userKey, 'true');
+  }
+  closeModal();
+}
+
 async function renderDashboard() {
   const root = $('#dashboard-root');
   if (!S.user) return;
@@ -2925,8 +3052,13 @@ async function renderDashboard() {
   }
   try {
     if (S.user.role === 'admin') await adminDash(root);
-    else if (S.user.role === 'pandit') await panditDash(root);
-    else await userDash(root);
+    else if (S.user.role === 'pandit') {
+      await panditDash(root);
+      checkAndShowMediaPopup();
+    } else {
+      await userDash(root);
+      checkAndShowMediaPopup();
+    }
   } catch (e) {
     if (/Authentication|Admin access/.test(e.message)) { saveSession(null); showView('home'); toast('Session expired. Please log in again.', true); }
     else root.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
@@ -3151,6 +3283,20 @@ function renderDevoteeDashboardUI(root, bookings, longs, verifiedList) {
         <button class="btn btn-outline btn-sm" data-action="nav" data-view="home"><span class="material-icons">home</span> Home</button>
         <button class="btn btn-outline btn-sm" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>
       </div>
+    </div>
+
+    <!-- Festive Season Offers & Announcements Notice Banner -->
+    <div style="background:linear-gradient(135deg, #fffcf5 0%, #fff8eb 100%);border:1.5px solid #d99a19;border-radius:12px;padding:12px 18px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;box-shadow:0 3px 12px rgba(217,154,25,0.08)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:24px">🪔</span>
+        <div>
+          <b style="font-size:14px;color:#351605">Puja Festive Season Special Discounts &amp; Announcements</b>
+          <p style="margin:2px 0 0;font-size:12px;color:#7a553e">Save on authentic Vedic rituals in your district with platform festive offers.</p>
+        </div>
+      </div>
+      <button class="btn btn-gold btn-sm" onclick="checkAndShowMediaPopup(true)">
+        <span class="material-icons" style="font-size:14px;vertical-align:middle">local_offer</span> View Festive Offers &amp; Notices
+      </button>
     </div>
 
     <!-- Active Pandit Availability by State & District -->
@@ -4864,6 +5010,20 @@ async function panditDash(root) {
         <button class="btn btn-outline btn-sm" data-action="nav" data-view="home"><span class="material-icons">home</span> Home</button>
         <button class="btn btn-outline btn-sm" data-action="logout" title="Logout"><span class="material-icons">logout</span> Logout</button>
       </div>
+    </div>
+
+    <!-- Official Pandit Announcements Banner -->
+    <div style="background:linear-gradient(135deg, #f5f8ff 0%, #edf2ff 100%);border:1.5px solid #3f51b5;border-radius:12px;padding:12px 18px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;box-shadow:0 3px 12px rgba(63,81,181,0.08)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:24px">📢</span>
+        <div>
+          <b style="font-size:14px;color:#1a237e">Official Acharya &amp; Pandit Announcements</b>
+          <p style="margin:2px 0 0;font-size:12px;color:#3949ab">Platform notices, ritual schedules and auspicious festive guidelines for verified Pandits.</p>
+        </div>
+      </div>
+      <button class="btn btn-outline dark btn-sm" onclick="checkAndShowMediaPopup(true)">
+        <span class="material-icons" style="font-size:14px;vertical-align:middle">campaign</span> View Pandit Notices
+      </button>
     </div>
 
     ${me.verified ? '' : '<div class="panel" style="background:#fffcf5;border-left:4px solid var(--ochre)"><strong>Your profile is under Admin KYC verification.</strong> Once approved, your profile will be actively listed in the verified pandits directory.</div>'}
@@ -7350,10 +7510,27 @@ const ACTIONS = {
             <div style="font-size:13px;color:var(--muted);margin-top:4px">
               📅 ${esc(b.date || 'Scheduled Date')} · ⏰ ${esc(b.time || '10:00 AM')} · Assigned Pandit: <b>${esc(b.panditName || 'Assigned Purohit')}</b>
             </div>
-            <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #ebd9c2;display:flex;justify-content:space-between;align-items:center">
-              <span style="font-size:13px;font-weight:600">Total Dakshina to Pay:</span>
-              <span style="font-size:22px;font-weight:700;color:var(--ochre)">${inr(remaining)}</span>
-            </div>
+            ${(b.discountAmount && b.discountAmount > 0) || (b.originalFee && b.originalFee > fee) ? `
+              <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #ebd9c2">
+                <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:4px">
+                  <span>Original Ceremony Rate:</span>
+                  <span style="text-decoration:line-through;font-weight:600">${inr(b.originalFee || (fee + (b.discountAmount || 0)))}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;color:#c62828;font-weight:700;margin-bottom:6px">
+                  <span>Festive Dakshina Discount (${b.discountPercent || Math.round(((b.discountAmount || 0)/(b.originalFee || (fee + (b.discountAmount || 0))))*100)}% OFF):</span>
+                  <span>-${inr(b.discountAmount || (b.originalFee - fee))}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px dashed #ebd9c2;padding-top:8px">
+                  <span style="font-size:14px;font-weight:700;color:var(--mahogany)">Real Dakshina Payable:</span>
+                  <span style="font-size:24px;font-weight:800;color:#2e7d32">${inr(remaining)}</span>
+                </div>
+              </div>
+            ` : `
+              <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #ebd9c2;display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:13px;font-weight:600">Total Dakshina to Pay:</span>
+                <span style="font-size:22px;font-weight:700;color:var(--ochre)">${inr(remaining)}</span>
+              </div>
+            `}
           </div>
 
           <!-- Official Platform Bank Details Box -->
