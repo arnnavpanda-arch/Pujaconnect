@@ -2149,8 +2149,29 @@ app.put('/api/bookings/:id/status', wrap(async (req, res) => {
 app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
   const { paymentProof, paymentMethod } = req.body;
   if (!paymentProof) return res.status(400).json({ error: 'Payment Transaction Ref / ID is required' });
-  const b = await Booking.findOne(bookingFindQuery(req.params.id));
-  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  let b = await Booking.findOne(bookingFindQuery(req.params.id));
+  if (!b) {
+    const q = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+      : { id: req.params.id };
+    const r = await LongPujaRequest.findOne(q);
+    if (r) {
+      const isConfirmed = r.status === 'Confirmed' || Object.values(r.panditStatuses || {}).includes('Accepted');
+      if (!isConfirmed) {
+        return res.status(400).json({ error: 'Dakshina payment is accepted only after the assigned Vedic Pandit accepts and confirms your ceremony schedule 🙏' });
+      }
+      r.paymentStatus = 'Under Processing';
+      r.paymentProof = String(paymentProof).trim();
+      r.paymentMethod = paymentMethod || 'UPI/Bank Transfer';
+      r.paymentDate = new Date();
+      r.advanceAmount = Number(req.body.amount) || r.estimatedCost || 0;
+      r.advancePaid = false;
+      r.paymentRejectionReason = '';
+      await r.save();
+      return res.json({ ok: true, request: r, message: 'Dakshina payment submitted successfully! Your payment is under processing and awaiting Admin verification.' });
+    }
+    return res.status(404).json({ error: 'Booking not found' });
+  }
 
   const isPanditApproved = ['Confirmed', 'In Progress', 'Completed'].includes(b.status) || b.panditApproval === 'Approved';
   if (!isPanditApproved) {
@@ -2979,6 +3000,130 @@ app.put('/api/long-puja-requests/:id/status', wrap(async (req, res) => {
   const r = await LongPujaRequest.findOneAndUpdate({ id: req.params.id }, { status: req.body.status }, { new: true });
   if (!r) return res.status(404).json({ error: 'Request not found' });
   res.json(r);
+}));
+
+app.post('/api/long-puja-requests/:id/submit-payment', wrap(async (req, res) => {
+  const { paymentProof, paymentMethod, amount } = req.body;
+  if (!paymentProof) return res.status(400).json({ error: 'Payment Transaction UTR / Ref ID is required' });
+
+  const query = mongoose.Types.ObjectId.isValid(req.params.id)
+    ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+    : { id: req.params.id };
+
+  const r = await LongPujaRequest.findOne(query);
+  if (!r) return res.status(404).json({ error: 'Multi-day ritual request not found' });
+
+  const statuses = r.panditStatuses ? (r.panditStatuses instanceof Map ? Array.from(r.panditStatuses.values()) : Object.values(r.panditStatuses)) : [];
+  const hasAccepted = statuses.some(st => String(st).toLowerCase() === 'accepted');
+  const isConfirmed = r.status === 'Confirmed' || hasAccepted;
+  if (!isConfirmed) {
+    return res.status(400).json({ error: 'Dakshina payment is accepted only after the assigned Vedic Pandit accepts and confirms your ceremony schedule 🙏' });
+  }
+
+  r.paymentStatus = 'Under Processing';
+  r.paymentProof = String(paymentProof).trim();
+  r.paymentMethod = paymentMethod || 'UPI/Bank Transfer';
+  r.paymentDate = new Date();
+  r.advanceAmount = Number(amount) || r.estimatedCost || 0;
+  r.advancePaid = false;
+  r.paymentRejectionReason = '';
+  await r.save();
+
+  // Send admin notification
+  try {
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.SENDER_EMAIL || 'bookpujaconnect@gmail.com';
+    await sendSafe('NEW_BOOKING_ADMIN_ALERT', adminEmail, {
+      ...r.toObject(),
+      service: `${r.pujaName} (Multi-Day Ceremony Dakshina Submitted)`,
+      fee: r.estimatedCost,
+      date: `${r.fromDate} → ${r.toDate} (${r.totalDays || 1} Days)`,
+      paymentProof: r.paymentProof
+    });
+  } catch (mailErr) {}
+
+  res.json({
+    ok: true,
+    request: r,
+    message: 'Dakshina payment submitted successfully! Your payment is under processing and awaiting Admin verification.'
+  });
+}));
+
+app.post('/api/long-puja-requests/:id/verify-payment', wrap(async (req, res) => {
+  const query = mongoose.Types.ObjectId.isValid(req.params.id)
+    ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+    : { id: req.params.id };
+
+  const r = await LongPujaRequest.findOne(query);
+  if (!r) return res.status(404).json({ error: 'Multi-day ritual request not found' });
+
+  r.paymentStatus = 'Paid & Verified';
+  r.advancePaid = true;
+  r.advanceAmount = r.estimatedCost || r.advanceAmount;
+  r.paymentRejectionReason = '';
+  if (!r.invoiceId) {
+    r.invoiceId = 'INV-' + String(r.id).replace(/[^a-zA-Z0-9]/g, '') + '-9901';
+  }
+  if (!r.invoiceGeneratedAt) {
+    r.invoiceGeneratedAt = new Date();
+  }
+  await r.save();
+
+  // Send official payment receipt email to devotee
+  if (r.userEmail) {
+    try {
+      await sendSafe('PAYMENT_RECEIPT', lc(r.userEmail), {
+        bookingId: r.id,
+        reference: r.id,
+        invoiceId: r.invoiceId,
+        service: r.pujaName,
+        userName: r.userName,
+        userPhone: r.phone || '',
+        userEmail: r.userEmail,
+        panditName: (r.assignedPandits && r.assignedPandits.length) ? r.assignedPandits.join(', ') : 'Vedic Purohit Team',
+        date: `${r.fromDate} → ${r.toDate} (${r.totalDays || 1} Days)`,
+        time: `${r.dailyHours || 4}h/day, Daily Start: ${r.startTime || '08:00 AM'}`,
+        district: r.district,
+        address: r.venueAddress || r.address || r.venue || r.district,
+        total: r.estimatedCost,
+        amount: r.estimatedCost,
+        paymentProof: r.paymentProof,
+        paymentMethod: r.paymentMethod
+      });
+    } catch (e) {
+      console.warn('Devotee long puja payment receipt email error:', e);
+    }
+  }
+
+  res.json({ ok: true, request: r, message: 'Multi-day ceremony payment verified successfully.' });
+}));
+
+app.post('/api/long-puja-requests/:id/reject-payment', wrap(async (req, res) => {
+  const query = mongoose.Types.ObjectId.isValid(req.params.id)
+    ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+    : { id: req.params.id };
+
+  const r = await LongPujaRequest.findOne(query);
+  if (!r) return res.status(404).json({ error: 'Multi-day ritual request not found' });
+
+  const reason = req.body.reason || 'Transaction reference not found in bank records. Please submit valid UTR.';
+  r.paymentStatus = 'Rejected';
+  r.paymentRejectionReason = reason;
+  await r.save();
+
+  // Send notification to devotee
+  if (r.userEmail) {
+    try {
+      await sendSafe('PAYMENT_REJECTED', lc(r.userEmail), {
+        bookingId: r.id,
+        service: r.pujaName,
+        userName: r.userName,
+        amount: r.estimatedCost,
+        rejectionReason: reason
+      });
+    } catch (e) {}
+  }
+
+  res.json({ ok: true, request: r, message: 'Payment rejected.' });
 }));
 
 // ---- Settings ----

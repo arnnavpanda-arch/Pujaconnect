@@ -2981,6 +2981,7 @@ async function userDash(root) {
     api('/pandits?verified=true').catch(() => [])
   ]);
   S.bookings = bookings;
+  S.longs = longs;
   if (panditsRes && panditsRes.length) S.pandits = panditsRes;
   const verifiedList = S.pandits || [];
 
@@ -3034,7 +3035,14 @@ async function userDash(root) {
 
   const tab = S.dashTab || 'bookings';
   const upcoming = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'In Progress').length;
-  const pendingPayments = bookings.filter((b) => b.paymentStatus !== 'Paid' && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')).length;
+  const pendingPayments = bookings.filter((b) => b.paymentStatus !== 'Paid' && b.paymentStatus !== 'Paid & Verified' && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')).length;
+  const pendingLongPayments = (longs || []).filter((l) =>
+    l.status !== 'Cancelled' &&
+    l.paymentStatus !== 'Paid' &&
+    l.paymentStatus !== 'Paid & Verified' &&
+    (l.status === 'Confirmed' || Object.values(l.panditStatuses || {}).some((st) => String(st).toLowerCase() === 'accepted'))
+  ).length;
+  const totalPendingPayments = pendingPayments + pendingLongPayments;
   const rebookNeeded = bookings.filter(isBookingRejected).length;
   const refundPendingCount = bookings.filter((b) => b.status === 'Cancelled' && b.refundStatus === 'Pending Refund').length;
   const initial = (S.user.name || 'D').charAt(0).toUpperCase();
@@ -3136,9 +3144,9 @@ async function userDash(root) {
         <span class="subtab-icon-wrap"><span class="material-icons">payments</span></span>
         <div class="subtab-info">
           <span class="subtab-title">Payment Tracking</span>
-          <span class="subtab-sub">${pendingPayments > 0 ? `${pendingPayments} To Pay` : 'All Clear'}</span>
+          <span class="subtab-sub">${totalPendingPayments > 0 ? `${totalPendingPayments} To Pay` : 'All Clear'}</span>
         </div>
-        ${pendingPayments > 0 ? `<span class="subtab-badge alert">${pendingPayments}</span>` : ''}
+        ${totalPendingPayments > 0 ? `<span class="subtab-badge alert">${totalPendingPayments}</span>` : ''}
       </button>
 
       <button class="subtab ${tab === 'refunds' ? 'active' : ''}" data-action="dashTab" data-tab="refunds">
@@ -3162,9 +3170,9 @@ async function userDash(root) {
         <span class="subtab-icon-wrap"><span class="material-icons">local_fire_department</span></span>
         <div class="subtab-info">
           <span class="subtab-title">Multi-Day Yajnas</span>
-          <span class="subtab-sub">${longs.length} Requests</span>
+          <span class="subtab-sub">${longs.length} Requests${pendingLongPayments > 0 ? ` · ${pendingLongPayments} Pay Due` : ''}</span>
         </div>
-        <span class="subtab-badge">${longs.length}</span>
+        ${pendingLongPayments > 0 ? `<span class="subtab-badge alert" style="background:#e65100;color:#fff">${pendingLongPayments} To Pay</span>` : `<span class="subtab-badge">${longs.length}</span>`}
       </button>
 
       <button class="subtab ${tab === 'profile' ? 'active' : ''}" data-action="dashTab" data-tab="profile">
@@ -3178,7 +3186,7 @@ async function userDash(root) {
 
     <div id="dash-tab-content">
       ${tab === 'bookings' ? renderDevoteeBookingsTab(bookings) : ''}
-      ${tab === 'payments' ? renderDevoteePaymentTrackingTab(bookings) : ''}
+      ${tab === 'payments' ? renderDevoteePaymentTrackingTab(bookings, longs) : ''}
       ${tab === 'refunds' ? renderDevoteeRefundsTab(bookings) : ''}
       ${tab === 'explore' ? renderDevoteeExploreTab() : ''}
       ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
@@ -3188,8 +3196,11 @@ async function userDash(root) {
   setupDevoteeRefundListeners();
 }
 
-function renderDevoteePaymentTrackingTab(bookings) {
-  if (!bookings.length) {
+function renderDevoteePaymentTrackingTab(bookings, longs = (S.longs || [])) {
+  const hasBookings = bookings && bookings.length > 0;
+  const hasLongs = longs && longs.length > 0;
+
+  if (!hasBookings && !hasLongs) {
     return `
       <div class="panel empty" style="padding:48px 20px">
         <span class="material-icons" style="font-size:48px;color:var(--ochre)">payments</span>
@@ -3202,7 +3213,121 @@ function renderDevoteePaymentTrackingTab(bookings) {
 
   return `
     <div style="display:flex;flex-direction:column;gap:16px">
-      ${bookings.map((b) => {
+      ${(longs || []).map((l) => {
+        const cost = Number(l.estimatedCost) || 0;
+        const advance = Number(l.advanceAmount) || 0;
+        const isPaid = l.paymentStatus === 'Paid' || l.paymentStatus === 'Paid & Verified';
+        const isVerifying = l.paymentStatus === 'Under Processing' || l.paymentStatus === 'Verification Pending';
+        const isRejected = l.paymentStatus === 'Rejected' || l.paymentStatus === 'Payment Rejected';
+        const isCancelled = l.status === 'Cancelled';
+        const isPanditApproved = l.status === 'Confirmed' ||
+          (l.panditStatuses && Object.values(l.panditStatuses).some((st) => String(st).toLowerCase() === 'accepted'));
+        const remaining = Math.max(0, isPaid ? 0 : cost - (l.advancePaid ? advance : 0));
+
+        let statusSnippet = '';
+        if (isPaid) {
+          statusSnippet = `<span class="badge green"><span class="material-icons" style="font-size:14px">check_circle</span> Paid &amp; Verified</span>`;
+        } else if (isVerifying) {
+          statusSnippet = `<span class="badge amber"><span class="material-icons" style="font-size:14px">hourglass_top</span> Under Processing</span>`;
+        } else if (isRejected) {
+          statusSnippet = `<span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a"><span class="material-icons" style="font-size:14px">cancel</span> Payment Rejected</span>${l.paymentRejectionReason ? `<br><small class="muted" style="color:#c62828;font-size:12px;margin-top:2px;display:inline-block">Reason: ${esc(l.paymentRejectionReason)}</small>` : ''}`;
+        } else if (isCancelled) {
+          statusSnippet = `<span class="badge red">Ceremony Cancelled</span>`;
+        } else if (isPanditApproved) {
+          statusSnippet = `<span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100;font-weight:700">Dakshina Due 💳</span>`;
+        } else {
+          statusSnippet = `<span class="badge" style="background:#f5ece1;color:#6d4833">Awaiting Pandit Acceptance</span>`;
+        }
+
+        let actionButton = '';
+        if (isPaid) {
+          actionButton = `
+            <button class="btn btn-gold btn-sm" data-action="viewLongBill" data-id="${esc(l.id)}">
+              <span class="material-icons">receipt_long</span> View / Print Bill
+            </button>
+          `;
+        } else if (isVerifying) {
+          actionButton = `
+            <div style="display:flex;align-items:center;gap:6px;color:var(--ochre);font-weight:600;font-size:13px">
+              <span class="material-icons">hourglass_top</span> Under Processing (Ref: ${esc(l.paymentProof || 'Submitted')})
+            </div>
+          `;
+        } else if (isRejected) {
+          actionButton = `
+            <button class="btn btn-gold btn-sm" data-action="payLongPuja" data-id="${esc(l.id)}" style="font-weight:700">
+              <span class="material-icons">refresh</span> Repay Dakshina (${inr(cost)})
+            </button>
+          `;
+        } else if (!isCancelled) {
+          if (isPanditApproved) {
+            actionButton = `
+              <button class="btn btn-gold btn-sm" data-action="payLongPuja" data-id="${esc(l.id)}" style="font-weight:700;box-shadow:0 3px 12px rgba(217,154,25,0.3)">
+                <span class="material-icons">account_balance_wallet</span> Pay Dakshina (${inr(cost)})
+              </button>
+            `;
+          } else {
+            actionButton = `
+              <span class="muted" style="font-size:13px">
+                <span class="material-icons" style="font-size:15px;vertical-align:middle">schedule</span> Awaiting Pandit Confirmation before payment
+              </span>
+            `;
+          }
+        }
+
+        const assignedPandits = (l.assignedPandits && l.assignedPandits.length) ? l.assignedPandits.join(', ') : 'Vedic Purohit Team';
+
+        return `
+          <div class="payment-card" data-action="viewLongTimeline" data-id="${esc(l.id)}" style="cursor:pointer;border-left:5px solid ${isPaid ? '#2e7d32' : (isPanditApproved ? '#d99a19' : '#8d2800')}" title="Click to view live ceremony progress timeline">
+            <div class="payment-card-header">
+              <div>
+                <span class="booking-id-tag" style="background:#fff3e0;color:#bf360c;border:1px solid #ffcc80">${esc(l.id)}</span>
+                <span class="badge gold" style="font-size:11px;margin-left:6px"><span class="material-icons" style="font-size:12px;vertical-align:middle">local_fire_department</span> Multi-Day (${l.totalDays} Days)</span>
+                <b style="font-size:17px;color:var(--mahogany);margin-left:8px">${esc(l.pujaName)}</b>
+              </div>
+              <div>${statusSnippet}</div>
+            </div>
+
+            <div class="payment-details-grid">
+              <div class="payment-detail-item">
+                <label>Assigned Vedic Pandits</label>
+                <b>${esc(assignedPandits)}</b>
+                <small class="muted">${l.requiredPandits} Pandit(s) required · ${esc(l.district)}</small>
+              </div>
+              <div class="payment-detail-item">
+                <label>Multi-Day Schedule</label>
+                <b>${esc(l.fromDate)} → ${esc(l.toDate)}</b>
+                <small class="muted">${l.totalDays} Days × ${l.dailyHours}h/day (Start: <b>${esc(l.startTime || '08:00 AM')}</b>)</small>
+              </div>
+              <div class="payment-detail-item">
+                <label>Total Dakshina</label>
+                <b style="color:var(--ochre)">${inr(cost)}</b>
+              </div>
+              <div class="payment-detail-item">
+                <label>Advance Paid</label>
+                <b>${inr(l.advancePaid ? (l.advanceAmount || cost) : 0)}</b>
+              </div>
+              <div class="payment-detail-item">
+                <label>Remaining to Pay</label>
+                <b style="color:${remaining > 0 ? 'var(--red)' : 'var(--green)'}">${inr(remaining)}</b>
+              </div>
+            </div>
+
+            <div class="row" style="margin-top:4px;padding-top:10px;border-top:1px solid var(--border);align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+              <div style="font-size:13px;color:var(--muted)">
+                <span class="material-icons" style="font-size:14px;vertical-align:middle">place</span> ${esc(l.venueAddress || l.venue || l.address || l.district)}
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button class="btn btn-outline dark btn-sm" data-action="viewLongTimeline" data-id="${esc(l.id)}" title="View live multi-day timeline">
+                  <span class="material-icons" style="font-size:14px">timeline</span> Timeline
+                </button>
+                ${actionButton}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+
+      ${(bookings || []).map((b) => {
         const fee = b.fee || 1500;
         const advance = b.advanceAmount || 0;
         const isPaid = b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified';
@@ -3294,11 +3419,11 @@ function renderDevoteePaymentTrackingTab(bookings) {
               </div>
             </div>
 
-            <div class="row" style="margin-top:4px;padding-top:10px;border-top:1px solid var(--border);align-items:center">
+            <div class="row" style="margin-top:4px;padding-top:10px;border-top:1px solid var(--border);align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
               <div style="font-size:13px;color:var(--muted)">
                 ${b.address ? `<span class="material-icons" style="font-size:14px;vertical-align:middle">place</span> ${esc(b.address)}` : ''}
               </div>
-              <div style="display:flex;gap:6px;align-items:center">
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                 <button class="btn btn-outline dark btn-sm" data-action="viewTimeline" data-id="${esc(b.bookingId)}" title="View live timeline and progress">
                   <span class="material-icons" style="font-size:14px">timeline</span> Timeline
                 </button>
@@ -3313,9 +3438,22 @@ function renderDevoteePaymentTrackingTab(bookings) {
 }
 
 async function openBookingTimeline(arg) {
+  if (typeof arg === 'string' && (arg.startsWith('LP-') || arg.startsWith('LONG-'))) {
+    return openLongPujaTimeline(arg);
+  }
+  if (typeof arg === 'object' && arg && arg.id && (String(arg.id).startsWith('LP-') || String(arg.id).startsWith('LONG-'))) {
+    return openLongPujaTimeline(arg.id);
+  }
+  if (typeof arg === 'string' && (S.longs || []).some((x) => x.id === arg)) {
+    return openLongPujaTimeline(arg);
+  }
+
   let b = (typeof arg === 'object' && arg && arg.bookingId) ? arg : (S.bookings || []).find((x) => x.bookingId === arg);
   if (!b && (typeof arg === 'string' || (arg && arg.id))) {
     const id = typeof arg === 'string' ? arg : arg.id;
+    if ((S.longs || []).some((x) => x.id === id)) {
+      return openLongPujaTimeline(id);
+    }
     try {
       b = await api('/bookings/' + encodeURIComponent(id));
     } catch (e) {}
@@ -3537,6 +3675,268 @@ async function openBookingTimeline(arg) {
           <button class="btn btn-dark btn-sm" onclick="ACTIONS.slip({id:'${esc(b.bookingId)}'})">
             <span class="material-icons" style="font-size:15px;vertical-align:middle">print</span> Print Slip
           </button>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="closeModal()">Close</button>
+      </div>
+    </div>
+  `, null, true);
+}
+
+async function openLongPujaTimeline(arg) {
+  let l = (typeof arg === 'object' && arg && arg.pujaName && arg.fromDate) ? arg : (S.longs || []).find((x) => x.id === arg || x._id === arg);
+  if (!l && (typeof arg === 'string' || (arg && arg.id))) {
+    const id = typeof arg === 'string' ? arg : arg.id;
+    try {
+      l = await api('/long-puja-requests/' + encodeURIComponent(id));
+    } catch (e) {}
+  }
+  if (!l) return toast('Multi-day ceremony record not found', true);
+
+  const cost = Number(l.estimatedCost) || 0;
+  const isCancelled = l.status === 'Cancelled';
+  const isRejectedByPandit = ['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status);
+  const isPanditAccepted = l.status === 'Confirmed' ||
+    (l.panditStatuses && Object.values(l.panditStatuses).some((st) => String(st).toLowerCase() === 'accepted'));
+
+  // Check if ceremony slot / dates have passed
+  let slotPassed = false;
+  try {
+    const endDt = parsePujaStartDateTime(l.toDate || l.fromDate, l.startTime || '08:00 AM');
+    endDt.setHours(endDt.getHours() + (Number(l.dailyHours) || 4));
+    slotPassed = endDt.getTime() < Date.now();
+  } catch (e) {}
+  const isCompleted = l.status === 'Completed' || (!isCancelled && !isRejectedByPandit && slotPassed && isPanditAccepted);
+
+  // Check if today is within ceremony dates
+  let isTodayInProgress = false;
+  try {
+    const startDt = parsePujaStartDateTime(l.fromDate, l.startTime || '08:00 AM');
+    const endDt = parsePujaStartDateTime(l.toDate || l.fromDate, '11:59 PM');
+    const now = Date.now();
+    isTodayInProgress = !isCancelled && !isRejectedByPandit && isPanditAccepted && (now >= startDt.getTime() && now <= endDt.getTime());
+  } catch (e) {}
+
+  const assignedPanditsList = Array.isArray(l.assignedPandits) ? l.assignedPandits : [];
+  const assignedCount = assignedPanditsList.length;
+
+  // Format Pandit names
+  let panditNames = 'To Be Assigned by Admin';
+  if (assignedPanditsList.length) {
+    panditNames = assignedPanditsList.map((em) => {
+      const pObj = (S.pandits || []).find((p) => (p.email || '').toLowerCase() === em.toLowerCase());
+      const st = (l.panditStatuses && l.panditStatuses[em]) || (isPanditAccepted ? 'Accepted' : 'Assigned');
+      return pObj ? `${pObj.name} (${st})` : `${em} (${st})`;
+    }).join(', ');
+  }
+
+  // Stage 2: Admin Review & Pandit Assignment
+  let step2State = 'pending';
+  let step2Tag = 'Pending Review';
+  let step2Desc = 'PujaConnect coordination team is verifying ceremony requirements, venue facilities, and qualified Vedic Acharyas.';
+  if (isRejectedByPandit) {
+    step2State = 'warning';
+    step2Tag = 'Reassignment in Progress 🔄';
+    step2Desc = `Previously assigned Pandit was unavailable for these dates. Admin is assigning another verified Vedic Scholar for ${esc(l.district)}.`;
+  } else if (l.status === 'Pending Admin') {
+    step2State = 'active';
+    step2Tag = 'Review in Progress ⏳';
+    step2Desc = `PujaConnect coordination team is currently reviewing verified Vedic Acharyas in ${esc(l.district)} to assign a team of ${l.requiredPandits} Pandit(s) for ${esc(l.pujaName)} across ${l.totalDays} consecutive days.`;
+  } else {
+    step2State = 'completed';
+    step2Tag = 'Approved & Assigned ✅';
+    step2Desc = `Admin verified ritual requirements and assigned Vedic Purohit team (${assignedCount}/${l.requiredPandits} assigned: ${esc(panditNames)}) in ${esc(l.district)}.`;
+  }
+
+  // Stage 3: Waiting for Assigned Pandit ji Confirmation
+  let step3State = 'pending';
+  let step3Tag = 'Pending';
+  let step3Desc = `Will be dispatched to assigned Vedic Pandit(s) once admin assigns team.`;
+  if (l.status === 'Pending Admin') {
+    step3State = 'pending';
+    step3Tag = 'Awaiting Admin';
+    step3Desc = 'Pandit assignment offer will be dispatched immediately upon admin approval.';
+  } else if (isRejectedByPandit) {
+    step3State = 'warning';
+    step3Tag = 'Declined by Pandit (Reassigning)';
+    step3Desc = `${esc(l.rejectionReason || 'Assigned Pandit had a conflicting ritual schedule')}. Admin is reassigning another qualified Vedic Pandit.`;
+  } else if (l.status === 'Assigned' && !isPanditAccepted) {
+    step3State = 'active';
+    step3Tag = 'Waiting for Pandit ji Confirmation ⏳';
+    step3Desc = `Ceremony offer dispatched to assigned Pandit (${esc(panditNames)}). Waiting for Pandit ji to accept and confirm availability for all ${l.totalDays} days.`;
+  } else if (isPanditAccepted) {
+    step3State = 'completed';
+    step3Tag = 'Confirmed & Accepted ✅';
+    step3Desc = `Assigned Vedic Pandit (${esc(panditNames)}) has officially accepted the ceremony assignment and confirmed availability from ${esc(l.fromDate)} to ${esc(l.toDate)} (${l.totalDays} days, daily start ${esc(l.startTime || '08:00 AM')}).`;
+  }
+
+  // Stage 4: Dakshina Payment & Bank Verification
+  const isPaid = l.paymentStatus === 'Paid' || l.paymentStatus === 'Paid & Verified';
+  const isVerifying = l.paymentStatus === 'Under Processing' || l.paymentStatus === 'Verification Pending';
+  const isPaymentRejected = l.paymentStatus === 'Rejected' || l.paymentStatus === 'Payment Rejected';
+
+  let step4State = 'pending';
+  let step4Tag = 'Pending Pandit Acceptance';
+  let step4Desc = `Total Dakshina: ${inr(cost)}. Dakshina payment unlocks automatically as soon as the assigned Vedic Pandit accepts your ceremony schedule.`;
+  if (isPaid) {
+    step4State = 'completed';
+    step4Tag = 'Paid & Verified ✅';
+    step4Desc = `Dakshina of ${inr(cost)} verified by PujaConnect accounts. Official ceremony invoice and receipt issued.`;
+  } else if (isVerifying) {
+    step4State = 'active';
+    step4Tag = 'Verification in Progress ⏳';
+    step4Desc = `Payment transaction proof submitted (${esc(l.paymentProof || 'UTR/UPI')}). Administration is verifying bank records.`;
+  } else if (isPaymentRejected) {
+    step4State = 'rejected';
+    step4Tag = 'Verification Unsuccessful ✕';
+    step4Desc = `${esc(l.paymentRejectionReason || 'Reference not found in bank records')}. Please click "Pay Dakshina" below to resubmit valid payment details.`;
+  } else if (isPanditAccepted) {
+    step4State = 'active';
+    step4Tag = 'Dakshina Payment Due 💳';
+    step4Desc = `Assigned Pandit has accepted! Total Dakshina: ${inr(cost)}. Devotee can now scan official QR code or transfer via UPI / Bank to secure the ceremony.`;
+  }
+
+  // Stage 5: Sacred Multi-Day Ceremony & Blessings
+  let step5State = 'pending';
+  let step5Tag = 'Upcoming Schedule';
+  let step5Desc = `Scheduled for ${esc(l.fromDate)} → ${esc(l.toDate)} (${l.totalDays} days, ${l.dailyHours}h/day, Daily Start: ${esc(l.startTime || '08:00 AM')}) at ${esc(l.venueName ? `${l.venueName}, ` : '')}${esc(l.venueAddress || l.venue || l.address || l.district)}.`;
+  if (isCancelled) {
+    step5State = 'rejected';
+    step5Tag = 'Cancelled';
+    step5Desc = 'Ceremony booking was cancelled.';
+  } else if (isCompleted) {
+    step5State = 'completed';
+    step5Tag = 'Ceremony Completed 🙏';
+    step5Desc = `Sacred ${l.totalDays}-day Vedic rituals concluded successfully with Purnahuti on ${esc(l.toDate)}. May Lord shower peace, health, and prosperity! ✨`;
+  } else if (isTodayInProgress) {
+    step5State = 'active';
+    step5Tag = 'Ceremony In Progress Today 🪔';
+    step5Desc = `Ceremony is in progress today (${esc(l.fromDate)} to ${esc(l.toDate)}). Vedic Purohit team is conducting rituals at your venue.`;
+  } else if (isPanditAccepted) {
+    step5State = 'scheduled';
+    step5Tag = 'Confirmed & Scheduled 📅';
+    step5Desc = `All preparations complete! Assigned Vedic Purohits will conduct ${esc(l.pujaName)} across ${l.totalDays} consecutive days starting daily at ${esc(l.startTime || '08:00 AM')}.`;
+  }
+
+  openModal(`Multi-Day Ceremony Progress Timeline – ${l.id}`, `
+    <div style="padding:4px 0">
+      <!-- Ritual Summary Card -->
+      <div style="background:#fff8ed;border:1.5px solid #ebd9c2;border-radius:12px;padding:16px;margin-bottom:18px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span class="booking-id-tag" style="color:#b26a00;font-size:12px">REQUEST ID: ${esc(l.id)}</span>
+              <span class="badge gold" style="font-size:11px"><span class="material-icons" style="font-size:12px;vertical-align:middle">local_fire_department</span> Multi-Day Mahayajna (${l.totalDays} Days)</span>
+            </div>
+            <h3 style="margin:6px 0 6px;color:var(--mahogany);font-size:20px">${esc(l.pujaName)}</h3>
+            <div style="font-size:13px;color:#5c3818;display:flex;flex-wrap:wrap;gap:14px;margin-top:6px">
+              <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">calendar_today</span> <b>${esc(l.fromDate)} → ${esc(l.toDate)}</b> (${l.totalDays} days × ${l.dailyHours}h/day, Daily Start: <b>${esc(l.startTime || '08:00 AM')}</b>)</span>
+              <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">place</span> <b>${esc(l.district)}</b></span>
+              <span><span class="material-icons" style="font-size:15px;vertical-align:middle;color:var(--ochre)">payments</span> Dakshina: <b>${inr(cost)}</b></span>
+            </div>
+          </div>
+          <div>
+            ${statusBadge(isCompleted ? 'Completed' : l.status)}
+          </div>
+        </div>
+
+        <!-- Venue details -->
+        <div style="font-size:12.5px;color:#7a5030;margin-top:10px;border-top:1px dashed #ebd9c2;padding-top:8px">
+          <b>🏛️ Ceremony Venue:</b> ${esc(l.venueType || 'Venue')} · ${l.venueName ? `<b>${esc(l.venueName)}</b>, ` : ''}${esc(l.venueAddress || l.venue || l.address || 'Address provided by devotee')}${l.venueLandmark ? ` (Nr: ${esc(l.venueLandmark)})` : ''}${l.venuePincode ? ` · PIN: ${esc(l.venuePincode)}` : ''}
+          ${(l.venueFacilities && l.venueFacilities.length) ? `<div style="margin-top:4px;color:#8d5b35">Setup facilities: ${l.venueFacilities.map(esc).join(', ')}</div>` : ''}
+        </div>
+      </div>
+
+      <!-- Live Stepper Timeline -->
+      <div class="ceremony-timeline">
+        <!-- Step 1: Request Submitted -->
+        <div class="ceremony-timeline-step completed">
+          <div class="timeline-step-icon"><span class="material-icons">check_circle</span></div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">1. Multi-Day Ceremony Request Submitted</span>
+              <span class="timeline-step-tag" style="background:#e8f5e9;color:#2e7d32">Submitted ✅</span>
+            </div>
+            <p class="timeline-step-desc">
+              Devotee requested <b>${esc(l.pujaName)}</b> for <b>${l.totalDays} consecutive days</b> (${esc(l.fromDate)} → ${esc(l.toDate)}, ${l.dailyHours}h/day, ${l.requiredPandits} Pandit(s) required) in <b>${esc(l.district)}</b>.
+              <br><small class="muted">Notice Verified: 48h advance notice certified. Venue registered.</small>
+            </p>
+          </div>
+        </div>
+
+        <!-- Step 2: Approved by Admin & Pandit Assignment -->
+        <div class="ceremony-timeline-step ${step2State}">
+          <div class="timeline-step-icon">
+            <span class="material-icons">${step2State === 'completed' ? 'check_circle' : (step2State === 'warning' ? 'sync' : (step2State === 'active' ? 'hourglass_top' : 'radio_button_unchecked'))}</span>
+          </div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">2. Approved by Admin &amp; Pandit Team Assignment</span>
+              <span class="timeline-step-tag" style="background:${step2State === 'completed' ? '#e8f5e9;color:#2e7d32' : (step2State === 'warning' ? '#ffebee;color:#c62828' : '#fff8e1;color:#b26a00')}">${esc(step2Tag)}</span>
+            </div>
+            <p class="timeline-step-desc">${step2Desc}</p>
+          </div>
+        </div>
+
+        <!-- Step 3: Waiting for Assigned Pandit ji Confirmation -->
+        <div class="ceremony-timeline-step ${step3State}">
+          <div class="timeline-step-icon">
+            <span class="material-icons">${step3State === 'completed' ? 'check_circle' : (step3State === 'active' ? 'sync' : (step3State === 'warning' ? 'error_outline' : 'radio_button_unchecked'))}</span>
+          </div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">3. Waiting for Assigned Pandit ji Confirmation</span>
+              <span class="timeline-step-tag" style="background:${step3State === 'completed' ? '#e8f5e9;color:#2e7d32' : (step3State === 'active' ? '#fff8e1;color:#b26a00' : '#f5f5f5;color:#777')}">${esc(step3Tag)}</span>
+            </div>
+            <p class="timeline-step-desc">${step3Desc}</p>
+          </div>
+        </div>
+
+        <!-- Step 4: Dakshina Payment & Bank Verification -->
+        <div class="ceremony-timeline-step ${step4State}">
+          <div class="timeline-step-icon">
+            <span class="material-icons">${step4State === 'completed' ? 'check_circle' : (step4State === 'rejected' ? 'error' : (step4State === 'active' ? 'payments' : 'radio_button_unchecked'))}</span>
+          </div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">4. Dakshina Payment &amp; Platform Verification</span>
+              <span class="timeline-step-tag" style="background:${step4State === 'completed' ? '#e8f5e9;color:#2e7d32' : (step4State === 'rejected' ? '#ffebee;color:#c62828' : (step4State === 'active' ? '#fff8e1;color:#b26a00' : '#f5f5f5;color:#777'))}">${esc(step4Tag)}</span>
+            </div>
+            <p class="timeline-step-desc">${step4Desc}</p>
+          </div>
+        </div>
+
+        <!-- Step 5: Sacred Multi-Day Ceremony & Blessings -->
+        <div class="ceremony-timeline-step ${step5State}">
+          <div class="timeline-step-icon">
+            <span class="material-icons">${step5State === 'completed' ? 'auto_awesome' : (step5State === 'active' ? 'local_fire_department' : (step5State === 'scheduled' ? 'event' : (step5State === 'rejected' ? 'cancel' : 'radio_button_unchecked')))}</span>
+          </div>
+          <div class="timeline-step-content">
+            <div class="timeline-step-header">
+              <span class="timeline-step-title">5. Sacred Multi-Day Ceremony &amp; Divine Blessings</span>
+              <span class="timeline-step-tag" style="background:${step5State === 'completed' ? '#e8f5e9;color:#2e7d32' : (step5State === 'scheduled' ? '#e3f2fd;color:#1565c0' : (step5State === 'active' ? '#fff3e0;color:#e65100' : '#f5f5f5;color:#777'))}">${esc(step5Tag)}</span>
+            </div>
+            <p class="timeline-step-desc">${step5Desc}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons Footer inside Modal -->
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:20px;padding-top:14px;border-top:1px solid #ebd9c2;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${isPaid ? `
+            <button class="btn btn-gold btn-sm" onclick="closeModal();ACTIONS.viewLongBill({id:'${esc(l.id)}'})">
+              <span class="material-icons" style="font-size:15px;vertical-align:middle">receipt_long</span> View Bill / Receipt
+            </button>
+          ` : (isPanditAccepted && !isVerifying) ? `
+            <button class="btn btn-gold btn-sm" onclick="closeModal();ACTIONS.payLongPuja({id:'${esc(l.id)}'})" style="font-weight:700">
+              <span class="material-icons" style="font-size:15px;vertical-align:middle">payments</span> Pay Dakshina (${inr(cost)})
+            </button>
+          ` : ''}
+          ${(!isCancelled && !isCompleted) ? `
+            <button class="btn btn-outline dark btn-sm" onclick="closeModal();ACTIONS.cancelLongPuja({id:'${esc(l.id)}'})" style="color:#c62828;border-color:#ef9a9a">
+              <span class="material-icons" style="font-size:14px">cancel</span> Cancel Ceremony / View Policy
+            </button>
+          ` : ''}
         </div>
         <button class="btn btn-outline btn-sm" onclick="closeModal()">Close</button>
       </div>
@@ -3767,17 +4167,54 @@ function renderDevoteeLongTab(longs) {
     <div class="booking-cards-grid">
       ${longs.map((l) => {
         const isCancelled = l.status === 'Cancelled';
-        const isCompleted = l.status === 'Completed';
+        const isRejectedByPandit = ['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status);
+        const isPanditAccepted = l.status === 'Confirmed' ||
+          (l.panditStatuses && Object.values(l.panditStatuses).some((st) => String(st).toLowerCase() === 'accepted'));
+
+        let slotPassed = false;
+        try {
+          const endDt = parsePujaStartDateTime(l.toDate || l.fromDate, l.startTime || '08:00 AM');
+          endDt.setHours(endDt.getHours() + (Number(l.dailyHours) || 4));
+          slotPassed = endDt.getTime() < Date.now();
+        } catch (e) {}
+        const isCompleted = l.status === 'Completed' || (!isCancelled && !isRejectedByPandit && slotPassed && isPanditAccepted);
+
+        const isPaid = l.paymentStatus === 'Paid' || l.paymentStatus === 'Paid & Verified';
+        const isVerifying = l.paymentStatus === 'Under Processing' || l.paymentStatus === 'Verification Pending';
+        const isPaymentRejected = l.paymentStatus === 'Rejected' || l.paymentStatus === 'Payment Rejected';
+        const cost = Number(l.estimatedCost) || 0;
         const venueDisplay = l.venue || l.address || '';
-        const assignedCount = (l.assignedPandits && Array.isArray(l.assignedPandits)) ? l.assignedPandits.length : 0;
+        const assignedPanditsList = Array.isArray(l.assignedPandits) ? l.assignedPandits : [];
+        const assignedCount = assignedPanditsList.length;
+
+        // Formulate assigned pandits display name
+        let assignedPanditsNames = '';
+        if (assignedPanditsList.length) {
+          assignedPanditsNames = assignedPanditsList.map((em) => {
+            const pObj = (S.pandits || []).find((p) => (p.email || '').toLowerCase() === em.toLowerCase());
+            return pObj ? pObj.name : em;
+          }).join(', ');
+        }
+
         return `
-        <div class="booking-card" style="${isCancelled ? 'border:1.5px solid #ef9a9a;background:#fffaf9;' : ''}">
+        <div class="booking-card" style="${isCancelled ? 'border:1.5px solid #ef9a9a;background:#fffaf9;' : (isPanditAccepted && !isPaid ? 'border:2px solid #d99a19;box-shadow:0 6px 20px rgba(217,154,25,0.15);' : '')}">
           <div>
             <div class="booking-card-top">
-              <span class="booking-id-tag">${esc(l.id)}</span>
-              ${statusBadge(l.status)}
+              <span class="booking-id-tag" style="background:#fff3e0;color:#bf360c;border:1px solid #ffcc80">${esc(l.id)}</span>
+              ${statusBadge(isCompleted ? 'Completed' : l.status)}
             </div>
             <h4>${esc(l.pujaName)}</h4>
+
+            <!-- Live Ceremony Progress Timeline Quick Tracker -->
+            <div class="timeline-quick-cta" data-action="viewLongTimeline" data-id="${esc(l.id)}" style="cursor:pointer;background:#fff8ed;border:1px dashed #d99a19;border-radius:8px;padding:8px 12px;margin:8px 0 10px;display:flex;align-items:center;justify-content:space-between;color:#8a5500;font-size:12.5px" title="Click to view live ceremony progress timeline">
+              <span style="display:flex;align-items:center;gap:6px">
+                <span class="material-icons" style="font-size:16px;color:var(--ochre)">timeline</span>
+                <b>Live Ceremony Timeline</b> · Track progress &rarr;
+              </span>
+              <span class="badge ${isCompleted ? 'green' : (isPanditAccepted ? (isPaid ? 'green' : 'amber') : 'blue')}" style="font-size:10.5px">
+                ${isCompleted ? 'Completed 🙏' : (isPanditAccepted ? (isPaid ? 'Dakshina Paid ✅' : 'Pandit Confirmed – Pay Due 💳') : 'Reviewing ⏳')}
+              </span>
+            </div>
 
             <div class="booking-meta-row" style="margin-top:8px">
               <span class="material-icons">calendar_today</span>
@@ -3814,26 +4251,90 @@ function renderDevoteeLongTab(longs) {
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">groups</span>
-              <span>Pandits: <b>${assignedCount}/${l.requiredPandits} assigned</b></span>
+              <span>Pandits: <b>${assignedCount}/${l.requiredPandits} assigned</b> ${assignedPanditsNames ? `<small class="muted">(${esc(assignedPanditsNames)})</small>` : ''}</span>
             </div>
             <div class="booking-meta-row">
               <span class="material-icons">payments</span>
-              <span>Estimated Total Dakshina: <b>${inr(l.estimatedCost)}</b> ${l.advancePaid ? '<span class="badge green">Advance Paid</span>' : '<span class="badge" style="background:#f5ece1;color:#6d4833">Pay on Confirmation</span>'}</span>
+              <span>Total Dakshina: <b>${inr(cost)}</b> ${isPaid ? '<span class="badge green">Paid &amp; Verified</span>' : (isVerifying ? '<span class="badge amber">Under Processing</span>' : (isPanditAccepted ? '<span class="badge amber" style="background:#fff3e0;border:1px solid #ffb74d;color:#e65100">Pay Now</span>' : '<span class="badge" style="background:#f5ece1;color:#6d4833">Pay on Confirmation</span>'))}</span>
             </div>
 
-            ${l.status === 'Confirmed' ? `
-              <div style="background:#f0fff4;border:1px solid #a5d6a7;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:12.5px;color:#1b5e20">
-                ✅ <strong>Ceremony Confirmed!</strong> A verified Vedic Acharya has accepted your ceremony assignment.
+            <!-- Pandit Acceptance & Pay Option Banner -->
+            ${isPanditAccepted ? `
+              <div style="background:#f0fff4;border:1.5px solid #a5d6a7;border-radius:10px;padding:12px 14px;margin-top:12px;font-size:13px;color:#1b5e20">
+                <div style="font-weight:700;display:flex;align-items:center;gap:6px">
+                  <span class="material-icons" style="font-size:18px">check_circle</span>
+                  Vedic Pandit Accepted Ceremony Schedule! 🙏
+                </div>
+                <div style="font-size:12.5px;margin-top:4px;color:#2e7d32;line-height:1.5">
+                  The assigned Vedic Pandit ${assignedPanditsNames ? `(<strong>${esc(assignedPanditsNames)}</strong>)` : ''} has officially confirmed availability for your ${l.totalDays}-day ceremony (${esc(l.fromDate)} → ${esc(l.toDate)}).
+                </div>
               </div>
+
+              <!-- DAKSHINA PAYMENT OPTIONS -->
+              ${isPaid ? `
+                <div style="background:#f0fff4;border:1px solid #c8e6c9;border-radius:8px;padding:10px 14px;margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                  <div style="font-size:13px;color:#1b5e20">
+                    <span class="badge green" style="margin:0"><span class="material-icons" style="font-size:13px;vertical-align:middle">verified</span> Dakshina Paid &amp; Verified</span>
+                    <div style="font-size:11.5px;color:#2e7d32;margin-top:3px">Ref: <code>${esc(l.paymentProof || 'Direct')}</code> · Total: <b>${inr(cost)}</b></div>
+                  </div>
+                  <button class="btn btn-gold btn-sm" data-action="viewLongBill" data-id="${esc(l.id)}">
+                    <span class="material-icons">receipt_long</span> View / Print Bill
+                  </button>
+                </div>
+              ` : isVerifying ? `
+                <div style="background:#fff8e1;border:1.5px solid #ffe082;border-radius:8px;padding:12px 14px;margin-top:10px;font-size:13px;color:#b26a00">
+                  <div style="font-weight:700;display:flex;align-items:center;gap:6px">
+                    <span class="material-icons" style="font-size:18px">hourglass_top</span> Dakshina Payment Under Processing
+                  </div>
+                  <div style="font-size:12px;margin-top:4px;color:#795548;line-height:1.4">
+                    Transfer Reference: <code>${esc(l.paymentProof || '')}</code> (${esc(l.paymentMethod || 'UPI/Transfer')}). PujaConnect Admin is verifying bank records. Official bill will be generated upon confirmation.
+                  </div>
+                </div>
+              ` : isPaymentRejected ? `
+                <div style="background:#ffebee;border:1.5px solid #ffcdd2;border-radius:8px;padding:12px 14px;margin-top:10px;font-size:13px;color:#c62828">
+                  <div style="font-weight:700;display:flex;align-items:center;gap:6px">
+                    <span class="material-icons" style="font-size:18px">cancel</span> Payment Verification Unsuccessful
+                  </div>
+                  <div style="font-size:12px;margin-top:4px;color:#b71c1c">
+                    Reason: ${esc(l.paymentRejectionReason || 'Reference not found in bank records')}. Please resubmit valid payment reference below.
+                  </div>
+                  <button class="btn btn-gold btn-sm" data-action="payLongPuja" data-id="${esc(l.id)}" style="margin-top:8px;font-weight:700">
+                    <span class="material-icons">refresh</span> Repay Dakshina (${inr(cost)})
+                  </button>
+                </div>
+              ` : `
+                <!-- UNLOCKED PAY DAKSHINA OPTION -->
+                <div style="background:linear-gradient(135deg, #fffcf0 0%, #fff8e8 100%);border:2px solid #d99a19;border-radius:10px;padding:14px 16px;margin-top:12px;box-shadow:0 4px 16px rgba(217,154,25,0.18)">
+                  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+                    <div style="flex:1;min-width:240px">
+                      <div style="display:flex;align-items:center;gap:6px;font-weight:800;color:var(--mahogany);font-size:14.5px">
+                        <span class="material-icons" style="color:var(--ochre);font-size:20px">account_balance_wallet</span>
+                        Dakshina Payment Unlocked
+                        <span class="badge green" style="font-size:10px;padding:2px 6px">Pandit Confirmed ✅</span>
+                      </div>
+                      <div style="font-size:12.5px;color:#6b4423;margin-top:3px;line-height:1.4">
+                        Assigned Vedic Pandit has accepted your ceremony! Please pay the Dakshina of <b>${inr(cost)}</b> via UPI or Bank Transfer to confirm and finalize your ceremony schedule.
+                      </div>
+                    </div>
+                    <button class="btn btn-gold btn-md" data-action="payLongPuja" data-id="${esc(l.id)}" style="font-weight:800;padding:10px 22px;font-size:14px;box-shadow:0 4px 14px rgba(217,154,25,0.35);display:inline-flex;align-items:center;gap:6px">
+                      <span class="material-icons">payments</span> Pay Dakshina (${inr(cost)})
+                    </button>
+                  </div>
+                </div>
+              `}
             ` : (l.status === 'Assigned' ? `
-              <div style="background:#fffcf0;border:1px solid #ebd9c2;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:12.5px;color:#7a553e">
-                ⏳ <strong>Pandit Assigned:</strong> Awaiting Purohit confirmation.
+              <div style="background:#fffcf0;border:1px solid #ebd9c2;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:12.5px;color:#7a553e">
+                ⏳ <strong>Pandit Assigned:</strong> Awaiting Purohit confirmation. Dakshina payment unlocks automatically as soon as Pandit accepts your ceremony schedule.
               </div>
-            ` : (['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? `
-              <div style="background:#fffaf0;border:1px solid #ffe0b2;border-radius:8px;padding:8px 12px;margin-top:10px;font-size:12.5px;color:#e65100">
+            ` : (isRejectedByPandit ? `
+              <div style="background:#fffaf0;border:1px solid #ffe0b2;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:12.5px;color:#e65100">
                 🔄 <strong>Administration Re-assignment:</strong> Our team is assigning another verified Vedic Scholar for your ceremony dates.
               </div>
-            ` : ''))}
+            ` : `
+              <div style="background:#fffcf7;border:1px solid #ebd9c2;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:12.5px;color:#7a553e">
+                📋 <strong>Admin Review:</strong> Ceremony request submitted. Our team is assigning qualified Vedic Pandits for ${esc(l.district)}.
+              </div>
+            `))}
 
             ${isCancelled ? `
               <div style="background:#ffebee;border:1px solid #ffcdd2;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12.5px;color:#b71c1c">
@@ -3846,12 +4347,24 @@ function renderDevoteeLongTab(longs) {
           </div>
 
           <div class="booking-card-footer" style="margin-top:14px;padding-top:12px;border-top:1px solid #f2e4d2;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <span class="muted" style="font-size:11.5px">
-              <span class="material-icons" style="font-size:13px;vertical-align:middle;color:var(--ochre)">verified</span> 48h Advance Notice Verified
-            </span>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <button class="btn btn-outline dark btn-sm" data-action="viewLongTimeline" data-id="${esc(l.id)}" title="View live multi-day ceremony progress timeline">
+                <span class="material-icons" style="font-size:15px;vertical-align:middle">timeline</span> Timeline
+              </button>
+              ${(isPanditAccepted && !isPaid && !isVerifying) ? `
+                <button class="btn btn-gold btn-sm" data-action="payLongPuja" data-id="${esc(l.id)}" style="font-weight:700">
+                  <span class="material-icons" style="font-size:14px">payments</span> Pay Dakshina (${inr(cost)})
+                </button>
+              ` : ''}
+              ${isPaid ? `
+                <button class="btn btn-gold btn-sm" data-action="viewLongBill" data-id="${esc(l.id)}">
+                  <span class="material-icons" style="font-size:14px">receipt_long</span> View Bill
+                </button>
+              ` : ''}
+            </div>
             ${(!isCancelled && !isCompleted) ? `
               <button class="btn btn-outline dark btn-sm" data-action="cancelLongPuja" data-id="${esc(l.id)}" style="color:#c62828;border-color:#ef9a9a">
-                <span class="material-icons" style="font-size:14px">cancel</span> Cancel Ceremony / View Policy
+                <span class="material-icons" style="font-size:14px">cancel</span> Cancel Ceremony
               </button>
             ` : ''}
           </div>
@@ -5769,7 +6282,14 @@ const ACTIONS = {
     showView('dashboard');
     setTimeout(() => switchPanditSubtab('havan', d.id), 50);
   },
-  viewTimeline: (d) => openBookingTimeline(d.id),
+  viewLongTimeline: (d) => openLongPujaTimeline(d.id),
+  viewTimeline: (d) => {
+    const id = d && d.id;
+    if (id && (id.startsWith('LP-') || id.startsWith('LONG-') || (S.longs || []).some((x) => x.id === id))) {
+      return openLongPujaTimeline(id);
+    }
+    return openBookingTimeline(id);
+  },
   rebookBooking: async (d) => {
     let b = (S.bookings || []).find((x) => x.bookingId === d.id);
     if (!b && d.id) {
@@ -6190,14 +6710,177 @@ const ACTIONS = {
     if (!ok) return;
     try { await api('/pujas/' + d.id, { method: 'DELETE' }); toast('Deleted'); renderDashboard(); } catch (e) { toast(e.message, true); }
   },
-  modalBackdrop: (d, el, ev) => { if (ev.target === el) closeModal(); },
+  payLongPuja: async (d) => {
+    try {
+      const lId = d && d.id;
+      if (!lId) return toast('Missing ceremony request identifier', true);
+
+      let l = (S.longs || []).find((x) => x.id === lId || x._id === lId);
+      if (!l) {
+        try {
+          l = await api('/long-puja-requests/' + encodeURIComponent(lId));
+        } catch {}
+      }
+      if (!l) return toast('Multi-day ceremony record not found for ' + lId, true);
+
+      const isPanditAccepted = l.status === 'Confirmed' ||
+        (l.panditStatuses && Object.values(l.panditStatuses).some((st) => String(st).toLowerCase() === 'accepted'));
+
+      if (!isPanditAccepted) {
+        return toast('Dakshina payment is accepted only after the assigned Vedic Pandit accepts and confirms your ceremony schedule 🙏', true);
+      }
+
+      // Fetch centralized Platform Bank Details (managed exclusively by Admin)
+      let platformBank = {
+        accountHolder: 'PujaConnect Official Platform Account',
+        bankName: 'State Bank of India',
+        accountNumber: '40918237465',
+        ifscCode: 'SBIN0001234',
+        upiId: 'pujaconnect@upi',
+        qrCode: 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=pujaconnect@upi&pn=PujaConnect%20Vedic%20Services&cu=INR'
+      };
+      try {
+        const pb = await api('/platform-bank-details');
+        if (pb && (pb.accountNumber || pb.upiId)) platformBank = { ...platformBank, ...pb };
+      } catch (err) {}
+
+      const cost = Number(l.estimatedCost) || 0;
+      const displayUpi = platformBank.upiId || 'pujaconnect@upi';
+      const qrImgHtml = platformBank.qrCode
+        ? `<div class="qr-preview-card" style="margin:16px 0;text-align:center">
+             <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:var(--mahogany)">
+               <span class="material-icons" style="font-size:16px;vertical-align:middle;color:var(--ochre)">qr_code_scanner</span>
+               Scan Official PujaConnect QR to Pay Dakshina (PhonePe / GPay / Paytm / BHIM)
+             </div>
+             <img src="${esc(platformBank.qrCode)}" class="qr-img" style="max-width:180px;height:auto;border-radius:10px;border:1px solid #ebd9c2;background:#fff;padding:8px" alt="PujaConnect UPI QR Code">
+             <div class="muted" style="font-size:11px;margin-top:6px">Tap and hold or scan with any UPI/banking app</div>
+           </div>`
+        : '';
+
+      const assignedPandits = (l.assignedPandits && l.assignedPandits.length) ? l.assignedPandits.join(', ') : 'Vedic Purohit Team';
+
+      openModal(`Pay Dakshina – ${esc(l.pujaName)} (${l.totalDays} Days)`, `
+        <div style="max-width:520px;margin:0 auto">
+          <div style="background:#fff8ed;border:1px solid #ebd9c2;border-radius:12px;padding:16px;margin-bottom:18px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <span class="booking-id-tag">${esc(l.id)}</span>
+              <span class="badge green">Pandit Confirmed ✅</span>
+            </div>
+            <div style="font-size:15px;color:var(--mahogany);font-weight:700"><b>${esc(l.pujaName)}</b></div>
+            <div style="font-size:13px;color:var(--muted);margin-top:4px;line-height:1.5">
+              📅 <b>${esc(l.fromDate)} → ${esc(l.toDate)}</b> (${l.totalDays} days × ${l.dailyHours}h/day, Daily Start: <b>${esc(l.startTime || '08:00 AM')}</b>)<br>
+              🏛️ Venue: ${esc(l.venueAddress || l.venue || l.address || l.district)}<br>
+              👥 Assigned Purohit: <b>${esc(assignedPandits)}</b>
+            </div>
+            <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #ebd9c2;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:13px;font-weight:600">Total Dakshina to Pay:</span>
+              <span style="font-size:22px;font-weight:700;color:var(--ochre)">${inr(cost)}</span>
+            </div>
+          </div>
+
+          <!-- Official Platform Bank Details Box -->
+          <div class="bank-details-box">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-weight:700;color:var(--mahogany);font-size:14.5px">
+              <span class="material-icons" style="color:var(--ochre)">account_balance</span>
+              PujaConnect Official Platform Bank &amp; UPI Details
+            </div>
+            <div class="bank-info-grid">
+              <div class="bank-info-item">
+                <label>Account Holder Name</label>
+                <b>${esc(platformBank.accountHolder)}</b>
+              </div>
+              <div class="bank-info-item">
+                <label>Bank Name</label>
+                <b>${esc(platformBank.bankName)}</b>
+              </div>
+              <div class="bank-info-item">
+                <label>Bank Account Number</label>
+                <b style="font-family:monospace;letter-spacing:1px">${esc(platformBank.accountNumber)}</b>
+              </div>
+              <div class="bank-info-item">
+                <label>IFSC Code</label>
+                <b style="font-family:monospace;letter-spacing:1px">${esc(platformBank.ifscCode)}</b>
+              </div>
+              <div class="bank-info-item" style="grid-column: 1 / -1">
+                <label>Official Platform UPI ID</label>
+                <b style="font-family:monospace;color:var(--ochre);font-size:14.5px">${esc(displayUpi)}</b>
+              </div>
+            </div>
+            ${qrImgHtml}
+            <div style="background:#fff8ed;border-left:3px solid var(--ochre);padding:8px 10px;margin-top:12px;font-size:11.5px;color:#8a5d3b">
+              ℹ️ Devotees pay directly to PujaConnect's verified platform account. Admin verifies payment and handles Pandit disbursements after ceremony completion.
+            </div>
+          </div>
+
+          <!-- Submit Payment Verification Form -->
+          <div style="margin-top:18px">
+            <div style="font-weight:700;margin-bottom:8px;font-size:14px;color:var(--mahogany)">
+              <span class="material-icons" style="font-size:16px;vertical-align:middle;color:var(--green)">verified</span>
+              Submit Transfer Reference for Verification
+            </div>
+            <p class="muted" style="font-size:12.5px;margin-bottom:12px">
+              After completing the transfer via UPI, GPay, PhonePe, or Bank Transfer, enter your Transaction UTR / Ref Number below. The Admin will verify and your official multi-day ceremony bill will be generated.
+            </p>
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Payment Mode Used</label>
+              <select id="pay-mode-long" style="margin-bottom:10px">
+                <option value="UPI (PhonePe / GPay / Paytm)">UPI (PhonePe / GPay / Paytm / BHIM)</option>
+                <option value="Direct Bank Transfer (IMPS/NEFT)">Direct Bank Transfer (IMPS / NEFT)</option>
+                <option value="Cash Paid to Pandit">Cash Paid Directly to Pandit</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-weight:600;font-size:12.5px">Transaction UTR / Reference ID / UPI Ref Number *</label>
+              <input type="text" id="pay-proof-long" placeholder="e.g. 423456789012 or UPI/345678" style="margin-bottom:14px">
+            </div>
+            <button class="btn btn-gold btn-lg" id="btn-submit-long-payment-proof" style="width:100%">
+              <span class="material-icons">send</span> Submit Payment for Verification
+            </button>
+          </div>
+        </div>
+      `, (m) => {
+        const submitBtn = $('#btn-submit-long-payment-proof', m);
+        if (submitBtn) {
+          submitBtn.onclick = async () => {
+            const proof = $('#pay-proof-long', m).value.trim();
+            const mode = $('#pay-mode-long', m).value;
+            if (!proof) return toast('Please enter the Transaction UTR or Reference Number', true);
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Submitting...';
+            try {
+              await api('/long-puja-requests/' + encodeURIComponent(l.id) + '/submit-payment', {
+                method: 'POST',
+                body: { paymentProof: proof, paymentMethod: mode, amount: cost }
+              });
+              closeModal();
+              toast('Dakshina payment submitted! Your payment is under processing and awaiting Admin verification. 🙏');
+              renderDashboard();
+            } catch (err) {
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = '<span class="material-icons">send</span> Submit Payment for Verification';
+              toast(err.message, true);
+            }
+          };
+        }
+      });
+    } catch (e) {
+      console.error('Error in payLongPuja:', e);
+      toast('Could not open payment window: ' + e.message, true);
+    }
+  },
   payBooking: async (d) => {
     try {
       const bId = d && d.id;
       if (!bId) return toast('Missing booking identifier', true);
+      if (bId && (String(bId).startsWith('LP-') || String(bId).startsWith('LONG-') || (S.longs || []).some((x) => x.id === bId))) {
+        return ACTIONS.payLongPuja(d);
+      }
 
       let b = (S.bookings || []).find((x) => x.bookingId === bId || x._id === bId);
       if (!b) {
+        if ((S.longs || []).some((x) => x.id === bId)) {
+          return ACTIONS.payLongPuja(d);
+        }
         try {
           b = await api('/bookings/' + encodeURIComponent(bId));
         } catch {}
@@ -6357,8 +7040,15 @@ const ACTIONS = {
     try {
       const bId = d && d.id;
       if (!bId) return toast('Missing booking identifier', true);
+      if (bId && (String(bId).startsWith('LP-') || String(bId).startsWith('LONG-') || (S.longs || []).some((x) => x.id === bId))) {
+        return ACTIONS.viewLongBill(d);
+      }
+
       let b = (S.bookings || []).find((x) => x.bookingId === bId || x._id === bId);
       if (!b) {
+        if ((S.longs || []).some((x) => x.id === bId)) {
+          return ACTIONS.viewLongBill(d);
+        }
         try {
           b = await api('/bookings/' + encodeURIComponent(bId));
         } catch {}
@@ -6478,6 +7168,107 @@ const ACTIONS = {
     } catch (e) {
       console.error('Error in viewBill:', e);
       toast('Could not generate bill: ' + e.message, true);
+    }
+  },
+  viewLongBill: async (d) => {
+    try {
+      const lId = d && d.id;
+      if (!lId) return toast('Missing ceremony request identifier', true);
+      let l = (S.longs || []).find((x) => x.id === lId || x._id === lId);
+      if (!l) {
+        try {
+          l = await api('/long-puja-requests/' + encodeURIComponent(lId));
+        } catch {}
+      }
+      if (!l) return toast('Multi-day ceremony record not found', true);
+
+      const invDate = l.invoiceGeneratedAt ? new Date(l.invoiceGeneratedAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : (l.paymentDate ? new Date(l.paymentDate).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : new Date().toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }));
+      const invId = l.invoiceId || ('INV-LONG-' + String(l.id).replace(/[^a-zA-Z0-9]/g, '') + '-9901');
+      const cost = Number(l.estimatedCost) || 0;
+      const assignedPandits = (l.assignedPandits && l.assignedPandits.length) ? l.assignedPandits.join(', ') : 'Vedic Purohit Team';
+
+      openModal('Official Multi-Day Ritual Dakshina Receipt', `
+        <div class="invoice-container">
+          <div class="invoice-head">
+            <div>
+              <div class="invoice-brand"><span class="om">ॐ</span> PujaConnect</div>
+              <div style="font-size:12px;color:var(--muted)">Authentic Vedic Ceremonies &amp; Ritual Logistics</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">Govt. Registered Vedic Purohit Network · India</div>
+            </div>
+            <div style="text-align:right">
+              <div class="invoice-num">${esc(invId)}</div>
+              <div style="font-size:12px;color:var(--muted)">Issue Date: <b>${invDate}</b></div>
+              <div style="font-size:12px;color:var(--muted)">Request ID: <b>${esc(l.id)}</b></div>
+            </div>
+          </div>
+
+          <div class="invoice-parties">
+            <div class="invoice-party">
+              <label>Billed To (Devotee)</label>
+              <b>${esc(l.userName || (S.user ? S.user.name : 'Devotee'))}</b>
+              <div>${esc(l.userEmail || (S.user ? S.user.email : ''))}</div>
+              <div>📞 ${esc(l.phone || (S.user ? S.user.phone : 'Registered Mobile'))}</div>
+              <div>📍 ${esc(l.venueAddress || l.venue || l.address || l.district)}</div>
+            </div>
+            <div class="invoice-party" style="text-align:right">
+              <label>Ceremony Performed By (Vedic Acharya Team)</label>
+              <b>${esc(assignedPandits)}</b>
+              <div>Verified Vedic Purohits (${esc(l.district)})</div>
+              <div>Team Size: ${l.requiredPandits} Pandit(s)</div>
+            </div>
+          </div>
+
+          <table class="invoice-table">
+            <thead>
+              <tr>
+                <th>Item / Sacred Service</th>
+                <th>Dates &amp; Schedule</th>
+                <th style="text-align:right">Dakshina Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <b>${esc(l.pujaName)} (Multi-Day Ceremony)</b>
+                  <div style="font-size:11.5px;color:var(--muted);margin-top:2px">Consecutive ${l.totalDays}-day Vedic yajna, daily havan, chanting, samagri setup &amp; purnahuti vidhi</div>
+                </td>
+                <td>
+                  ${esc(l.fromDate)} → ${esc(l.toDate)}<br>
+                  <small class="muted">${l.totalDays} Days × ${l.dailyHours}h/day (Daily Start: <b>${esc(l.startTime || '08:00 AM')}</b>)</small>
+                </td>
+                <td style="text-align:right;font-weight:700">${inr(cost)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="invoice-summary">
+            <div class="invoice-total-row grand">
+              <span>Total Dakshina Amount Paid</span>
+              <span style="color:#2e7d32">${inr(cost)}</span>
+            </div>
+          </div>
+
+          <div class="invoice-footer">
+            <div class="invoice-stamp">PAID &amp; VERIFIED</div>
+            <div style="font-size:12px;color:var(--muted);line-height:1.5">
+              <b>Devotee Payment Mode:</b> ${esc(l.paymentMethod || 'UPI / Bank Transfer')}<br>
+              <b>Transaction Ref / UTR:</b> <code style="font-size:11px">${esc(l.paymentProof || 'VERIFIED')}</code><br>
+              <b>Ceremony Status:</b> <span style="color:#2e7d32;font-weight:700">Confirmed (Paid &amp; Verified)</span><br>
+              <span style="font-style:italic;color:var(--ochre)">"May Lord shower divine peace, auspiciousness, and spiritual prosperity upon your home."</span>
+            </div>
+          </div>
+
+          <div class="invoice-actions">
+            <button class="btn btn-gold" onclick="window.print()">
+              <span class="material-icons">print</span> Print Official Bill
+            </button>
+            <button class="btn btn-outline" onclick="closeModal()">Close</button>
+          </div>
+        </div>
+      `, null, true);
+    } catch (e) {
+      console.error('Error in viewLongBill:', e);
+      toast('Could not generate multi-day bill: ' + e.message, true);
     }
   }
 };

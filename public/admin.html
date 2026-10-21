@@ -1404,7 +1404,13 @@
                           return `<div style="margin-top:2px"><small title="${esc(e)}"><b>${esc(pDisplayName)}</b>: <span style="color:${stColor};font-weight:700">${stIcon}${esc(st)}</span></small></div>`;
                         }).join('')}</div>` : ''}
                       </td>
-                      <td><b>${inr(l.estimatedCost)}</b>${l.advancePaid ? '<br><small class="badge green">Advance Paid</small>' : ''}</td>
+                      <td>
+                        <b>${inr(l.estimatedCost)}</b>
+                        ${l.paymentStatus === 'Paid & Verified' || l.paymentStatus === 'Paid' ? '<br><small class="badge green">Paid &amp; Verified</small>' :
+                          (l.paymentStatus === 'Under Processing' ? '<br><span class="badge amber" style="font-size:10.5px">Under Verification</span>' :
+                          (l.paymentStatus === 'Rejected' ? '<br><span class="badge red" style="font-size:10.5px">Payment Rejected</span>' :
+                          (l.advancePaid ? '<br><small class="badge green">Advance Paid</small>' : '')))}
+                      </td>
                       <td>
                         ${statusBadge(l.status)}
                         ${isRejected ? `
@@ -1414,14 +1420,32 @@
                           ${l.rejectionReason ? `<div style="font-size:11px;color:#8d2800;font-style:italic;margin-top:2px">${esc(l.rejectionReason)}</div>` : ''}
                           <small class="muted" style="display:block;margin-top:2px">Re-assignment required</small>
                         ` : ''}
+                        ${l.paymentProof ? `
+                          <div style="margin-top:4px"><code style="font-size:11px;background:#fff8ed;padding:2px 4px;border:1px solid #ebd9c2">Ref: ${esc(l.paymentProof)}</code></div>
+                        ` : ''}
                       </td>
                       <td>
-                        ${['Pending Admin', 'Assigned', 'Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? `
-                          <button class="btn btn-gold btn-sm" onclick="openAssignModal('${esc(l.id)}')" style="display:inline-flex;align-items:center;gap:4px">
-                            <span class="material-icons" style="font-size:14px">person_add</span>
-                            ${isRejected ? 'Re-assign Pandit' : (l.status === 'Pending Admin' ? 'Assign Pandits' : 'Re-assign Pandits')}
-                          </button>
-                        ` : '—'}
+                        <div style="display:flex;flex-direction:column;gap:5px">
+                          ${['Pending Admin', 'Assigned', 'Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? `
+                            <button class="btn btn-gold btn-sm" onclick="openAssignModal('${esc(l.id)}')" style="display:inline-flex;align-items:center;gap:4px">
+                              <span class="material-icons" style="font-size:14px">person_add</span>
+                              ${isRejected ? 'Re-assign Pandit' : (l.status === 'Pending Admin' ? 'Assign Pandits' : 'Re-assign Pandits')}
+                            </button>
+                          ` : ''}
+                          ${l.paymentStatus === 'Under Processing' ? `
+                            <button class="btn btn-green btn-sm" onclick="verifyBookingPayment('${esc(l.id)}')" style="display:inline-flex;align-items:center;gap:4px">
+                              <span class="material-icons" style="font-size:14px">verified</span> Verify Payment
+                            </button>
+                            <button class="btn btn-red btn-sm" onclick="rejectBookingPayment('${esc(l.id)}')" style="display:inline-flex;align-items:center;gap:4px">
+                              <span class="material-icons" style="font-size:14px">cancel</span> Reject Payment
+                            </button>
+                          ` : ''}
+                          ${l.paymentStatus === 'Paid & Verified' || l.paymentStatus === 'Paid' ? `
+                            <button class="btn btn-gold btn-sm" onclick="viewAdminBill('${esc(l.id)}')" style="display:inline-flex;align-items:center;gap:4px">
+                              <span class="material-icons" style="font-size:14px">receipt_long</span> View Receipt
+                            </button>
+                          ` : ''}
+                        </div>
                       </td>
                     </tr>
                     `;
@@ -2192,10 +2216,11 @@
     }
 
     async function verifyBookingPayment(id) {
+      const isLong = String(id).startsWith('LP-') || String(id).startsWith('LONG-') || (S.adminLongs || []).some(x => x.id === id);
       const confirmed = await adminConfirm({
         title: 'Verify & Confirm Payment',
-        message: `Verify payment for booking ${id} and issue official bill?`,
-        detail: 'This will officially verify the devotee payment, generate the downloadable Dakshina bill/receipt, and send an email alert to the assigned Pandit.',
+        message: `Verify payment for ${isLong ? 'multi-day ceremony' : 'booking'} ${id} and issue official bill?`,
+        detail: 'This will officially verify the devotee payment, generate the downloadable Dakshina bill/receipt, and update the ceremony record.',
         confirmText: 'Verify & Issue Bill',
         confirmClass: 'btn-green',
         icon: 'verified'
@@ -2203,8 +2228,12 @@
       if (!confirmed) return;
 
       try {
-        await api('/bookings/' + id + '/verify-payment', { method: 'POST' });
-        toast('Payment verified! Bill issued and Pandit credit alert email sent. 🙏');
+        if (isLong) {
+          await api('/long-puja-requests/' + encodeURIComponent(id) + '/verify-payment', { method: 'POST' });
+        } else {
+          await api('/bookings/' + encodeURIComponent(id) + '/verify-payment', { method: 'POST' });
+        }
+        toast('Payment verified! Bill issued and records updated. 🙏');
         loadData();
       } catch (e) {
         toast(e.message, true);
@@ -2212,10 +2241,11 @@
     }
 
     async function rejectBookingPayment(id) {
+      const isLong = String(id).startsWith('LP-') || String(id).startsWith('LONG-') || (S.adminLongs || []).some(x => x.id === id);
       const defaultReason = 'Transaction reference could not be verified in bank records';
       const reason = await adminPrompt({
         title: 'Reject Payment Verification',
-        message: `Rejecting payment proof for booking ${id}`,
+        message: `Rejecting payment proof for ${isLong ? 'multi-day ceremony' : 'booking'} ${id}`,
         label: 'Rejection Reason (will be emailed to devotee)',
         placeholder: 'e.g. Invalid UTR / unconfirmed credit',
         defaultValue: defaultReason,
@@ -2226,10 +2256,17 @@
       if (reason === null) return;
 
       try {
-        await api('/bookings/' + id + '/reject-payment', {
-          method: 'POST',
-          body: { reason: reason.trim() || defaultReason }
-        });
+        if (isLong) {
+          await api('/long-puja-requests/' + encodeURIComponent(id) + '/reject-payment', {
+            method: 'POST',
+            body: { reason: reason.trim() || defaultReason }
+          });
+        } else {
+          await api('/bookings/' + encodeURIComponent(id) + '/reject-payment', {
+            method: 'POST',
+            body: { reason: reason.trim() || defaultReason }
+          });
+        }
         toast('Payment marked as Rejected. Devotee notified to re-submit valid proof.');
         loadData();
       } catch (e) {
@@ -2238,6 +2275,96 @@
     }
 
     function viewAdminBill(id) {
+      const isLong = String(id).startsWith('LP-') || String(id).startsWith('LONG-') || (S.adminLongs || []).some(x => x.id === id);
+      if (isLong) {
+        const l = (S.adminLongs || []).find(x => x.id === id);
+        if (!l) return toast('Multi-day ceremony record not found', true);
+        const invDate = l.invoiceGeneratedAt ? new Date(l.invoiceGeneratedAt).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : new Date().toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+        const invId = l.invoiceId || ('INV-LONG-' + String(l.id).replace(/[^a-zA-Z0-9]/g, '') + '-9901');
+        const cost = Number(l.estimatedCost) || 0;
+        const assignedPandits = (l.assignedPandits && l.assignedPandits.length) ? l.assignedPandits.join(', ') : 'Vedic Purohit Team';
+
+        openModal('Official Multi-Day Ritual Dakshina Receipt', `
+          <div class="invoice-container">
+            <div class="invoice-head">
+              <div>
+                <div class="invoice-brand"><span class="om">ॐ</span> PujaConnect</div>
+                <div style="font-size:12px;color:var(--muted)">Authentic Vedic Ceremonies &amp; Ritual Logistics</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">Govt. Registered Vedic Purohit Network · India</div>
+              </div>
+              <div style="text-align:right">
+                <div class="invoice-num">${esc(invId)}</div>
+                <div style="font-size:12px;color:var(--muted)">Issue Date: <b>${invDate}</b></div>
+                <div style="font-size:12px;color:var(--muted)">Request ID: <b>${esc(l.id)}</b></div>
+              </div>
+            </div>
+
+            <div class="invoice-parties">
+              <div class="invoice-party">
+                <label>Billed To (Devotee)</label>
+                <b>${esc(l.userName)}</b>
+                <div>${esc(l.userEmail)}</div>
+                <div>📞 ${esc(l.phone || 'Registered Mobile')}</div>
+                <div>📍 ${esc(l.venueAddress || l.venue || l.address || l.district)}</div>
+              </div>
+              <div class="invoice-party" style="text-align:right">
+                <label>Ceremony Performed By (Vedic Acharya Team)</label>
+                <b>${esc(assignedPandits)}</b>
+                <div>Verified Vedic Purohits (${esc(l.district)})</div>
+                <div>Team Size: ${l.requiredPandits} Pandit(s)</div>
+              </div>
+            </div>
+
+            <table class="invoice-table">
+              <thead>
+                <tr>
+                  <th>Item / Sacred Service</th>
+                  <th>Dates &amp; Schedule</th>
+                  <th style="text-align:right">Dakshina Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <b>${esc(l.pujaName)} (Multi-Day Ceremony)</b>
+                    <div style="font-size:11.5px;color:var(--muted);margin-top:2px">Consecutive ${l.totalDays}-day Vedic yajna, daily havan, chanting, samagri setup &amp; purnahuti vidhi</div>
+                  </td>
+                  <td>
+                    ${esc(l.fromDate)} → ${esc(l.toDate)}<br>
+                    <small class="muted">${l.totalDays} Days × ${l.dailyHours}h/day (Start: <b>${esc(l.startTime || '08:00 AM')}</b>)</small>
+                  </td>
+                  <td style="text-align:right;font-weight:700">${inr(cost)}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="invoice-summary">
+              <div class="invoice-total-row grand">
+                <span>Total Dakshina Amount Paid</span>
+                <span style="color:#2e7d32">${inr(cost)}</span>
+              </div>
+            </div>
+
+            <div class="invoice-footer">
+              <div class="invoice-stamp">PAID &amp; VERIFIED</div>
+              <div style="font-size:12px;color:var(--muted);line-height:1.5">
+                <b>Devotee Payment Mode:</b> ${esc(l.paymentMethod || 'UPI / Bank Transfer')}<br>
+                <b>Transaction Ref / UTR:</b> <code style="font-size:11px">${esc(l.paymentProof || 'VERIFIED')}</code><br>
+                <b>Ceremony Status:</b> <span style="color:#2e7d32;font-weight:700">Confirmed (Paid &amp; Verified)</span>
+              </div>
+            </div>
+
+            <div class="invoice-actions">
+              <button class="btn btn-gold" onclick="window.print()">
+                <span class="material-icons">print</span> Print Official Bill
+              </button>
+              <button class="btn btn-outline" onclick="closeModal()">Close</button>
+            </div>
+          </div>
+        `);
+        return;
+      }
+
       const b = (S.bookings || []).find(x => x.bookingId === id);
       if (!b) return toast('Booking record not found', true);
 
@@ -2336,7 +2463,21 @@
     }
 
     function renderPaymentsVerification(root) {
-      const allBookings = S.bookings || [];
+      const standardBookings = (S.bookings || []).map(b => ({ ...b, isLong: false }));
+      const longBookings = (S.adminLongs || []).map(l => ({
+        ...l,
+        isLong: true,
+        bookingId: l.id,
+        service: `${l.pujaName} (${l.totalDays} Days)`,
+        fee: l.estimatedCost,
+        date: `${l.fromDate} → ${l.toDate}`,
+        time: `${l.dailyHours}h/day, Start: ${l.startTime || '08:00 AM'}`,
+        panditName: (l.assignedPandits && l.assignedPandits.length) ? l.assignedPandits.join(', ') : 'Vedic Purohit Team',
+        panditEmail: (l.assignedPandits && l.assignedPandits.length) ? l.assignedPandits.join(', ') : 'Pending Assignment',
+        userPhone: l.phone,
+        address: l.venueAddress || l.venue || l.address || l.district
+      }));
+      const allBookings = [...standardBookings, ...longBookings];
       const pending = allBookings.filter(b => b.paymentStatus === 'Under Processing' || b.paymentStatus === 'Verification Pending');
       const paid = allBookings.filter(b => b.paymentStatus === 'Paid' || b.paymentStatus === 'Paid & Verified');
       const rejected = allBookings.filter(b => b.paymentStatus === 'Rejected' || b.paymentStatus === 'Payment Rejected');
