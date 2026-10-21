@@ -175,12 +175,163 @@ const S = {
   user: JSON.parse(localStorage.getItem('pc_user') || 'null'),
   token: localStorage.getItem('pc_token') || '',
   pujas: [],
+  pandits: [],
   pujaTab: 'Short',
+  exploreDistrict: '',
+  systemSettings: null,
   filters: { state: 'Odisha', district: '', service: '' },
   priceConfigFilters: { state: '', district: '', search: '' },
   priceConfigData: null,
   view: 'home'
 };
+
+const DEFAULT_SYSTEM_SETTINGS = {
+  contactNumber: '+91 94370 12345',
+  logo: '',
+  officeAddress: 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024'
+};
+
+async function loadSystemSettings() {
+  if (S.systemSettings) return S.systemSettings;
+  try {
+    const s = await api('/system-settings');
+    S.systemSettings = s || DEFAULT_SYSTEM_SETTINGS;
+  } catch (e) {
+    S.systemSettings = DEFAULT_SYSTEM_SETTINGS;
+  }
+  updatePublicFooterSystemInfo();
+  return S.systemSettings;
+}
+
+function updatePublicFooterSystemInfo() {
+  const settings = S.systemSettings || DEFAULT_SYSTEM_SETTINGS;
+  const phone = settings.contactNumber || '+91 94370 12345';
+  const address = settings.officeAddress || 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024';
+  const logo = settings.logo || '';
+
+  const phoneLink = document.getElementById('footer-phone-link');
+  if (phoneLink) {
+    phoneLink.href = 'tel:' + phone.replace(/[^0-9+]/g, '');
+    phoneLink.textContent = phone;
+  }
+
+  const addrEl = document.getElementById('footer-address-text');
+  if (addrEl) {
+    addrEl.textContent = address;
+  }
+
+  const logoContainer = document.getElementById('footer-logo-container');
+  if (logoContainer) {
+    if (logo) {
+      logoContainer.innerHTML = `<img src="${esc(logo)}" alt="PujaConnect Official Logo" class="footer-logo-img">`;
+    } else {
+      logoContainer.innerHTML = `
+        <span class="om" style="font-size:38px;color:#f5b942">ॐ</span>
+        <span class="footer-brand-title">PujaConnect</span>
+      `;
+    }
+  }
+}
+
+function renderOfficialContactFooterSnippet(isPandit = false) {
+  const settings = S.systemSettings || DEFAULT_SYSTEM_SETTINGS;
+  const phone = settings.contactNumber || '+91 94370 12345';
+  const address = settings.officeAddress || 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024';
+  const logo = settings.logo || '';
+
+  const cleanPhone = phone.replace(/[^0-9+]/g, '');
+
+  return `
+    <div class="dash-official-footer-card">
+      <div class="dash-official-footer-logo-col">
+        ${logo ? `
+          <img src="${esc(logo)}" class="dash-official-footer-logo" alt="PujaConnect Official Logo">
+        ` : `
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:32px;color:#f5b942;line-height:1">ॐ</span>
+            <span style="font-size:18px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
+          </div>
+        `}
+        <div class="dash-official-title">${isPandit ? 'PujaConnect Administrative Secretariat' : 'PujaConnect Central Headquarters'}</div>
+        <div class="dash-official-sub">${isPandit ? 'Official Acharya Liaison &amp; Purohit Coordination Desk' : 'Devotee Assistance, Booking Verification &amp; Ritual Guidance'}</div>
+      </div>
+      <div class="dash-official-contact-col">
+        <div class="dash-official-label">${isPandit ? 'Official Pandit Support Helpline' : 'Official Devotee Helpline'}</div>
+        <a href="tel:${esc(cleanPhone)}" class="dash-official-phone-badge">
+          <span class="material-icons" style="font-size:16px">${isPandit ? 'phone_in_talk' : 'support_agent'}</span>
+          <span>${esc(phone)}</span>
+        </a>
+        <div class="dash-official-note">${isPandit ? 'Direct administrative priority line for ritual schedules &amp; payouts' : 'Toll-free customer support &amp; ceremony scheduling assistance'}</div>
+      </div>
+      <div class="dash-official-address-col">
+        <div class="dash-official-label">Main Office Address</div>
+        <div class="dash-official-address-val">
+          <span class="material-icons">${isPandit ? 'temple_hindu' : 'location_on'}</span>
+          <span>${esc(address)}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function showLogoSplash({ durationSec = 4, title = '', subtitle = '', onFinish = null } = {}) {
+  const existing = document.getElementById('fullpage-logo-splash');
+  if (existing) existing.remove();
+
+  const settings = S.systemSettings || DEFAULT_SYSTEM_SETTINGS;
+  const logo = settings.logo || '';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'fullpage-logo-splash';
+  overlay.className = 'logo-splash-overlay';
+
+  overlay.innerHTML = `
+    <div class="logo-splash-card">
+      <div class="logo-splash-img-wrap">
+        ${logo ? `
+          <img src="${esc(logo)}" alt="Official PujaConnect Logo" class="logo-splash-img">
+        ` : `
+          <div class="logo-splash-default-emblem">
+            <span class="logo-splash-default-om">ॐ</span>
+          </div>
+        `}
+      </div>
+      <h2 class="logo-splash-title">PujaConnect</h2>
+      <p class="logo-splash-tagline">Vedic Rituals &amp; Certified Purohit Services</p>
+      ${title ? `<div class="logo-splash-welcome-badge"><span class="material-icons" style="font-size:15px;color:var(--gold)">verified</span> ${esc(title)}</div>` : ''}
+      <div class="logo-splash-timer-wrap">
+        <div class="logo-splash-timer-bar" id="splash-timer-bar"></div>
+      </div>
+      <button type="button" class="logo-splash-skip-btn" id="btn-skip-splash">Skip &amp; Continue →</button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  setTimeout(() => {
+    const bar = document.getElementById('splash-timer-bar');
+    if (bar) {
+      bar.style.transition = `width ${durationSec}s linear`;
+      bar.style.width = '100%';
+    }
+  }, 40);
+
+  let closed = false;
+  const closeSplash = () => {
+    if (closed) return;
+    closed = true;
+    overlay.classList.add('fade-out');
+    setTimeout(() => {
+      overlay.remove();
+      if (onFinish) onFinish();
+    }, 350);
+  };
+
+  const skipBtn = overlay.querySelector('#btn-skip-splash');
+  if (skipBtn) skipBtn.onclick = closeSplash;
+
+  setTimeout(closeSplash, durationSec * 1000);
+}
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -533,51 +684,288 @@ async function renderHomePandits() {
 /* ---------- catalog ---------- */
 async function loadPujas() {
   try {
-    const [pujas, offers] = await Promise.all([
+    const [pujas, offers, pandits] = await Promise.all([
       api('/pujas'),
-      api('/media/offers').catch(() => [])
+      api('/media/offers').catch(() => []),
+      api('/pandits?verified=true').catch(() => [])
     ]);
-    S.pujas = pujas;
+    S.pujas = Array.isArray(pujas) ? pujas : [];
     S.offers = Array.isArray(offers) ? offers : [];
-  } catch (e) { S.pujas = []; toast(e.message, true); }
+    if (Array.isArray(pandits) && pandits.length) S.pandits = pandits;
+  } catch (e) {
+    S.pujas = [];
+    toast(e.message, true);
+  }
 }
+
+function getPujaDistrictPricingMap(p) {
+  const verified = (S.pandits || []).filter((pt) => pt.verified || pt.status === 'Verified');
+  const qualified = verified.filter((pt) => {
+    if (!pt.services || !pt.services.length) return true;
+    return pt.services.some((s) => s.trim().toLowerCase() === p.name.trim().toLowerCase());
+  });
+  const panditPool = qualified.length ? qualified : verified;
+  const baseFee = p.baseFee || 1199;
+
+  const distMap = {};
+  panditPool.forEach((pt) => {
+    const dists = Array.isArray(pt.workingDistricts) && pt.workingDistricts.length
+      ? pt.workingDistricts
+      : [pt.district || 'Khordha'];
+    const curPrices = pt.districtPrices || {};
+
+    dists.forEach((d) => {
+      const cleanD = (d || '').trim();
+      if (!cleanD) return;
+      if (!distMap[cleanD]) distMap[cleanD] = [];
+      const adminFixedRate = (curPrices[cleanD] && Number(curPrices[cleanD]) > 0)
+        ? Number(curPrices[cleanD])
+        : (pt.fee || baseFee);
+      distMap[cleanD].push({
+        panditId: pt._id,
+        panditName: pt.name,
+        price: adminFixedRate
+      });
+    });
+  });
+
+  return { distMap, panditPool };
+}
+
 function pujaCard(p, withTags) {
   const isLong = p.type === 'Long';
-  const offer = !isLong && typeof findActiveOffer === 'function' ? findActiveOffer({ service: p.name, state: (S.filters && S.filters.state) || (S.user && S.user.state) || 'Odisha' }) : null;
   const baseFee = p.baseFee || 1199;
+  const curDist = (S.exploreDistrict || '').trim();
+  const { distMap, panditPool } = getPujaDistrictPricingMap(p);
+  const availableDistricts = Object.keys(distMap).sort();
+
   let priceHtml = '';
+  let districtRatesDetailHtml = '';
+
   if (isLong) {
-    priceHtml = `<span style="font-weight:700">${inr(p.perHourFee || 600)} / hr <small class="muted" style="font-size:11.5px;font-weight:400">per Pandit</small></span>`;
-  } else if (offer) {
-    const disc = Math.round((baseFee * offer.discountPercent) / 100);
-    const finalFee = Math.max(0, baseFee - disc);
-    priceHtml = `<span style="color:#2e7d32;font-weight:700">From ${inr(finalFee)}</span> <span style="text-decoration:line-through;color:var(--muted);font-size:12px">${inr(baseFee)}</span> <span class="badge green" style="font-size:10px;padding:2px 6px;font-weight:700">${offer.discountPercent}% OFF</span>`;
+    // Multi-Day Mahayajna: show Admin-fixed daily rates by district (NO arbitrary custom rate / customize button)
+    const baseDaily = p.perHourFee ? p.perHourFee * 4 : 2400;
+    if (curDist && curDist !== 'ALL' && distMap[curDist]) {
+      const dailyPrices = distMap[curDist].map((x) => x.price);
+      const minD = Math.min(...dailyPrices);
+      const maxD = Math.max(...dailyPrices);
+      const rateText = minD === maxD ? inr(minD) : `${inr(minD)} – ${inr(maxD)}`;
+      priceHtml = `<span style="font-weight:700;color:#1b5e20">${rateText} / day</span> <small class="muted" style="font-size:11.5px">in ${esc(curDist)}</small>`;
+      districtRatesDetailHtml = `
+        <div class="puja-card-district-rate-box">
+          <div class="puja-card-rate-header">
+            <span class="puja-card-rate-label">🏛️ Admin Fixed Daily Dakshina</span>
+            <span class="badge green" style="font-size:10px">Fixed by Admin</span>
+          </div>
+          <div class="puja-card-district-fees">${rateText} <small style="font-weight:400;font-size:12px;color:var(--muted)">per Purohit / day</small></div>
+          <div class="puja-card-pandit-meta">
+            Fixed for: <b>${esc(distMap[curDist].map((x) => x.panditName).join(', '))}</b>
+          </div>
+        </div>
+      `;
+    } else {
+      priceHtml = `<span style="font-weight:700;color:#1b5e20">From ${inr(baseDaily)} / day</span> <small class="muted" style="font-size:11.5px">district rates</small>`;
+      districtRatesDetailHtml = `
+        <div class="puja-card-district-rate-box">
+          <div class="puja-card-rate-header">
+            <span class="puja-card-rate-label">District-wise Daily Admin Dakshina</span>
+            <span class="badge" style="background:#f5f0e8;color:#55280b;font-size:10px">${availableDistricts.length} Districts Served</span>
+          </div>
+          <div class="puja-district-chips-wrap">
+            ${availableDistricts.slice(0, 5).map((d) => {
+              const pList = distMap[d];
+              const pMin = Math.min(...pList.map((x) => x.price));
+              return `<span class="puja-dist-mini-chip" data-action="selectExploreDistrict" data-dist="${esc(d)}"><b>${esc(d)}:</b> ${inr(pMin)}/d</span>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
   } else {
-    priceHtml = 'From ' + inr(baseFee);
+    // Short Home Pujas: show exact Admin-fixed Dakshina by district
+    const offer = typeof findActiveOffer === 'function' ? findActiveOffer({ service: p.name, district: curDist && curDist !== 'ALL' ? curDist : '', state: S.filters.state || 'Odisha' }) : null;
+
+    if (curDist && curDist !== 'ALL') {
+      if (distMap[curDist] && distMap[curDist].length > 0) {
+        const prices = distMap[curDist].map((x) => x.price);
+        const minP = Math.min(...prices);
+        const maxP = Math.max(...prices);
+        const panditNames = distMap[curDist].map((x) => x.panditName);
+
+        if (offer) {
+          const discMin = Math.max(0, minP - Math.round((minP * offer.discountPercent) / 100));
+          const discMax = Math.max(0, maxP - Math.round((maxP * offer.discountPercent) / 100));
+          const discText = discMin === discMax ? inr(discMin) : `${inr(discMin)} – ${inr(discMax)}`;
+          const origText = minP === maxP ? inr(minP) : `${inr(minP)} – ${inr(maxP)}`;
+          priceHtml = `<span style="color:#2e7d32;font-weight:800">${discText}</span> <span style="text-decoration:line-through;color:var(--muted);font-size:12px">${origText}</span> <span class="badge green" style="font-size:10px;padding:2px 6px;font-weight:700">${offer.discountPercent}% OFF</span>`;
+        } else {
+          priceHtml = minP === maxP ? inr(minP) : `${inr(minP)} – ${inr(maxP)}`;
+        }
+
+        districtRatesDetailHtml = `
+          <div class="puja-card-district-rate-box">
+            <div class="puja-card-rate-header">
+              <span class="puja-card-rate-label">🏛️ Admin Fixed Dakshina for ${esc(curDist)}</span>
+              <span class="badge green" style="font-size:10px">Admin Guaranteed</span>
+            </div>
+            <div class="puja-card-district-fees">
+              ${minP === maxP ? inr(minP) : `${inr(minP)} – ${inr(maxP)}`}
+              <small style="font-weight:400;font-size:12px;color:var(--muted)">in ${esc(curDist)}</small>
+            </div>
+            <div class="puja-card-pandit-meta">
+              Official rates fixed by Admin for: <b>${esc(panditNames.join(', '))}</b>
+            </div>
+            ${availableDistricts.filter((d) => d !== curDist).length ? `
+              <div class="puja-district-chips-wrap">
+                <span style="font-size:10.5px;color:var(--muted);margin-right:2px">Other Districts:</span>
+                ${availableDistricts.filter((d) => d !== curDist).slice(0, 4).map((d) => {
+                  const oMin = Math.min(...distMap[d].map((x) => x.price));
+                  return `<span class="puja-dist-mini-chip" data-action="selectExploreDistrict" data-dist="${esc(d)}"><b>${esc(d)}:</b> ${inr(oMin)}</span>`;
+                }).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      } else {
+        priceHtml = inr(baseFee);
+        districtRatesDetailHtml = `
+          <div class="puja-card-district-rate-box">
+            <div class="puja-card-rate-header">
+              <span class="puja-card-rate-label">Official Base Dakshina</span>
+              <span class="badge" style="background:#fff3e0;color:#e65100;font-size:10px">Admin Central Pool</span>
+            </div>
+            <div class="puja-card-district-fees">${inr(baseFee)} <small style="font-weight:400;font-size:12px;color:var(--muted)">in ${esc(curDist)}</small></div>
+            <div class="puja-card-pandit-meta">Regional mobile Vedic Purohit assigned directly by administration.</div>
+          </div>
+        `;
+      }
+    } else {
+      // All Districts View: calculate overall range across admin-fixed district prices
+      const allPrices = [];
+      availableDistricts.forEach((d) => {
+        distMap[d].forEach((x) => allPrices.push(x.price));
+      });
+      const minAll = allPrices.length ? Math.min(...allPrices) : baseFee;
+      const maxAll = allPrices.length ? Math.max(...allPrices) : baseFee;
+      const overallText = minAll === maxAll ? inr(minAll) : `${inr(minAll)} – ${inr(maxAll)}`;
+      priceHtml = `<span style="font-weight:800;color:#1b5e20">${overallText}</span> <small class="muted" style="font-size:11.5px">by district</small>`;
+
+      districtRatesDetailHtml = `
+        <div class="puja-card-district-rate-box">
+          <div class="puja-card-rate-header">
+            <span class="puja-card-rate-label">District-wise Admin Fixed Rates</span>
+            <span class="badge green" style="font-size:10px">${availableDistricts.length} Districts Configured</span>
+          </div>
+          <div class="puja-district-chips-wrap">
+            ${availableDistricts.slice(0, 6).map((d) => {
+              const dList = distMap[d];
+              const dMin = Math.min(...dList.map((x) => x.price));
+              return `<span class="puja-dist-mini-chip" data-action="selectExploreDistrict" data-dist="${esc(d)}"><b>${esc(d)}:</b> ${inr(dMin)}</span>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
   }
+
+  const chosenDist = curDist && curDist !== 'ALL' ? curDist : (availableDistricts[0] || 'Khordha');
 
   return `<div class="card"><div class="thumb" style="background-image:url('${esc(p.image)}')"></div><div class="body">
     <h3>${esc(p.name)}</h3><p class="muted" style="margin:0 0 8px">${esc(p.desc)}</p>
     ${withTags ? `<p style="font-size:13px;margin:0 0 8px">${esc(p.longDesc)}</p><div>${(p.benefits || []).map((b) => `<span class="badge">✦ ${esc(b)}</span>`).join('')}</div>` : ''}
+    ${districtRatesDetailHtml}
     <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap"><span class="price">${priceHtml}</span>
     ${isLong ? `
-      <button class="btn btn-dark btn-sm" data-action="planLong" data-name="${esc(p.name)}">Customize</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-gold btn-sm" data-action="bookLongPujaWithDistrict" data-name="${esc(p.name)}" data-district="${esc(chosenDist)}">Book Multi-Day</button>
+        <button class="btn btn-outline dark btn-sm" data-action="findForInDistrict" data-name="${esc(p.name)}" data-district="${esc(chosenDist)}">Acharyas</button>
+      </div>
     ` : `
       <div style="display:flex;gap:6px">
-        <button class="btn btn-gold btn-sm" data-action="bookDirectPuja" data-name="${esc(p.name)}">Book Puja</button>
-        <button class="btn btn-outline dark btn-sm" data-action="findFor" data-name="${esc(p.name)}">Pandits</button>
+        <button class="btn btn-gold btn-sm" data-action="bookDirectPujaWithDistrict" data-name="${esc(p.name)}" data-district="${esc(chosenDist)}">Book for ${esc(chosenDist)}</button>
+        <button class="btn btn-outline dark btn-sm" data-action="findForInDistrict" data-name="${esc(p.name)}" data-district="${esc(chosenDist)}">Pandits</button>
       </div>
     `}
     </div></div></div>`;
 }
+
 function renderHomePujas() {
   const el = $('#home-pujas');
   if (!el) return;
   const list = S.pujas.filter((p) => p.type === 'Short').slice(0, 3);
   el.innerHTML = list.length ? list.map((p) => pujaCard(p)).join('') : '<div class="empty">Loading pujas…</div>';
 }
+
+function renderExploreDistrictBar() {
+  const bar = $('#explore-puja-district-bar');
+  if (!bar) return;
+
+  // Gather unique districts served by verified pandits
+  const distSet = new Set();
+  (S.pandits || []).forEach((pt) => {
+    if (pt.district) distSet.add(pt.district.trim());
+    if (Array.isArray(pt.workingDistricts)) {
+      pt.workingDistricts.forEach((d) => { if (d) distSet.add(d.trim()); });
+    }
+    if (pt.districtPrices && typeof pt.districtPrices === 'object') {
+      Object.keys(pt.districtPrices).forEach((d) => {
+        if (d && Number(pt.districtPrices[d]) > 0) distSet.add(d.trim());
+      });
+    }
+  });
+
+  // Also include standard Odisha districts from LOCATIONS
+  (LOCATIONS['Odisha'] || []).forEach((d) => distSet.add(d));
+
+  const sortedDistricts = Array.from(distSet).sort();
+  const currentDist = S.exploreDistrict || (S.user && S.user.district) || 'Khordha';
+  if (!S.exploreDistrict) S.exploreDistrict = currentDist;
+
+  bar.innerHTML = `
+    <div class="explore-district-header-row">
+      <div class="explore-district-heading">
+        <span class="material-icons" style="color:var(--ochre);font-size:20px">verified_user</span>
+        <span>Select District for Official Admin-Fixed Dakshina:</span>
+      </div>
+      <div class="explore-district-select-wrap">
+        <label style="font-size:12px;font-weight:700;color:var(--muted)">All Districts:</label>
+        <select id="explore-district-select">
+          <option value="ALL" ${S.exploreDistrict === 'ALL' ? 'selected' : ''}>🌐 All Districts (Rate Matrix)</option>
+          ${sortedDistricts.map((d) => `<option value="${esc(d)}" ${S.exploreDistrict === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="explore-district-pills-row">
+      <button type="button" class="district-pill-btn ${S.exploreDistrict === 'ALL' ? 'active-district-chip' : ''}" data-dist="ALL">
+        <span class="material-icons" style="font-size:14px">public</span> All Districts
+      </button>
+      ${sortedDistricts.slice(0, 8).map((d) => `
+        <button type="button" class="district-pill-btn ${S.exploreDistrict === d ? 'active-district-chip' : ''}" data-dist="${esc(d)}">
+          <span class="material-icons" style="font-size:13px">place</span> ${esc(d)}
+        </button>
+      `).join('')}
+    </div>
+  `;
+
+  const sel = bar.querySelector('#explore-district-select');
+  if (sel) {
+    sel.onchange = (e) => {
+      S.exploreDistrict = e.target.value;
+      renderPujas();
+    };
+  }
+
+  bar.querySelectorAll('.district-pill-btn').forEach((btn) => {
+    btn.onclick = () => {
+      S.exploreDistrict = btn.dataset.dist;
+      renderPujas();
+    };
+  });
+}
+
 function renderPujas() {
   document.querySelectorAll('#view-pujas .tab').forEach((t) => t.classList.toggle('active', t.dataset.type === S.pujaTab));
+  renderExploreDistrictBar();
   const list = S.pujas.filter((p) => p.type === S.pujaTab);
   $('#puja-list').innerHTML = list.length ? list.map((p) => pujaCard(p, true)).join('') : '<div class="empty">No pujas in this category yet.</div>';
 }
@@ -1355,7 +1743,7 @@ async function openBooking(arg) {
 
   const sel = { date: targetDate || '', time: targetTime || '' };
   const initialPuja = targetPujaName || S.filters.service || (selectedPandit && selectedPandit.services && selectedPandit.services[0]) || allShortPujas[0] || 'Satyanarayan Puja';
-  const initialDistrict = lockedDistrict || targetDistrict || (selectedPandit && ((selectedPandit.workingDistricts && selectedPandit.workingDistricts[0]) || selectedPandit.district)) || S.filters.district || availableDistricts[0];
+  const initialDistrict = targetDistrict || lockedDistrict || (selectedPandit && ((selectedPandit.workingDistricts && selectedPandit.workingDistricts[0]) || selectedPandit.district)) || S.filters.district || availableDistricts[0];
 
   // Full-Screen Verified Vedic Scholars & Location Rates Popup
   // Shown when devotee presses any Book Now puja before booking form
@@ -2406,8 +2794,17 @@ function afterAuth(r) {
   saveSession(r.user, r.token);
   closeModal();
   toast('Namaste, ' + r.user.name + ' 🙏');
-  const next = S.afterLogin; S.afterLogin = null;
-  if (next) next(); else showView('dashboard');
+  const roleName = r.user.role === 'pandit' ? 'Acharya' : 'Devotee';
+  showLogoSplash({
+    durationSec: 3,
+    title: `Namaste, ${r.user.name}! Entering ${roleName} Portal...`,
+    onFinish: () => {
+      const next = S.afterLogin;
+      S.afterLogin = null;
+      if (next) next();
+      else showView('dashboard');
+    }
+  });
 }
 
 /* ---------- pandit registration ---------- */
@@ -3653,6 +4050,9 @@ function renderDevoteeDashboardUI(root, bookings, longs, verifiedList) {
       ${tab === 'long' ? renderDevoteeLongTab(longs) : ''}
       ${tab === 'profile' ? renderDevoteeProfileTab(bookings.length) : ''}
     </div>
+
+    <!-- Official Platform Support & Main Headquarters Details -->
+    ${renderOfficialContactFooterSnippet(false)}
   `;
   if (tab === 'refunds') {
     setupDevoteeRefundListeners();
@@ -5414,6 +5814,9 @@ async function panditDash(root) {
       ${tab === 'bank' ? renderPanditBankTab(me) : ''}
       ${tab === 'profile' ? renderPanditProfileTab(me) : ''}
     </div>
+
+    <!-- Official Platform Secretariat & Headquarters Details -->
+    ${renderOfficialContactFooterSnippet(true)}
   `;
   if (tab === 'avail') {
     setupAvailTabListeners(me);
@@ -6961,7 +7364,22 @@ const ACTIONS = {
   },
   pujaTab: (d) => { S.pujaTab = d.type; renderPujas(); },
   findFor: (d) => { S.filters.service = d.name; showView('pandits'); },
+  findForInDistrict: (d) => {
+    S.filters.service = d.name;
+    if (d.district && d.district !== 'ALL') S.filters.district = d.district;
+    showView('pandits');
+  },
+  selectExploreDistrict: (d) => {
+    S.exploreDistrict = d.dist;
+    renderPujas();
+  },
   bookDirectPuja: (d) => openBooking({ pujaName: d.name }),
+  bookDirectPujaWithDistrict: (d) => openBooking({ pujaName: d.name, district: d.district }),
+  bookLongPujaWithDistrict: (d) => {
+    S.longPreset = d.name;
+    if (d.district && d.district !== 'ALL') S.filters.district = d.district;
+    showView('long');
+  },
   planLong: (d) => { S.longPreset = d.name; showView('long'); },
   bookPandit: (d) => openBooking(d.id),
   openPanditHavan: (d) => {
@@ -8788,10 +9206,16 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
   }
 
   renderNav();
+  await loadSystemSettings();
   await loadPujas();
   renderHomePujas();
   renderHomePandits();
   setupHeroFilter();
+
+  // Show full-page logo splash for 4 seconds when user opens main webpage
+  if (!actionParam && !rebookId && (!location.hash || location.hash === '#home')) {
+    showLogoSplash({ durationSec: 4 });
+  }
 
   if (actionParam === 'rebook' || (rebookId && emailParam)) {
     // Clean search params from URL so refresh stays clean

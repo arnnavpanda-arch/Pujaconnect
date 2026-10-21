@@ -3030,3 +3030,547 @@ html.direct-dashboard-mode #view-dashboard { display: block !important; }
   border-radius: 6px;
   border: 1px solid #f3d493;
 }
+
+/* =====================================================================
+   Official Branding Footer (Public Webpage Footer)
+===================================================================== */
+.footer-official-branding {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.2fr;
+  gap: 24px;
+  padding: 28px 0 24px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid rgba(255, 209, 102, 0.2);
+  text-align: left;
+}
+.footer-brand-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.footer-logo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.footer-logo-img {
+  max-width: 180px;
+  max-height: 54px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.3));
+}
+.footer-brand-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--gold);
+  font-family: Georgia, serif;
+  letter-spacing: 0.03em;
+}
+.footer-tagline {
+  color: #ebd9c2;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 340px;
+}
+.footer-heading {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.footer-contact-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.footer-phone-val {
+  font-size: 16px;
+  font-weight: 800;
+  color: #fff;
+  text-decoration: none;
+  transition: color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.footer-phone-val:hover {
+  color: var(--gold);
+  text-decoration: underline;
+}
+.footer-support-hours {
+  color: #ebd9c2;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.footer-address-item {
+  color: #ebd9c2;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+@media (max-width: 820px) {
+  .footer-official-branding {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    text-align: center;
+  }
+  .footer-logo-wrap,
+  .footer-contact-item,
+  .footer-heading {
+    justify-content: center;
+  }
+  .footer-tagline {
+    margin: 0 auto;
+  }
+}
+
+/* =====================================================================
+   Official Support & Secretariat Card (User & Pandit Dashboard at Last)
+===================================================================== */
+.dash-official-footer-card {
+  background: linear-gradient(135deg, #2b1103 0%, #1e0a02 100%);
+  border: 1.5px solid #d99a19;
+  border-radius: 16px;
+  padding: 22px 26px;
+  margin-top: 36px;
+  margin-bottom: 20px;
+  color: #ffd88a;
+  box-shadow: 0 8px 30px rgba(43, 17, 3, 0.25);
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.2fr;
+  gap: 24px;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+.dash-official-footer-card::before {
+  content: 'ॐ';
+  position: absolute;
+  right: -15px;
+  bottom: -20px;
+  font-size: 110px;
+  color: rgba(217, 154, 25, 0.06);
+  pointer-events: none;
+  line-height: 1;
+  font-family: Georgia, serif;
+}
+.dash-official-footer-logo-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dash-official-footer-logo {
+  max-width: 170px;
+  max-height: 48px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+}
+.dash-official-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.dash-official-sub {
+  font-size: 12px;
+  color: #ebd9c2;
+  line-height: 1.4;
+}
+.dash-official-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+  margin-bottom: 4px;
+}
+.dash-official-phone-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(217, 154, 25, 0.16);
+  border: 1px solid #d99a19;
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 999px;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+.dash-official-phone-badge:hover {
+  background: #d99a19;
+  color: #2b1103;
+}
+.dash-official-note {
+  font-size: 11.5px;
+  color: #ebd9c2;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+.dash-official-address-val {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #f7ede2;
+  line-height: 1.5;
+}
+.dash-official-address-val .material-icons {
+  font-size: 18px;
+  color: var(--gold);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+@media (max-width: 820px) {
+  .dash-official-footer-card {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 18px 16px;
+    text-align: center;
+  }
+  .dash-official-footer-logo-col {
+    align-items: center;
+  }
+  .dash-official-address-val {
+    justify-content: center;
+    text-align: center;
+  }
+}
+
+/* =====================================================================
+   Explore Puja District Selection & Rates Bar
+===================================================================== */
+.explore-district-filter-box {
+  background: #ffffff;
+  border: 1.5px solid #ebd9c2;
+  border-radius: 14px;
+  padding: 14px 18px;
+  box-shadow: 0 4px 16px rgba(53, 22, 5, 0.05);
+}
+.explore-district-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.explore-district-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--mahogany);
+}
+.explore-district-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.explore-district-select-wrap select {
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #ebd9c2;
+  background: #fffcf7;
+  font-weight: 600;
+  color: #3b2115;
+}
+.explore-district-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+.district-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 13px;
+  border-radius: 20px;
+  border: 1px solid #ebd9c2;
+  background: #fffcf7;
+  color: #4a2814;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+.district-pill-btn:hover {
+  background: #fff8eb;
+  border-color: var(--ochre);
+}
+.district-pill-btn.active-district-chip {
+  background: var(--mahogany);
+  color: var(--gold);
+  border-color: var(--mahogany);
+  box-shadow: 0 2px 8px rgba(53, 22, 5, 0.2);
+}
+
+/* Card District Rate Matrix */
+.puja-card-district-rate-box {
+  background: #fff8ec;
+  border: 1px solid #ebd9be;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0 12px;
+}
+.puja-card-rate-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.puja-card-rate-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8c5b36;
+}
+.puja-card-district-fees {
+  font-size: 17px;
+  font-weight: 800;
+  color: #1b5e20;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.puja-card-pandit-meta {
+  font-size: 11.5px;
+  color: #6d4323;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.puja-district-chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #ebd9c2;
+}
+.puja-dist-mini-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: #fff;
+  border: 1px solid #e0cdb6;
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: #4a2814;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.puja-dist-mini-chip:hover,
+.puja-dist-mini-chip.active-mini-chip {
+  background: #2e7d32;
+  color: #fff;
+  border-color: #2e7d32;
+}
+
+/* =====================================================================
+   Full-Page Logo Pop-up Screen ("Pop Pop Wise" PC & Mobile)
+===================================================================== */
+@keyframes logoPopWise {
+  0% {
+    transform: scale(0.4) translateY(20px);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08) translateY(-4px);
+    opacity: 1;
+  }
+  80% {
+    transform: scale(0.96) translateY(2px);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes logoPulseGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 16px rgba(217, 154, 25, 0.45));
+  }
+  50% {
+    filter: drop-shadow(0 0 34px rgba(255, 215, 0, 0.85));
+  }
+}
+
+@keyframes splashBackdropFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.logo-splash-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999999;
+  background: radial-gradient(circle at center, #2e1104 0%, #150601 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: splashBackdropFade 0.3s ease-out forwards;
+  backdrop-filter: blur(10px);
+}
+.logo-splash-overlay.fade-out {
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+
+/* PC / Desktop Default Sizing */
+.logo-splash-card {
+  background: rgba(30, 11, 2, 0.94);
+  border: 2px solid #d99a19;
+  border-radius: 24px;
+  padding: 38px 36px 30px;
+  max-width: 440px;
+  width: 92%;
+  text-align: center;
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.7), 0 0 40px rgba(217, 154, 25, 0.3);
+  animation: logoPopWise 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.logo-splash-img-wrap {
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: logoPulseGlow 3s ease-in-out infinite;
+  min-height: 110px;
+}
+
+/* PC Logo Image Dimensions */
+.logo-splash-img {
+  max-width: 320px;
+  max-height: 200px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+.logo-splash-default-emblem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.logo-splash-default-om {
+  font-size: 72px;
+  color: #f5b942;
+  line-height: 1;
+  text-shadow: 0 0 24px rgba(245, 185, 66, 0.8);
+}
+
+.logo-splash-title {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 800;
+  color: #ffd88a;
+  font-family: Georgia, serif;
+  letter-spacing: 0.04em;
+}
+.logo-splash-tagline {
+  margin: 0 0 14px;
+  color: #ebd9c2;
+  font-size: 13.5px;
+  letter-spacing: 0.02em;
+}
+.logo-splash-welcome-badge {
+  background: rgba(255, 209, 102, 0.12);
+  border: 1px solid rgba(255, 209, 102, 0.35);
+  color: #ffd88a;
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-bottom: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.logo-splash-timer-wrap {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.logo-splash-timer-bar {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #d99a19, #ffd166);
+}
+.logo-splash-skip-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 216, 138, 0.3);
+  color: #ffd88a;
+  padding: 6px 18px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.logo-splash-skip-btn:hover {
+  background: rgba(255, 216, 138, 0.15);
+  border-color: #ffd88a;
+}
+
+/* Mobile Phone Responsive Sizing */
+@media (max-width: 600px) {
+  .logo-splash-card {
+    padding: 26px 20px 22px;
+    max-width: 88vw;
+    border-radius: 18px;
+  }
+  .logo-splash-img {
+    max-width: 220px;
+    max-height: 140px;
+  }
+  .logo-splash-default-om {
+    font-size: 56px;
+  }
+  .logo-splash-title {
+    font-size: 21px;
+  }
+  .logo-splash-tagline {
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  .logo-splash-welcome-badge {
+    font-size: 11.5px;
+    padding: 3px 10px;
+    margin-bottom: 14px;
+  }
+}
+

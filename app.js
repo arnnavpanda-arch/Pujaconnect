@@ -1354,6 +1354,36 @@ app.put('/api/platform-bank-details', adminOnly, wrap(async (req, res) => {
   res.json(s.value);
 }));
 
+// Centralized System Settings (Official Contact, Logo, Office Address) Managed by Admin
+const DEFAULT_SYSTEM_SETTINGS = {
+  contactNumber: '+91 94370 12345',
+  logo: '',
+  officeAddress: 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024'
+};
+
+app.get('/api/system-settings', wrap(async (req, res) => {
+  const s = await AppSetting.findOne({ key: 'system_settings' });
+  res.json(s && s.value ? { ...DEFAULT_SYSTEM_SETTINGS, ...s.value } : DEFAULT_SYSTEM_SETTINGS);
+}));
+
+app.put('/api/system-settings', adminOnly, wrap(async (req, res) => {
+  const { contactNumber, logo, officeAddress } = req.body;
+  const currentDoc = await AppSetting.findOne({ key: 'system_settings' });
+  const current = currentDoc && currentDoc.value ? currentDoc.value : DEFAULT_SYSTEM_SETTINGS;
+  const updated = {
+    ...current,
+    contactNumber: contactNumber !== undefined ? String(contactNumber).trim() : current.contactNumber,
+    logo: logo !== undefined ? String(logo).trim() : current.logo,
+    officeAddress: officeAddress !== undefined ? String(officeAddress).trim() : current.officeAddress
+  };
+  const s = await AppSetting.findOneAndUpdate(
+    { key: 'system_settings' },
+    { value: updated },
+    { upsert: true, new: true }
+  );
+  res.json(s.value);
+}));
+
 // ---- Bookings ----
 async function uniqueId(Model, field, prefix) {
   for (let i = 0; i < 10; i++) {

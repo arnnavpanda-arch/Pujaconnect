@@ -153,8 +153,15 @@
 
     <section id="view-pujas" class="view-section">
       <div class="container">
-        <h2 class="section-title">Sacred Puja Services</h2>
-        <div class="tabs">
+        <div class="section-header-wrap" style="margin-bottom:14px">
+          <h2 class="section-title" style="margin-bottom:6px">Sacred Puja Services &amp; Official District Rates</h2>
+          <p class="muted" style="margin:0;font-size:14px">Explore ritual Dakshina fixed directly by PujaConnect Administration for verified Vedic Purohits in each district.</p>
+        </div>
+
+        <!-- District Selection & Rate Selector for Explore Puja -->
+        <div id="explore-puja-district-bar" class="explore-district-filter-box"></div>
+
+        <div class="tabs" style="margin-top:16px">
           <button class="tab active" data-action="pujaTab" data-type="Short">Popular Home Pujas</button>
           <button class="tab" data-action="pujaTab" data-type="Long">Multi-Day Mahayajnas</button>
         </div>
@@ -187,6 +194,29 @@
   </main>
 
   <footer class="footer">
+    <div class="footer-official-branding" id="footer-official-branding">
+      <div class="footer-brand-col">
+        <div id="footer-logo-container" class="footer-logo-wrap">
+          <span class="om" style="font-size:38px;color:#f5b942">ॐ</span>
+          <span class="footer-brand-title">PujaConnect</span>
+        </div>
+        <p class="footer-tagline">Vedic Ritual Platform connecting devotees with certified, authentic Purohits across India.</p>
+      </div>
+      <div class="footer-contact-col">
+        <h4 class="footer-heading"><span class="material-icons" style="font-size:16px;color:#d99a19">phone_in_talk</span> Official Helpline &amp; Support</h4>
+        <div class="footer-contact-item">
+          <a href="tel:+919437012345" id="footer-phone-link" class="footer-phone-val">+91 94370 12345</a>
+        </div>
+        <div class="footer-support-hours">Available 7:00 AM – 9:00 PM IST (All 7 Days)</div>
+      </div>
+      <div class="footer-address-col">
+        <h4 class="footer-heading"><span class="material-icons" style="font-size:16px;color:#d99a19">apartment</span> Main Office Address</h4>
+        <div class="footer-address-item" id="footer-address-text">
+          PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024
+        </div>
+      </div>
+    </div>
+
     <div class="footer-links">
       <a href="#about" data-action="nav" data-view="about">About Us</a>
       <a href="#puja-prices" data-action="nav" data-view="puja-prices">Puja Price Configuration</a>

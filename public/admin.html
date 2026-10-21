@@ -350,6 +350,9 @@
       <button class="admin-tab" data-tab="media" onclick="switchAdminTab('media')">
         <span class="material-icons">campaign</span> Media &amp; Offers <span id="badge-media-count" class="admin-tab-pill">0</span>
       </button>
+      <button class="admin-tab" data-tab="settings" onclick="switchAdminTab('settings')">
+        <span class="material-icons">settings</span> System Settings
+      </button>
     </div>
 
     <div id="admin-view-root">
@@ -854,6 +857,7 @@
       else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(root);
       else if (CURRENT_TAB === 'users') renderDevoteesDirectory(root);
       else if (CURRENT_TAB === 'media') renderMediaSection(root);
+      else if (CURRENT_TAB === 'settings') renderSystemSettingsTab(root);
     }
 
     // 0. Bookings & Pandit Assignments
@@ -3276,6 +3280,289 @@
       } catch (e) {
         root.innerHTML = `<div class="empty error">Failed to load platform bank details: ${esc(e.message)}</div>`;
       }
+    }
+
+    async function renderSystemSettingsTab(root) {
+      root.innerHTML = '<div class="empty">Loading System Settings...</div>';
+      try {
+        const settings = await api('/system-settings');
+        const contactNumber = settings.contactNumber || '+91 94370 12345';
+        const officeAddress = settings.officeAddress || 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024';
+        const logo = settings.logo || '';
+
+        root.innerHTML = `
+          <div class="admin-panel" style="max-width:920px;margin:0 auto">
+            <div class="admin-panel-head">
+              <div>
+                <h3><span class="material-icons" style="color:var(--admin-gold)">settings</span> Platform System Settings &amp; Brand Identity</h3>
+                <p class="muted" style="font-size:13px;margin:4px 0 0">
+                  Manage the official PujaConnect contact helpline, official brand logo, and registered central headquarters office address. These details are rendered across public web pages, devotee dashboard, and pandit portal.
+                </p>
+              </div>
+            </div>
+
+            <!-- Official Helpline / Contact Number -->
+            <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:18px 20px;margin-bottom:20px">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                <span class="material-icons" style="color:var(--admin-gold);font-size:22px">phone_in_talk</span>
+                <label style="font-size:15px;font-weight:700;color:var(--admin-dark);margin:0">Official Contact Number *</label>
+              </div>
+              <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                Direct phone number for devotee assistance, customer service, and verified Purohit administrative coordination.
+              </p>
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <input type="text" id="adm-sys-contact" value="${esc(contactNumber)}" placeholder="+91 94370 12345" style="font-size:15px;font-weight:600;max-width:340px;flex:1;padding:9px 12px">
+                <span class="badge" style="background:#e8f5e9;border:1px solid #c8e6c9;color:#1b5e20;padding:6px 12px;font-size:12px">
+                  <span class="material-icons" style="font-size:14px;vertical-align:middle">call</span> Click-to-call enabled on public &amp; dashboard footers
+                </span>
+              </div>
+            </div>
+
+            <!-- Official Logo Configuration & Direct Upload -->
+            <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:18px 20px;margin-bottom:20px">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="material-icons" style="color:var(--admin-gold);font-size:22px">photo_library</span>
+                  <label style="font-size:15px;font-weight:700;color:var(--admin-dark);margin:0">Official Platform Logo Image *</label>
+                </div>
+                <button type="button" class="btn btn-outline dark btn-sm" id="btn-test-splash-preview" style="font-size:12px">
+                  <span class="material-icons" style="font-size:14px">visibility</span> Test Pop-up Splash Preview (4s / 3s)
+                </button>
+              </div>
+              <p class="muted" style="font-size:12.5px;margin:0 0 12px">
+                Upload your official brand logo image file from your PC or mobile. This logo appears in the full-page welcome splash (4s on web visit, 3s on login) and on the footers of the public site, devotee dashboard, and pandit portal.
+              </p>
+
+              <!-- Upload & URL Controls -->
+              <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                  <input type="file" id="adm-sys-logo-file" accept="image/*" style="display:none">
+                  <button type="button" class="btn btn-gold btn-sm" id="btn-choose-logo-file" style="padding:9px 16px">
+                    <span class="material-icons" style="font-size:16px">upload_file</span> Choose Logo from Device (PC/Mobile)
+                  </button>
+                  <button type="button" class="btn btn-outline dark btn-sm" id="btn-reset-default-logo" style="padding:9px 14px">
+                    <span class="material-icons" style="font-size:15px">restart_alt</span> Reset to Default Golden Emblem
+                  </button>
+                  <span id="adm-sys-logo-filename" class="muted" style="font-size:12px"></span>
+                </div>
+                <div>
+                  <label style="font-size:12px;font-weight:600;color:#634330">Or Paste Image URL / Data URL:</label>
+                  <input type="text" id="adm-sys-logo-url" value="${esc(logo)}" placeholder="Paste direct image URL or upload image file above" style="font-size:12.5px;margin-top:4px">
+                </div>
+              </div>
+
+              <!-- Dual Responsive Preview: PC View vs Mobile View -->
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;margin-top:14px">
+                <!-- PC / Desktop Preview Box -->
+                <div style="background:#1d0b03;border:1.5px solid #d99a19;border-radius:10px;padding:16px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,0.25)">
+                  <div style="display:flex;align-items:center;justify-content:center;gap:6px;color:#ffd88a;font-size:12px;font-weight:700;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">
+                    <span class="material-icons" style="font-size:16px">laptop_mac</span> PC / Desktop View
+                  </div>
+                  <div style="min-height:160px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);border-radius:8px;padding:12px;border:1px dashed rgba(255,216,138,0.3)">
+                    <div id="preview-pc-wrap" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px">
+                      <img id="preview-pc-img" src="${esc(logo || '')}" alt="PC Logo Preview" style="${logo ? 'max-width:280px;max-height:140px;object-fit:contain;border-radius:8px;' : 'display:none;'}">
+                      <div id="preview-pc-placeholder" style="${logo ? 'display:none;' : 'display:flex;flex-direction:column;align-items:center;gap:6px;'}">
+                        <span style="font-size:54px;color:#f5b942;line-height:1">ॐ</span>
+                        <span style="font-size:20px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
+                        <span style="font-size:11px;color:#d99a19;letter-spacing:1px">VEDIC RITUALS &amp; CERTIFIED ACHARYAS</span>
+                      </div>
+                    </div>
+                  </div>
+                  <small style="display:block;margin-top:10px;color:#e8c697;font-size:11px">Auto-scaled for wide screens &amp; laptops</small>
+                </div>
+
+                <!-- Mobile Phone Preview Box -->
+                <div style="background:#1d0b03;border:1.5px solid #d99a19;border-radius:10px;padding:16px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,0.25);max-width:320px;margin:0 auto;width:100%">
+                  <div style="display:flex;align-items:center;justify-content:center;gap:6px;color:#ffd88a;font-size:12px;font-weight:700;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">
+                    <span class="material-icons" style="font-size:16px">phone_iphone</span> Mobile Phone View
+                  </div>
+                  <div style="min-height:130px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);border-radius:8px;padding:10px;border:1px dashed rgba(255,216,138,0.3)">
+                    <div id="preview-mobile-wrap" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px">
+                      <img id="preview-mobile-img" src="${esc(logo || '')}" alt="Mobile Logo Preview" style="${logo ? 'max-width:180px;max-height:95px;object-fit:contain;border-radius:6px;' : 'display:none;'}">
+                      <div id="preview-mobile-placeholder" style="${logo ? 'display:none;' : 'display:flex;flex-direction:column;align-items:center;gap:4px;'}">
+                        <span style="font-size:38px;color:#f5b942;line-height:1">ॐ</span>
+                        <span style="font-size:16px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
+                        <span style="font-size:9.5px;color:#d99a19;letter-spacing:0.5px">SACRED SERVICES</span>
+                      </div>
+                    </div>
+                  </div>
+                  <small style="display:block;margin-top:10px;color:#e8c697;font-size:11px">Responsive fit for Android &amp; iPhone</small>
+                </div>
+              </div>
+            </div>
+
+            <!-- Main Office Address -->
+            <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:18px 20px;margin-bottom:24px">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                <span class="material-icons" style="color:var(--admin-gold);font-size:22px">apartment</span>
+                <label style="font-size:15px;font-weight:700;color:var(--admin-dark);margin:0">Main Office Address *</label>
+              </div>
+              <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                Official registered headquarters location, central Ashram, street, district, state, and PIN code.
+              </p>
+              <textarea id="adm-sys-address" rows="3" style="width:100%;font-size:14px;padding:10px 12px;line-height:1.5" placeholder="e.g. PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024">${esc(officeAddress)}</textarea>
+            </div>
+
+            <!-- Save Action Button -->
+            <div style="display:flex;gap:12px;align-items:center">
+              <button class="btn btn-gold btn-lg" id="btn-save-system-settings" style="flex:1;padding:13px 24px;font-size:15px;font-weight:700">
+                <span class="material-icons">save</span> Save Official System Settings
+              </button>
+            </div>
+          </div>
+        `;
+
+        // Interactive preview helpers
+        const logoUrlInput = document.getElementById('adm-sys-logo-url');
+        const logoFileInput = document.getElementById('adm-sys-logo-file');
+        const chooseBtn = document.getElementById('btn-choose-logo-file');
+        const resetBtn = document.getElementById('btn-reset-default-logo');
+        const testSplashBtn = document.getElementById('btn-test-splash-preview');
+        const pcImg = document.getElementById('preview-pc-img');
+        const pcPlaceholder = document.getElementById('preview-pc-placeholder');
+        const mobileImg = document.getElementById('preview-mobile-img');
+        const mobilePlaceholder = document.getElementById('preview-mobile-placeholder');
+        const filenameLabel = document.getElementById('adm-sys-logo-filename');
+
+        function updatePreviews(val) {
+          if (val && val.trim().length > 0) {
+            pcImg.src = val;
+            pcImg.style.display = 'block';
+            pcPlaceholder.style.display = 'none';
+
+            mobileImg.src = val;
+            mobileImg.style.display = 'block';
+            mobilePlaceholder.style.display = 'none';
+          } else {
+            pcImg.src = '';
+            pcImg.style.display = 'none';
+            pcPlaceholder.style.display = 'flex';
+
+            mobileImg.src = '';
+            mobileImg.style.display = 'none';
+            mobilePlaceholder.style.display = 'flex';
+          }
+        }
+
+        if (logoUrlInput) {
+          logoUrlInput.oninput = () => {
+            updatePreviews(logoUrlInput.value);
+            if (filenameLabel) filenameLabel.textContent = '';
+          };
+        }
+
+        if (chooseBtn && logoFileInput) {
+          chooseBtn.onclick = () => logoFileInput.click();
+          logoFileInput.onchange = (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            if (filenameLabel) filenameLabel.textContent = `Selected: ${file.name} (${Math.round(file.size / 1024)} KB)`;
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+              const base64Data = evt.target.result;
+              logoUrlInput.value = base64Data;
+              updatePreviews(base64Data);
+            };
+            reader.readAsDataURL(file);
+          };
+        }
+
+        if (resetBtn) {
+          resetBtn.onclick = () => {
+            logoUrlInput.value = '';
+            if (logoFileInput) logoFileInput.value = '';
+            if (filenameLabel) filenameLabel.textContent = 'Default Emblem restored';
+            updatePreviews('');
+            toast('Default Vedic logo emblem restored');
+          };
+        }
+
+        if (testSplashBtn) {
+          testSplashBtn.onclick = () => {
+            const currentLogo = logoUrlInput ? logoUrlInput.value.trim() : '';
+            openAdminSplashDemo(currentLogo, 4);
+          };
+        }
+
+        // Save logic
+        const saveBtn = document.getElementById('btn-save-system-settings');
+        if (saveBtn) {
+          saveBtn.onclick = async () => {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="material-icons spin">sync</span> Saving...';
+            try {
+              await api('/system-settings', {
+                method: 'PUT',
+                body: {
+                  contactNumber: document.getElementById('adm-sys-contact').value.trim(),
+                  logo: document.getElementById('adm-sys-logo-url').value.trim(),
+                  officeAddress: document.getElementById('adm-sys-address').value.trim()
+                }
+              });
+              toast('Official System Settings saved successfully! 🙏');
+              saveBtn.disabled = false;
+              saveBtn.innerHTML = '<span class="material-icons">save</span> Save Official System Settings';
+            } catch (err) {
+              toast(err.message || 'Error saving settings', true);
+              saveBtn.disabled = false;
+              saveBtn.innerHTML = '<span class="material-icons">save</span> Save Official System Settings';
+            }
+          };
+        }
+      } catch (err) {
+        root.innerHTML = `<div class="empty error">Failed to load system settings: ${esc(err.message)}</div>`;
+      }
+    }
+
+    function openAdminSplashDemo(logoUrl, durationSec = 4) {
+      const existing = document.getElementById('admin-splash-demo-overlay');
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'admin-splash-demo-overlay';
+      overlay.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: radial-gradient(circle at center, #2e1104 0%, #170702 100%);
+        z-index: 99999; display: flex; align-items: center; justify-content: center;
+        flex-direction: column; padding: 20px; animation: splashFadeIn 0.35s ease forwards;
+        backdrop-filter: blur(8px);
+      `;
+
+      overlay.innerHTML = `
+        <div style="background:rgba(34,14,3,0.92);border:2px solid #d99a19;border-radius:20px;padding:36px 30px;max-width:440px;width:90%;text-align:center;box-shadow:0 12px 48px rgba(0,0,0,0.6), 0 0 30px rgba(217,154,25,0.3);animation:logoPopWise 0.75s cubic-bezier(0.34, 1.56, 0.64, 1) both;position:relative">
+          <div style="position:absolute;top:12px;right:14px;background:#ffd88a;color:#2e1104;font-size:10px;font-weight:800;padding:3px 8px;border-radius:12px;letter-spacing:0.5px">ADMIN PREVIEW</div>
+          <div style="display:flex;justify-content:center;align-items:center;margin-bottom:18px">
+            ${logoUrl ? `
+              <img src="${esc(logoUrl)}" alt="Official Logo" style="max-width:300px;max-height:180px;object-fit:contain;filter:drop-shadow(0 0 16px rgba(255,215,0,0.5));border-radius:10px">
+            ` : `
+              <div style="display:flex;flex-direction:column;align-items:center">
+                <span style="font-size:68px;color:#f5b942;line-height:1;filter:drop-shadow(0 0 18px rgba(245,185,66,0.7))">ॐ</span>
+                <span style="font-size:26px;font-weight:800;color:#ffd88a;font-family:Georgia,serif;margin-top:6px">PujaConnect</span>
+              </div>
+            `}
+          </div>
+          <h2 style="margin:0 0 6px;color:#ffd88a;font-size:22px;font-family:Georgia,serif">Official Platform Identity</h2>
+          <p style="margin:0 0 18px;color:#ebd9c2;font-size:13px">Vedic Rituals &amp; Certified Purohit Services</p>
+          <div style="width:100%;height:5px;background:rgba(255,255,255,0.15);border-radius:999px;overflow:hidden;margin-bottom:16px">
+            <div id="demo-splash-bar" style="width:0%;height:100%;background:linear-gradient(90deg, #d99a19, #ffe082);transition:width ${durationSec}s linear"></div>
+          </div>
+          <button class="btn btn-gold btn-sm" id="btn-close-demo-splash" style="padding:8px 20px;font-weight:700">Close Preview</button>
+        </div>
+      `;
+
+      document.body.appendChild(overlay);
+
+      setTimeout(() => {
+        const bar = document.getElementById('demo-splash-bar');
+        if (bar) bar.style.width = '100%';
+      }, 50);
+
+      const closeBtn = document.getElementById('btn-close-demo-splash');
+      if (closeBtn) closeBtn.onclick = () => overlay.remove();
+
+      setTimeout(() => {
+        if (overlay && overlay.parentNode) overlay.remove();
+      }, durationSec * 1000);
     }
 
     async function setPanditStatus(id, status) {
