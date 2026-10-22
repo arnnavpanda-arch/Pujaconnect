@@ -129,12 +129,15 @@ async function hasPricedPanditsInDistrict(district = '', state = '') {
 }
 
 function bookingFindQuery(param) {
-  return {
-    $or: [
-      { bookingId: param },
-      { _id: String(param).match(/^[0-9a-fA-F]{24}$/) ? param : null }
-    ]
-  };
+  const cleanId = String(param || '').trim();
+  const conds = [
+    { bookingId: cleanId },
+    { bookingId: new RegExp('^' + cleanId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }
+  ];
+  if (mongoose.Types.ObjectId.isValid(cleanId) && /^[0-9a-fA-F]{24}$/.test(cleanId)) {
+    conds.push({ _id: cleanId });
+  }
+  return { $or: conds };
 }
 
 function longPujaFindQuery(param) {
@@ -1498,21 +1501,22 @@ app.delete('/api/bookings/:id', wrap(async (req, res) => {
     try { authUser = jwt.verify(token, JWT_SECRET()); } catch {}
   }
 
-  let b = await Booking.findOne(bookingFindQuery(req.params.id));
+  const rawId = req.params.id ? decodeURIComponent(req.params.id).trim() : '';
+  let b = await Booking.findOne(bookingFindQuery(rawId));
   let isLong = false;
   if (!b) {
-    const q = mongoose.Types.ObjectId.isValid(req.params.id)
-      ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
-      : { id: req.params.id };
-    b = await LongPujaRequest.findOne(q);
-    isLong = true;
+    b = await LongPujaRequest.findOne(longPujaFindQuery(rawId));
+    if (b) isLong = true;
   }
   if (!b) return res.status(404).json({ error: 'Booking not found' });
 
+  const bEmail = lc(b.userEmail || '').trim();
+  const authEmail = lc((authUser && authUser.email) || '').trim();
+  const qEmail = lc(req.query.userEmail || (req.body && req.body.userEmail) || '').trim();
+
   const isAdmin = authUser && authUser.role === 'admin';
-  const isOwner = authUser && authUser.email && (lc(authUser.email) === lc(b.userEmail));
-  const queryEmail = req.query.userEmail ? lc(req.query.userEmail) : (req.body && req.body.userEmail ? lc(req.body.userEmail) : '');
-  const isQueryOwner = queryEmail && (queryEmail === lc(b.userEmail));
+  const isOwner = authEmail && (authEmail === bEmail || bEmail.includes(authEmail) || authEmail.includes(bEmail));
+  const isQueryOwner = qEmail && (qEmail === bEmail || bEmail.includes(qEmail) || qEmail.includes(bEmail));
 
   if (!isAdmin && !isOwner && !isQueryOwner) {
     return res.status(403).json({ error: 'Not authorized to delete this booking' });

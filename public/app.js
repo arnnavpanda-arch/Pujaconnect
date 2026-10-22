@@ -522,7 +522,9 @@ function appConfirm({
   confirmText = 'Confirm',
   confirmClass = 'btn-gold',
   cancelText = 'Cancel',
-  icon = 'help_outline'
+  icon = 'help_outline',
+  onConfirm = null,
+  onCancel = null
 } = {}) {
   return new Promise((resolve) => {
     openModal(title, `
@@ -538,8 +540,18 @@ function appConfirm({
     `, (m) => {
       const cancelBtn = $('#app-confirm-cancel', m);
       const okBtn = $('#app-confirm-ok', m);
-      if (cancelBtn) cancelBtn.onclick = () => { closeModal(); resolve(false); };
-      if (okBtn) okBtn.onclick = () => { closeModal(); resolve(true); };
+      if (cancelBtn) cancelBtn.onclick = () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+        resolve(false);
+      };
+      if (okBtn) okBtn.onclick = async () => {
+        closeModal();
+        if (typeof onConfirm === 'function') {
+          try { await onConfirm(); } catch (err) { console.error(err); }
+        }
+        resolve(true);
+      };
     });
   });
 }
@@ -4947,8 +4959,8 @@ function renderDevoteeBookingsTab(bookings) {
         }
 
         return `
-        <div class="booking-card" data-action="viewTimeline" data-id="${esc(b.bookingId)}" style="cursor:pointer;${isSlotRejected ? 'border:2px solid #ff9800;background:#fffdf9;box-shadow:0 4px 18px rgba(230,81,0,0.12)' : ''}" title="Click to view live ceremony progress timeline">
-          <div>
+        <div class="booking-card" style="${isSlotRejected ? 'border:2px solid #ff9800;background:#fffdf9;box-shadow:0 4px 18px rgba(230,81,0,0.12)' : ''}">
+          <div data-action="viewTimeline" data-id="${esc(b.bookingId)}" style="cursor:pointer" title="Click to view live ceremony progress timeline">
             <div class="booking-card-top">
               <span class="booking-id-tag">${esc(b.bookingId)}</span>
               ${badgeHtml}
@@ -5034,8 +5046,8 @@ function renderDevoteeBookingsTab(bookings) {
               ${(!['Completed', 'Cancelled', 'Rejected'].includes(effectiveStatus) && !isCompleted) ? `
                 <button class="btn btn-outline dark btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>
               ` : ''}
-              <button class="btn btn-red btn-sm" data-action="deleteBooking" data-id="${esc(b.bookingId)}" title="Delete this booking record">
-                <span class="material-icons" style="font-size:15px;vertical-align:middle">delete</span> Delete
+              <button type="button" class="btn btn-red btn-sm" data-action="deleteBooking" data-id="${esc(b.bookingId)}" onclick="event.stopPropagation()" title="Delete this booking record">
+                <span class="material-icons" style="font-size:15px;vertical-align:middle;pointer-events:none">delete</span> Delete
               </button>
             </div>
           </div>
@@ -5354,11 +5366,16 @@ function renderDevoteeLongTab(longs) {
                 </button>
               ` : ''}
             </div>
-            ${(!isCancelled && !isCompleted) ? `
-              <button class="btn btn-outline dark btn-sm" data-action="cancelLongPuja" data-id="${esc(l.id)}" style="color:#c62828;border-color:#ef9a9a">
-                <span class="material-icons" style="font-size:14px">cancel</span> Cancel Ceremony
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              ${(!isCancelled && !isCompleted) ? `
+                <button type="button" class="btn btn-outline dark btn-sm" data-action="cancelLongPuja" data-id="${esc(l.id)}" onclick="event.stopPropagation()" style="color:#c62828;border-color:#ef9a9a">
+                  <span class="material-icons" style="font-size:14px;pointer-events:none">cancel</span> Cancel Ceremony
+                </button>
+              ` : ''}
+              <button type="button" class="btn btn-red btn-sm" data-action="deleteBooking" data-id="${esc(l.id)}" onclick="event.stopPropagation()" title="Delete this ceremony record">
+                <span class="material-icons" style="font-size:14px;vertical-align:middle;pointer-events:none">delete</span> Delete
               </button>
-            ` : ''}
+            </div>
           </div>
         </div>
         `;
@@ -7854,29 +7871,42 @@ const ACTIONS = {
     if (!bId) return toast('Booking identifier missing', true);
     openDevoteeCancellationModal(bId);
   },
-  deleteBooking: (d) => {
-    const bId = d && d.id;
+  deleteBooking: async (d, el, ev) => {
+    if (ev) {
+      try { ev.stopPropagation(); ev.preventDefault(); } catch {}
+    }
+    const bId = d && (d.id || d.bookingId);
     if (!bId) return toast('Booking identifier missing', true);
-    appConfirm({
+
+    const ok = await appConfirm({
       title: 'Delete Booking Record',
-      message: 'Are you sure you want to delete this booking record? This action cannot be undone.',
-      confirmText: 'Yes, Delete',
-      confirmIcon: 'delete',
+      message: 'Are you sure you want to delete this booking record?',
+      detail: `Ceremony record (${bId}) will be permanently deleted from your dashboard. This action cannot be undone.`,
+      confirmText: 'Yes, Delete Booking',
       confirmClass: 'btn-red',
-      onConfirm: async () => {
-        try {
-          const userEmailParam = S.user && S.user.email ? `?userEmail=${encodeURIComponent(S.user.email)}` : '';
-          await api(`/bookings/${encodeURIComponent(bId)}${userEmailParam}`, { method: 'DELETE' });
-          toast('Booking deleted successfully! 🗑️');
-          if (S.bookings) {
-            S.bookings = S.bookings.filter((x) => x.bookingId !== bId && x._id !== bId && x.id !== bId);
-          }
-          renderDashboard();
-        } catch (e) {
-          toast(e.message || 'Failed to delete booking', true);
-        }
-      }
+      icon: 'delete'
     });
+    if (!ok) return;
+
+    try {
+      const userEmailParam = S.user && S.user.email ? `?userEmail=${encodeURIComponent(S.user.email)}` : '';
+      await api(`/bookings/${encodeURIComponent(bId)}${userEmailParam}`, {
+        method: 'DELETE',
+        body: { userEmail: S.user ? S.user.email : '' }
+      });
+      toast('Booking deleted successfully! 🗑️');
+
+      if (S.bookings && Array.isArray(S.bookings)) {
+        S.bookings = S.bookings.filter((x) => x.bookingId !== bId && x._id !== bId && x.id !== bId);
+      }
+      if (S.longs && Array.isArray(S.longs)) {
+        S.longs = S.longs.filter((x) => x.id !== bId && x._id !== bId && x.bookingId !== bId);
+      }
+
+      await renderDashboard();
+    } catch (e) {
+      toast(e.message || 'Failed to delete booking', true);
+    }
   },
   cancelLongPuja: (d) => {
     const lId = d && d.id;
