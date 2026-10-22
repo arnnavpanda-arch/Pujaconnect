@@ -1515,10 +1515,15 @@ app.delete('/api/bookings/:id', wrap(async (req, res) => {
   const qEmail = lc(req.query.userEmail || (req.body && req.body.userEmail) || '').trim();
 
   const isAdmin = authUser && authUser.role === 'admin';
-  const isOwner = authEmail && (authEmail === bEmail || bEmail.includes(authEmail) || authEmail.includes(bEmail));
-  const isQueryOwner = qEmail && (qEmail === bEmail || bEmail.includes(qEmail) || qEmail.includes(bEmail));
+  const isDevotee = authUser && (authUser.role === 'user' || authUser.role === 'devotee');
+  const isEmailMatch = Boolean(
+    (authEmail && bEmail && (authEmail === bEmail || bEmail.includes(authEmail) || authEmail.includes(bEmail))) ||
+    (qEmail && bEmail && (qEmail === bEmail || bEmail.includes(qEmail) || qEmail.includes(bEmail)))
+  );
+  const isOwner = isDevotee && (!bEmail || isEmailMatch);
+  const isQueryOwner = Boolean(qEmail && (!bEmail || isEmailMatch));
 
-  if (!isAdmin && !isOwner && !isQueryOwner) {
+  if (!isAdmin && !isOwner && !isQueryOwner && !isEmailMatch) {
     return res.status(403).json({ error: 'Not authorized to delete this booking' });
   }
 
@@ -2611,9 +2616,8 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
       : { id: req.params.id };
     const r = await LongPujaRequest.findOne(q);
     if (r) {
-      const isConfirmed = r.status === 'Confirmed' || Object.values(r.panditStatuses || {}).includes('Accepted');
-      if (!isConfirmed) {
-        return res.status(400).json({ error: 'Dakshina payment is accepted only after the assigned Vedic Pandit accepts and confirms your ceremony schedule 🙏' });
+      if (r.status === 'Cancelled' || r.status === 'Rejected' || r.status === 'Declined') {
+        return res.status(400).json({ error: 'Cannot submit Dakshina for a cancelled ceremony request.' });
       }
       r.paymentStatus = 'Under Processing';
       r.paymentProof = String(paymentProof).trim();
@@ -2628,9 +2632,8 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
     return res.status(404).json({ error: 'Booking not found' });
   }
 
-  const isPanditApproved = ['Confirmed', 'In Progress', 'Completed'].includes(b.status) || b.panditApproval === 'Approved';
-  if (!isPanditApproved) {
-    return res.status(400).json({ error: 'Dakshina payment is accepted only after the assigned Pandit confirms your ceremony.' });
+  if (b.status === 'Cancelled' || b.status === 'Rejected' || b.slotUnavailable) {
+    return res.status(400).json({ error: 'Cannot submit Dakshina for a cancelled or rejected ceremony request.' });
   }
 
   // When devotee submits payment, status is 'Under Processing'.
@@ -3650,11 +3653,8 @@ app.post('/api/long-puja-requests/:id/submit-payment', wrap(async (req, res) => 
   const r = await LongPujaRequest.findOne(query);
   if (!r) return res.status(404).json({ error: 'Multi-day ritual request not found' });
 
-  const statuses = r.panditStatuses ? (r.panditStatuses instanceof Map ? Array.from(r.panditStatuses.values()) : Object.values(r.panditStatuses)) : [];
-  const hasAccepted = statuses.some(st => String(st).toLowerCase() === 'accepted');
-  const isConfirmed = r.status === 'Confirmed' || hasAccepted;
-  if (!isConfirmed) {
-    return res.status(400).json({ error: 'Dakshina payment is accepted only after the assigned Vedic Pandit accepts and confirms your ceremony schedule 🙏' });
+  if (r.status === 'Cancelled' || r.status === 'Rejected' || r.status === 'Declined') {
+    return res.status(400).json({ error: 'Cannot submit Dakshina for a cancelled ceremony request.' });
   }
 
   r.paymentStatus = 'Under Processing';

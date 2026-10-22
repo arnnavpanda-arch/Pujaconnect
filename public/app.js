@@ -4216,20 +4216,12 @@ function renderDevoteePaymentTrackingTab(bookings, longs = (S.longs || [])) {
               <span class="material-icons">refresh</span> Repay Dakshina (${inr(cost)})
             </button>
           `;
-        } else if (!isCancelled) {
-          if (isPanditApproved) {
-            actionButton = `
-              <button class="btn btn-gold btn-sm" data-action="payLongPuja" data-id="${esc(l.id)}" style="font-weight:700;box-shadow:0 3px 12px rgba(217,154,25,0.3)">
-                <span class="material-icons">account_balance_wallet</span> Pay Dakshina (${inr(cost)})
-              </button>
-            `;
-          } else {
-            actionButton = `
-              <span class="muted" style="font-size:13px">
-                <span class="material-icons" style="font-size:15px;vertical-align:middle">schedule</span> Awaiting Pandit Confirmation before payment
-              </span>
-            `;
-          }
+        } else if (!isCancelled && !isRejected) {
+          actionButton = `
+            <button type="button" class="btn btn-gold btn-sm" data-action="payLongPuja" data-id="${esc(l.id)}" style="font-weight:700;box-shadow:0 3px 12px rgba(217,154,25,0.3)">
+              <span class="material-icons" style="pointer-events:none">account_balance_wallet</span> Pay Dakshina (${inr(cost)})
+            </button>
+          `;
         }
 
         const assignedPandits = (l.assignedPandits && l.assignedPandits.length) ? l.assignedPandits.join(', ') : 'Vedic Purohit Team';
@@ -4326,20 +4318,12 @@ function renderDevoteePaymentTrackingTab(bookings, longs = (S.longs || [])) {
               <span class="material-icons">refresh</span> Repay Dakshina (${inr(fee)})
             </button>
           `;
-        } else if (b.status !== 'Cancelled') {
-          if (isPanditApproved) {
-            actionButton = `
-              <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
-                <span class="material-icons">account_balance_wallet</span> Pay Dakshina (${inr(fee)})
-              </button>
-            `;
-          } else {
-            actionButton = `
-              <span class="muted" style="font-size:13px">
-                <span class="material-icons" style="font-size:15px;vertical-align:middle">schedule</span> Awaiting Pandit Confirmation before payment
-              </span>
-            `;
-          }
+        } else if (b.status !== 'Cancelled' && !isRejected) {
+          actionButton = `
+            <button type="button" class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
+              <span class="material-icons" style="pointer-events:none">account_balance_wallet</span> Pay Dakshina (${inr(fee)})
+            </button>
+          `;
         }
 
         return `
@@ -5034,19 +5018,17 @@ function renderDevoteeBookingsTab(bookings) {
                 <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}">
                   <span class="material-icons">refresh</span> Repay (${inr(fee)})
                 </button>
-              ` : (!isSlotRejected && (['Confirmed', 'In Progress'].includes(b.status) || b.panditApproval === 'Approved')) ? `
-                <button class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}" style="font-weight:700">
-                  <span class="material-icons">payments</span> Pay Full Dakshina (${inr(fee)})
-                </button>
               ` : (!isSlotRejected && b.status !== 'Cancelled') ? `
-                <span class="badge amber" style="font-size:11px" title="Dakshina payment unlocks once Pandit confirms your ceremony"><span class="material-icons" style="font-size:13px">hourglass_top</span> Pay after Pandit Confirmation</span>
+                <button type="button" class="btn btn-gold btn-sm" data-action="payBooking" data-id="${esc(b.bookingId)}" style="font-weight:700">
+                  <span class="material-icons" style="font-size:15px;vertical-align:middle;pointer-events:none">payments</span> Pay Dakshina (${inr(fee)})
+                </button>
               ` : ''}
             </div>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               ${(!['Completed', 'Cancelled', 'Rejected'].includes(effectiveStatus) && !isCompleted) ? `
-                <button class="btn btn-outline dark btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>
+                <button type="button" class="btn btn-outline dark btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>
               ` : ''}
-              <button type="button" class="btn btn-red btn-sm" data-action="deleteBooking" data-id="${esc(b.bookingId)}" onclick="event.stopPropagation()" title="Delete this booking record">
+              <button type="button" class="btn btn-red btn-sm" data-action="deleteBooking" data-id="${esc(b.bookingId)}" title="Delete this booking record">
                 <span class="material-icons" style="font-size:15px;vertical-align:middle;pointer-events:none">delete</span> Delete
               </button>
             </div>
@@ -5355,24 +5337,24 @@ function renderDevoteeLongTab(longs) {
               <button class="btn btn-outline dark btn-sm" data-action="viewLongTimeline" data-id="${esc(l.id)}" title="View live multi-day ceremony progress timeline">
                 <span class="material-icons" style="font-size:15px;vertical-align:middle">timeline</span> Timeline
               </button>
-              ${(isPanditAccepted && !isPaid && !isVerifying) ? `
-                <button class="btn btn-gold btn-sm" data-action="payLongPuja" data-id="${esc(l.id)}" style="font-weight:700">
-                  <span class="material-icons" style="font-size:14px">payments</span> Pay Dakshina (${inr(cost)})
+              ${(!isPaid && !isVerifying && !isCancelled && !isRejectedByPandit) ? `
+                <button type="button" class="btn btn-gold btn-sm" data-action="payLongPuja" data-id="${esc(l.id)}" style="font-weight:700">
+                  <span class="material-icons" style="font-size:14px;pointer-events:none">payments</span> Pay Dakshina (${inr(cost)})
                 </button>
               ` : ''}
               ${isPaid ? `
-                <button class="btn btn-gold btn-sm" data-action="viewLongBill" data-id="${esc(l.id)}">
-                  <span class="material-icons" style="font-size:14px">receipt_long</span> View Bill
+                <button type="button" class="btn btn-gold btn-sm" data-action="viewLongBill" data-id="${esc(l.id)}">
+                  <span class="material-icons" style="font-size:14px;pointer-events:none">receipt_long</span> View Bill
                 </button>
               ` : ''}
             </div>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               ${(!isCancelled && !isCompleted) ? `
-                <button type="button" class="btn btn-outline dark btn-sm" data-action="cancelLongPuja" data-id="${esc(l.id)}" onclick="event.stopPropagation()" style="color:#c62828;border-color:#ef9a9a">
+                <button type="button" class="btn btn-outline dark btn-sm" data-action="cancelLongPuja" data-id="${esc(l.id)}" style="color:#c62828;border-color:#ef9a9a">
                   <span class="material-icons" style="font-size:14px;pointer-events:none">cancel</span> Cancel Ceremony
                 </button>
               ` : ''}
-              <button type="button" class="btn btn-red btn-sm" data-action="deleteBooking" data-id="${esc(l.id)}" onclick="event.stopPropagation()" title="Delete this ceremony record">
+              <button type="button" class="btn btn-red btn-sm" data-action="deleteBooking" data-id="${esc(l.id)}" title="Delete this ceremony record">
                 <span class="material-icons" style="font-size:14px;vertical-align:middle;pointer-events:none">delete</span> Delete
               </button>
             </div>
@@ -8408,11 +8390,8 @@ const ACTIONS = {
       }
       if (!l) return toast('Multi-day ceremony record not found for ' + lId, true);
 
-      const isPanditAccepted = l.status === 'Confirmed' ||
-        (l.panditStatuses && Object.values(l.panditStatuses).some((st) => String(st).toLowerCase() === 'accepted'));
-
-      if (!isPanditAccepted) {
-        return toast('Dakshina payment is accepted only after the assigned Vedic Pandit accepts and confirms your ceremony schedule 🙏', true);
+      if (l.status === 'Cancelled' || ['Rejected', 'Declined'].includes(l.status)) {
+        return toast('Cannot pay Dakshina for a cancelled or declined ceremony.', true);
       }
 
       // Fetch centralized Platform Bank Details (managed exclusively by Admin)
@@ -8578,9 +8557,8 @@ const ACTIONS = {
       }
       if (!b) return toast('Booking record not found for ' + bId, true);
 
-      const isPanditApproved = ['Confirmed', 'In Progress', 'Completed'].includes(b.status) || b.panditApproval === 'Approved';
-      if (!isPanditApproved) {
-        return toast('Dakshina payment is accepted only after your ceremony is confirmed by the assigned Pandit 🙏', true);
+      if (b.status === 'Cancelled' || isBookingRejected(b)) {
+        return toast('Cannot pay Dakshina for a cancelled or rejected ceremony.', true);
       }
 
       // Fetch centralized Platform Bank Details (managed exclusively by Admin)
