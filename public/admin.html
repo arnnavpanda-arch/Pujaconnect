@@ -72,37 +72,111 @@
       box-shadow: 0 0 8px currentColor;
     }
     
-    .main-admin { max-width: 1240px; margin: 24px auto; padding: 0 20px 80px; }
+    .main-admin { max-width: 1440px; margin: 20px auto; padding: 0 18px 80px; }
 
-    /* Admin Tab Navigation */
+    /* Admin 2-Column Responsive Layout: Left Sidebar Buttons, Right Content */
+    .admin-layout-wrapper {
+      display: flex;
+      gap: 22px;
+      align-items: flex-start;
+      margin-top: 20px;
+      width: 100%;
+      position: relative;
+    }
+    
+    .admin-sidebar {
+      width: 290px;
+      min-width: 290px;
+      background: #ffffff;
+      border: 1.5px solid var(--admin-border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 4px 20px rgba(53, 22, 5, 0.05);
+      position: sticky;
+      top: 80px;
+      max-height: calc(100vh - 100px);
+      overflow-y: auto;
+      z-index: 30;
+      box-sizing: border-box;
+      flex-shrink: 0;
+    }
+    .admin-sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1.5px solid var(--admin-border);
+    }
+    .admin-sidebar-header h4 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--admin-dark);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .admin-sidebar-close {
+      display: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--admin-dark);
+      padding: 4px;
+    }
+
+    /* Left-side Vertical Tab Navigation */
     .admin-tabs {
       display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      padding-bottom: 6px;
-      margin-bottom: 24px;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+      padding: 0;
+      margin: 0;
     }
     .admin-tab {
-      display: inline-flex;
+      display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 18px;
-      border-radius: 12px;
-      background: #fff;
-      border: 1px solid var(--admin-border);
+      gap: 10px;
+      padding: 11px 14px;
+      border-radius: 10px;
+      background: #ffffff;
+      border: 1px solid transparent;
       color: #4a2814;
       font-weight: 600;
       font-size: 13.5px;
       cursor: pointer;
-      white-space: nowrap;
+      width: 100%;
+      text-align: left;
       transition: all 0.2s ease;
+      box-sizing: border-box;
     }
-    .admin-tab:hover { background: #fffcf5; border-color: var(--admin-gold); }
+    .admin-tab .material-icons {
+      font-size: 19px;
+      color: var(--admin-gold);
+      flex-shrink: 0;
+    }
+    .admin-tab-label {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .admin-tab:hover {
+      background: #fff8eb;
+      border-color: var(--admin-gold);
+      color: #2e1305;
+      transform: translateX(2px);
+    }
     .admin-tab.active {
-      background: var(--admin-dark);
+      background: linear-gradient(135deg, #2b1103 0%, #451b07 100%);
       color: #ffd88a;
-      border-color: var(--admin-dark);
+      border-color: var(--admin-gold);
       box-shadow: 0 4px 14px rgba(34, 14, 3, 0.2);
+    }
+    .admin-tab.active .material-icons {
+      color: #ffd88a;
     }
     .admin-tab-pill {
       background: #e65100;
@@ -111,8 +185,79 @@
       font-weight: 700;
       padding: 2px 7px;
       border-radius: 10px;
+      margin-left: auto;
+      flex-shrink: 0;
     }
     .admin-tab-pill.green { background: #2e7d32; }
+
+    /* Right-side Data Content Area */
+    .admin-main-content {
+      flex: 1;
+      min-width: 0;
+      width: 100%;
+    }
+
+    /* Mobile Quick Navigation Bar */
+    .admin-mobile-bar {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      background: #ffffff;
+      border: 1.5px solid var(--admin-gold);
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    }
+    .admin-mobile-active-tab {
+      font-weight: 700;
+      color: var(--admin-dark);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    @media (max-width: 960px) {
+      .main-admin { padding: 0 12px 80px; margin: 12px auto; }
+      .admin-mobile-bar { display: flex; }
+      .admin-layout-wrapper {
+        flex-direction: column;
+        gap: 14px;
+      }
+      .admin-sidebar {
+        width: 100%;
+        min-width: 100%;
+        position: fixed;
+        top: 0;
+        left: -100%;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
+        z-index: 999;
+        transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 4px 0 24px rgba(0,0,0,0.3);
+      }
+      .admin-sidebar.open {
+        left: 0;
+      }
+      .admin-sidebar-close {
+        display: block;
+      }
+      .admin-sidebar-backdrop {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 998;
+      }
+      .admin-sidebar-backdrop.active {
+        display: block;
+      }
+    }
 
     /* Modern Admin KPI Stat Cards */
     .admin-stats-grid {
@@ -333,45 +478,88 @@
       </button>
     </div>
 
-    <!-- Subtabs -->
-    <div class="admin-tabs">
-      <button class="admin-tab" data-tab="settings" onclick="switchAdminTab('settings')" style="border:2px solid var(--admin-gold);background:#fff9eb;color:#8d2800;font-weight:700">
-        <span class="material-icons" style="color:var(--admin-gold)">settings</span> <b>System Settings</b>
-      </button>
-      <button class="admin-tab active" data-tab="bookings" onclick="switchAdminTab('bookings')">
-        <span class="material-icons">event_available</span> Bookings &amp; Assignments <span id="badge-bookings-count" class="admin-tab-pill">0</span>
-      </button>
-      <button class="admin-tab" data-tab="kyc" onclick="switchAdminTab('kyc')">
-        <span class="material-icons">verified_user</span> KYC Queue <span id="badge-kyc-count" class="admin-tab-pill">0</span>
-      </button>
-      <button class="admin-tab" data-tab="pandits" onclick="switchAdminTab('pandits')">
-        <span class="material-icons">badge</span> Pandits Directory &amp; Rates
-      </button>
-      <button class="admin-tab" data-tab="pujas" onclick="switchAdminTab('pujas')">
-        <span class="material-icons">spa</span> Puja Catalog
-      </button>
-      <button class="admin-tab" data-tab="longs" onclick="switchAdminTab('longs')">
-        <span class="material-icons">event_note</span> Multi-Day Requests <span id="badge-long-count" class="admin-tab-pill">0</span>
-      </button>
-      <button class="admin-tab" data-tab="payments" onclick="switchAdminTab('payments')">
-        <span class="material-icons">payments</span> Payment Verifications <span id="badge-payments-count" class="admin-tab-pill">0</span>
-      </button>
-      <button class="admin-tab" data-tab="pandit-payouts" onclick="switchAdminTab('pandit-payouts')">
-        <span class="material-icons">account_balance_wallet</span> Pandit Payment <span id="badge-pandit-payouts-count" class="admin-tab-pill">0</span>
-      </button>
-      <button class="admin-tab" data-tab="platform-bank" onclick="switchAdminTab('platform-bank')">
-        <span class="material-icons">account_balance</span> Platform Bank &amp; UPI
-      </button>
-      <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">
-        <span class="material-icons">group</span> Devotees
-      </button>
-      <button class="admin-tab" data-tab="media" onclick="switchAdminTab('media')">
-        <span class="material-icons">campaign</span> Media &amp; Offers <span id="badge-media-count" class="admin-tab-pill">0</span>
+    <!-- Mobile Navigation Toggle Bar -->
+    <div class="admin-mobile-bar">
+      <div class="admin-mobile-active-tab">
+        <span class="material-icons" style="color:var(--admin-gold)">dashboard</span>
+        <span id="admin-mobile-active-name">Bookings &amp; Assignments</span>
+      </div>
+      <button type="button" class="btn btn-gold btn-sm" id="btn-toggle-admin-menu" style="display:inline-flex;align-items:center;gap:6px;font-weight:700">
+        <span class="material-icons">menu</span> Sections Menu
       </button>
     </div>
 
-    <div id="admin-view-root">
-      <div class="empty">Loading Super Admin Dashboard…</div>
+    <div class="admin-sidebar-backdrop" id="admin-sidebar-backdrop"></div>
+
+    <div class="admin-layout-wrapper">
+      <!-- Left-side Navigation Sidebar with All Buttons -->
+      <aside class="admin-sidebar" id="admin-sidebar">
+        <div class="admin-sidebar-header">
+          <h4><span class="material-icons" style="color:var(--admin-gold);font-size:18px">admin_panel_settings</span> Admin Sections</h4>
+          <button type="button" class="admin-sidebar-close" id="btn-close-admin-sidebar" aria-label="Close menu">
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <div class="admin-tabs">
+          <button class="admin-tab" data-tab="settings" onclick="switchAdminTab('settings')">
+            <span class="material-icons">settings</span>
+            <span class="admin-tab-label">System Settings</span>
+          </button>
+          <button class="admin-tab active" data-tab="bookings" onclick="switchAdminTab('bookings')">
+            <span class="material-icons">event_available</span>
+            <span class="admin-tab-label">Bookings &amp; Assignments</span>
+            <span id="badge-bookings-count" class="admin-tab-pill">0</span>
+          </button>
+          <button class="admin-tab" data-tab="kyc" onclick="switchAdminTab('kyc')">
+            <span class="material-icons">verified_user</span>
+            <span class="admin-tab-label">KYC Queue</span>
+            <span id="badge-kyc-count" class="admin-tab-pill">0</span>
+          </button>
+          <button class="admin-tab" data-tab="pandits" onclick="switchAdminTab('pandits')">
+            <span class="material-icons">badge</span>
+            <span class="admin-tab-label">Pandits Directory</span>
+          </button>
+          <button class="admin-tab" data-tab="pujas" onclick="switchAdminTab('pujas')">
+            <span class="material-icons">spa</span>
+            <span class="admin-tab-label">Puja Catalog</span>
+          </button>
+          <button class="admin-tab" data-tab="longs" onclick="switchAdminTab('longs')">
+            <span class="material-icons">event_note</span>
+            <span class="admin-tab-label">Multi-Day Requests</span>
+            <span id="badge-long-count" class="admin-tab-pill">0</span>
+          </button>
+          <button class="admin-tab" data-tab="payments" onclick="switchAdminTab('payments')">
+            <span class="material-icons">payments</span>
+            <span class="admin-tab-label">Payment Verifications</span>
+            <span id="badge-payments-count" class="admin-tab-pill">0</span>
+          </button>
+          <button class="admin-tab" data-tab="pandit-payouts" onclick="switchAdminTab('pandit-payouts')">
+            <span class="material-icons">account_balance_wallet</span>
+            <span class="admin-tab-label">Pandit Payment</span>
+            <span id="badge-pandit-payouts-count" class="admin-tab-pill">0</span>
+          </button>
+          <button class="admin-tab" data-tab="platform-bank" onclick="switchAdminTab('platform-bank')">
+            <span class="material-icons">account_balance</span>
+            <span class="admin-tab-label">Platform Bank &amp; UPI</span>
+          </button>
+          <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">
+            <span class="material-icons">group</span>
+            <span class="admin-tab-label">Devotees</span>
+          </button>
+          <button class="admin-tab" data-tab="media" onclick="switchAdminTab('media')">
+            <span class="material-icons">campaign</span>
+            <span class="admin-tab-label">Media &amp; Offers</span>
+            <span id="badge-media-count" class="admin-tab-pill">0</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Right-side All Data Content View -->
+      <section class="admin-main-content">
+        <div id="admin-view-root">
+          <div class="empty">Loading Super Admin Dashboard…</div>
+        </div>
+      </section>
     </div>
   </main>
 
@@ -854,9 +1042,33 @@
       `;
     }
 
+    function openAdminSidebar() {
+      const sidebar = document.getElementById('admin-sidebar');
+      const backdrop = document.getElementById('admin-sidebar-backdrop');
+      if (sidebar) sidebar.classList.add('open');
+      if (backdrop) backdrop.classList.add('active');
+    }
+
+    function closeAdminSidebar() {
+      const sidebar = document.getElementById('admin-sidebar');
+      const backdrop = document.getElementById('admin-sidebar-backdrop');
+      if (sidebar) sidebar.classList.remove('open');
+      if (backdrop) backdrop.classList.remove('active');
+    }
+
     function switchAdminTab(tab) {
       CURRENT_TAB = tab;
       document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+      
+      const activeEl = document.querySelector(`.admin-tab[data-tab="${tab}"]`);
+      const mobileNameEl = document.getElementById('admin-mobile-active-name');
+      if (mobileNameEl && activeEl) {
+        const label = activeEl.querySelector('.admin-tab-label');
+        mobileNameEl.textContent = label ? label.textContent : tab;
+      }
+
+      closeAdminSidebar();
+
       if (location.hash !== '#' + tab) {
         history.replaceState(null, '', '#' + tab);
       }
@@ -6247,6 +6459,13 @@
       } catch (e) {
         console.warn('Direct admin auth notice:', e.message);
       }
+
+      const toggleBtn = document.getElementById('btn-toggle-admin-menu');
+      if (toggleBtn) toggleBtn.onclick = openAdminSidebar;
+      const closeBtn = document.getElementById('btn-close-admin-sidebar');
+      if (closeBtn) closeBtn.onclick = closeAdminSidebar;
+      const backdrop = document.getElementById('admin-sidebar-backdrop');
+      if (backdrop) backdrop.onclick = closeAdminSidebar;
 
       await loadData();
 

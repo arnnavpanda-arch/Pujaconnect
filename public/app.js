@@ -630,7 +630,12 @@ function showView(name) {
   window.scrollTo({ top: 0 });
   if (name === 'home') renderHomePandits();
   if (name === 'pandits') renderPandits();
-  if (name === 'pujas') renderPujas();
+  if (name === 'pujas') {
+    if (!S.exploreDistrict || S.exploreDistrict === 'ALL') {
+      S.exploreDistrict = (S.user && S.user.district) || 'Khordha';
+    }
+    renderPujas();
+  }
   if (name === 'long') renderLongForm();
   if (name === 'dashboard') renderDashboard();
   if (name === 'puja-prices') renderPujaPriceConfig();
@@ -2818,13 +2823,33 @@ function afterAuth(r) {
   saveSession(r.user, r.token);
   closeModal();
   toast('Namaste, ' + r.user.name + ' 🙏');
-  const next = S.afterLogin;
-  S.afterLogin = null;
-  if (next) {
-    next();
-  } else {
-    showView('dashboard');
+
+  // Reset popup dismissal flag so if an offer or announcement is active, it pops up after login every time
+  if (r.user) {
+    const userKey = (r.user.email || 'guest').toLowerCase();
+    sessionStorage.removeItem('pc_media_popup_dismissed_' + userKey);
   }
+
+  const proceedToDashboard = () => {
+    const next = S.afterLogin;
+    S.afterLogin = null;
+    if (next) {
+      next();
+    } else {
+      showView('dashboard');
+    }
+    // After logo popup finishes or is skipped, immediately show the active offer / announcement popup
+    setTimeout(() => {
+      checkAndShowMediaPopup(true);
+    }, 250);
+  };
+
+  // Show full-page brand logo splash (3s on login)
+  showLogoSplash({
+    durationSec: 3,
+    title: `Welcome, ${r.user.name || 'Devotee'} 🙏`,
+    onFinish: proceedToDashboard
+  });
 }
 
 /* ---------- pandit registration ---------- */
@@ -5005,13 +5030,13 @@ function renderDevoteeBookingsTab(bookings) {
                 <span class="badge amber" style="font-size:11px" title="Dakshina payment unlocks once Pandit confirms your ceremony"><span class="material-icons" style="font-size:13px">hourglass_top</span> Pay after Pandit Confirmation</span>
               ` : ''}
             </div>
-            <div style="display:flex;gap:6px">
-              ${(['Confirmed', 'In Progress'].includes(effectiveStatus) && !isCompleted) ? `
-                <button class="btn btn-outline dark btn-sm" data-action="reschedule" data-id="${esc(b.bookingId)}">Reschedule</button>
-              ` : ''}
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               ${(!['Completed', 'Cancelled', 'Rejected'].includes(effectiveStatus) && !isCompleted) ? `
-                <button class="btn btn-red btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>
+                <button class="btn btn-outline dark btn-sm" data-action="cancelBooking" data-id="${esc(b.bookingId)}">Cancel</button>
               ` : ''}
+              <button class="btn btn-red btn-sm" data-action="deleteBooking" data-id="${esc(b.bookingId)}" title="Delete this booking record">
+                <span class="material-icons" style="font-size:15px;vertical-align:middle">delete</span> Delete
+              </button>
             </div>
           </div>
         </div>
@@ -5024,22 +5049,46 @@ function renderDevoteeBookingsTab(bookings) {
 function renderDevoteeExploreTab() {
   const shortPujas = S.pujas.filter((p) => p.type === 'Short');
   const longPujas = S.pujas.filter((p) => p.type === 'Long');
+  const userDist = (S.user && S.user.district) || 'Khordha';
+  const userState = (S.user && S.user.state) || 'Odisha';
+
   return `
     <div class="panel" style="margin-bottom:20px">
       <div class="row" style="flex-wrap:wrap;gap:12px">
         <div>
           <h3 style="margin:0"><span class="material-icons" style="vertical-align:middle;color:var(--ochre)">spa</span> Explore Sacred Vedic Pujas</h3>
-          <p class="muted" style="margin:4px 0 0">Browse through authentic home rituals and multi-day ceremonies conducted by verified Pandits.</p>
+          <p class="muted" style="margin:4px 0 0">Official Admin-set Dakshina rates applicable for your registered district (<b>${esc(userDist)}, ${esc(userState)}</b>).</p>
         </div>
         <button class="btn btn-gold btn-sm" data-action="bookCta"><span class="material-icons">person_search</span> Find a Pandit</button>
       </div>
     </div>
 
     <h3 style="margin:24px 0 14px;color:var(--mahogany);display:flex;align-items:center;gap:8px">
-      <span class="material-icons" style="color:var(--ochre)">home</span> Popular Home Pujas
+      <span class="material-icons" style="color:var(--ochre)">home</span> Popular Home Pujas in ${esc(userDist)}
     </h3>
     <div class="grid" style="margin-bottom:32px">
-      ${shortPujas.map((p) => `
+      ${shortPujas.map((p) => {
+        const { distMap } = getPujaDistrictPricingMap(p);
+        let dakshinaHtml = '';
+        if (distMap[userDist] && distMap[userDist].length > 0) {
+          const prices = distMap[userDist].map((x) => x.price);
+          const minP = Math.min(...prices);
+          const maxP = Math.max(...prices);
+          const offer = typeof findActiveOffer === 'function' ? findActiveOffer({ service: p.name, district: userDist, state: userState }) : null;
+          if (offer) {
+            const discMin = Math.max(0, minP - Math.round((minP * offer.discountPercent) / 100));
+            const discMax = Math.max(0, maxP - Math.round((maxP * offer.discountPercent) / 100));
+            const discText = discMin === discMax ? inr(discMin) : `${inr(discMin)} – ${inr(discMax)}`;
+            const origText = minP === maxP ? inr(minP) : `${inr(minP)} – ${inr(maxP)}`;
+            dakshinaHtml = `<span style="color:#2e7d32;font-weight:800">${discText}</span> <span style="text-decoration:line-through;color:var(--muted);font-size:12px">${origText}</span> <span class="badge green" style="font-size:10px;padding:2px 6px">${offer.discountPercent}% OFF</span>`;
+          } else {
+            dakshinaHtml = minP === maxP ? inr(minP) : `${inr(minP)} – ${inr(maxP)}`;
+          }
+        } else {
+          dakshinaHtml = inr(p.baseFee || 1199);
+        }
+
+        return `
         <div class="card">
           <div class="thumb" style="background-image:url('${esc(p.image)}')"></div>
           <div class="body">
@@ -5047,35 +5096,50 @@ function renderDevoteeExploreTab() {
             <p class="muted" style="margin:0 0 8px;font-size:13.5px">${esc(p.desc)}</p>
             <div>${(p.benefits || []).map((b) => `<span class="badge">✦ ${esc(b)}</span>`).join('')}</div>
             <div class="row" style="margin-top:14px;gap:6px;flex-wrap:wrap">
-              <span class="price">${inr(p.baseFee)}</span>
+              <span class="price">${dakshinaHtml} <small class="muted" style="font-weight:400;font-size:11.5px">in ${esc(userDist)}</small></span>
               <div style="display:flex;gap:6px">
-                <button class="btn btn-gold btn-sm" data-action="bookDirectPuja" data-name="${esc(p.name)}">Book Puja</button>
-                <button class="btn btn-outline dark btn-sm" data-action="findFor" data-name="${esc(p.name)}">Pandits</button>
+                <button class="btn btn-gold btn-sm" data-action="bookDirectPujaWithDistrict" data-name="${esc(p.name)}" data-district="${esc(userDist)}">Book Puja</button>
+                <button class="btn btn-outline dark btn-sm" data-action="findForInDistrict" data-name="${esc(p.name)}" data-district="${esc(userDist)}">Pandits</button>
               </div>
             </div>
           </div>
         </div>
-      `).join('')}
+        `;
+      }).join('')}
     </div>
 
     <h3 style="margin:24px 0 14px;color:var(--mahogany);display:flex;align-items:center;gap:8px">
-      <span class="material-icons" style="color:var(--ochre)">auto_stories</span> Multi-Day Mahayajnas
+      <span class="material-icons" style="color:var(--ochre)">auto_stories</span> Multi-Day Mahayajnas in ${esc(userDist)}
     </h3>
     <div class="grid">
-      ${longPujas.map((p) => `
+      ${longPujas.map((p) => {
+        const { distMap } = getPujaDistrictPricingMap(p);
+        let dailyText = '';
+        if (distMap[userDist] && distMap[userDist].length > 0) {
+          const dPrices = distMap[userDist].map((x) => x.price);
+          const minD = Math.min(...dPrices);
+          const maxD = Math.max(...dPrices);
+          dailyText = (minD === maxD ? inr(minD) : `${inr(minD)} – ${inr(maxD)}`) + ' / day';
+        } else {
+          const baseDaily = p.perHourFee ? p.perHourFee * 4 : 2400;
+          dailyText = `${inr(baseDaily)} / day`;
+        }
+
+        return `
         <div class="card">
           <div class="thumb" style="background-image:url('${esc(p.image)}')"></div>
           <div class="body">
             <h3>${esc(p.name)}</h3>
             <p class="muted" style="margin:0 0 8px;font-size:13.5px">${esc(p.desc)}</p>
             <div>${(p.benefits || []).map((b) => `<span class="badge">✦ ${esc(b)}</span>`).join('')}</div>
-            <div class="row" style="margin-top:14px">
-              <span class="price">${esc(p.price || 'From ' + inr(p.perHourFee) + '/hr')}</span>
-              <button class="btn btn-gold btn-sm" data-action="planLong" data-name="${esc(p.name)}">Customize</button>
+            <div class="row" style="margin-top:14px;gap:6px;flex-wrap:wrap">
+              <span class="price">${dailyText} <small class="muted" style="font-weight:400;font-size:11.5px">in ${esc(userDist)}</small></span>
+              <button class="btn btn-gold btn-sm" data-action="bookLongPujaWithDistrict" data-name="${esc(p.name)}" data-district="${esc(userDist)}">Book Multi-Day</button>
             </div>
           </div>
         </div>
-      `).join('')}
+        `;
+      }).join('')}
     </div>
   `;
 }
@@ -6819,156 +6883,218 @@ async function adminDash(root) {
     <!-- Admin KPI Cards -->
     <div class="stats">${[['Devotees', stats.users], ['Pandits', stats.pandits], ['Verified', stats.verifiedPandits], ['Pending KYC', stats.pendingPandits], ['Bookings', stats.bookings], ['Completed', stats.completed], ['Booked Dakshina', inr(stats.revenue)], ['Multi-day (pending)', `${stats.pendingLong}/${stats.longRequests}`]].map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('')}</div>
 
-    <!-- Official Platform System Settings Panel (Spacious & Completely Uncompacted) -->
-    <div class="panel" id="admin-system-settings-panel" style="border:2px solid var(--ochre, #d99a19);background:#fffdf9;box-shadow:0 6px 24px rgba(217,154,25,0.08);margin-bottom:26px;padding:24px 26px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:20px;padding-bottom:16px;border-bottom:1.5px solid #ebd9c2">
-        <div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <span class="material-icons" style="color:var(--ochre, #d99a19);font-size:28px">settings</span>
-            <h3 style="margin:0;color:#2e1305;font-size:22px;font-weight:800;font-family:Georgia,serif">Platform System Settings &amp; Brand Identity</h3>
-            <span class="badge green" style="font-size:11px">Live &amp; Centralized</span>
-          </div>
-          <p class="muted" style="margin:6px 0 0;font-size:13.5px;max-width:860px;line-height:1.5">
-            Manage the official PujaConnect contact helpline, official brand logo (with live Desktop/PC &amp; Mobile previews and file upload), and registered central headquarters office address. Changes update immediately across all devotee &amp; pandit portals and public pages without restarting the server.
-          </p>
+    <div class="admin-spa-layout">
+      <!-- Left-side Admin Navigation Sidebar -->
+      <aside class="admin-spa-sidebar">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;padding:4px 8px;margin-bottom:4px">
+          Admin Sections
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button type="button" class="btn btn-outline dark btn-sm" id="dash-btn-test-splash" style="font-weight:600">
-            <span class="material-icons" style="font-size:15px;vertical-align:middle">visibility</span> Test Welcome Splash
-          </button>
-          <a href="/admin#settings" target="_blank" class="btn btn-outline dark btn-sm" style="font-weight:600;text-decoration:none">
-            <span class="material-icons" style="font-size:15px;vertical-align:middle">open_in_new</span> Open in Executive Portal
-          </a>
-        </div>
-      </div>
+        <button type="button" class="admin-spa-tab-btn active" data-admtab="settings">
+          <span class="material-icons">settings</span> System Settings
+        </button>
+        <button type="button" class="admin-spa-tab-btn" data-admtab="kyc">
+          <span class="material-icons">verified_user</span> Pandit KYC ${pend.length ? `<span class="badge red" style="margin-left:auto">${pend.length}</span>` : ''}
+        </button>
+        <button type="button" class="admin-spa-tab-btn" data-admtab="longs">
+          <span class="material-icons">event_note</span> Multi-Day Requests ${longs.length ? `<span class="badge amber" style="margin-left:auto">${longs.length}</span>` : ''}
+        </button>
+        <button type="button" class="admin-spa-tab-btn" data-admtab="pujas">
+          <span class="material-icons">spa</span> Service Catalog
+        </button>
+        <button type="button" class="admin-spa-tab-btn" data-admtab="pandits">
+          <span class="material-icons">badge</span> All Pandits (${pandits.length})
+        </button>
+        <button type="button" class="admin-spa-tab-btn" data-admtab="users">
+          <span class="material-icons">group</span> Devotees (${users.length})
+        </button>
+        <a href="/admin" target="_blank" class="admin-spa-tab-btn" style="text-decoration:none;color:#ffd88a;background:linear-gradient(135deg, #2b1103 0%, #451b07 100%);margin-top:12px;font-weight:700">
+          <span class="material-icons">open_in_new</span> Executive Portal
+        </a>
+      </aside>
 
-      <!-- Settings Fields: Spacious & Completely Uncompacted -->
-      <div style="display:flex;flex-direction:column;gap:22px">
-        <!-- 1. Official Helpline -->
-        <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-            <span class="material-icons" style="color:#d99a19;font-size:22px">phone_in_talk</span>
-            <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Official Contact Number / Helpline *</label>
-          </div>
-          <p class="muted" style="font-size:12.5px;margin:0 0 10px">
-            Priority devotee assistance line and Purohit coordination desk. Renders with one-tap click-to-call on all public footers, booking slips, and user dashboards.
-          </p>
-          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-            <input type="text" id="dash-sys-contact" value="${esc(currContact)}" placeholder="+91 94370 12345" style="font-size:15px;font-weight:600;max-width:360px;flex:1;padding:10px 14px">
-            <span class="badge" style="background:#e8f5e9;border:1px solid #c8e6c9;color:#1b5e20;padding:8px 14px;font-size:12px;display:inline-flex;align-items:center;gap:6px">
-              <span class="material-icons" style="font-size:15px">call</span> Click-to-call active
-            </span>
-          </div>
-        </div>
-
-        <!-- 2. Official Logo Image Configuration -->
-        <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span class="material-icons" style="color:#d99a19;font-size:22px">photo_library</span>
-              <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Official Platform Brand Logo *</label>
-            </div>
-            <span class="muted" style="font-size:12px">Supports PNG, JPG, WebP, SVG, and Data URLs</span>
-          </div>
-          <p class="muted" style="font-size:12.5px;margin:0 0 14px">
-            Upload your official brand logo image file from your PC or mobile. This logo appears in the full-page welcome splash (4s on initial visit, 3s on login) and on the footers of the public site, devotee dashboard, and pandit portal.
-          </p>
-
-          <!-- Upload and Input Controls -->
-          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
-            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-              <input type="file" id="dash-sys-logo-file" accept="image/*" style="display:none">
-              <button type="button" class="btn btn-gold btn-sm" id="dash-btn-choose-logo-file" style="padding:9px 16px;font-weight:700">
-                <span class="material-icons" style="font-size:16px;vertical-align:middle">upload_file</span> Choose Logo from Device (PC/Mobile)
-              </button>
-              <button type="button" class="btn btn-outline dark btn-sm" id="dash-btn-reset-default-logo" style="padding:9px 14px">
-                <span class="material-icons" style="font-size:15px;vertical-align:middle">restart_alt</span> Reset to Default Golden Emblem
-              </button>
-              <span id="dash-sys-logo-filename" class="muted" style="font-size:12.5px;font-weight:600"></span>
-            </div>
-            <div>
-              <label style="font-size:12px;font-weight:600;color:#634330">Or Direct Image URL / Base64 Data URL:</label>
-              <input type="text" id="dash-sys-logo-url" value="${esc(currLogo)}" placeholder="Paste direct image URL or upload image file above" style="font-size:13px;margin-top:4px;padding:9px 12px">
-            </div>
-          </div>
-
-          <!-- Dual Responsive Preview: PC View vs Mobile View (Spacious & Uncompacted) -->
-          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;margin-top:14px">
-            <!-- PC / Desktop Preview Box -->
-            <div style="background:#1d0b03;border:1.5px solid #d99a19;border-radius:10px;padding:16px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,0.25)">
-              <div style="display:flex;align-items:center;justify-content:center;gap:6px;color:#ffd88a;font-size:12px;font-weight:700;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">
-                <span class="material-icons" style="font-size:16px">laptop_mac</span> PC / Desktop View
+      <!-- Right-side Admin Content Panels -->
+      <section class="admin-spa-content">
+        <!-- 1. System Settings -->
+        <div id="admin-sec-settings" class="admin-sec-panel">
+          <div class="panel" id="admin-system-settings-panel" style="border:2px solid var(--ochre, #d99a19);background:#fffdf9;box-shadow:0 6px 24px rgba(217,154,25,0.08);margin-bottom:26px;padding:24px 26px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:20px;padding-bottom:16px;border-bottom:1.5px solid #ebd9c2">
+              <div>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="material-icons" style="color:var(--ochre, #d99a19);font-size:28px">settings</span>
+                  <h3 style="margin:0;color:#2e1305;font-size:22px;font-weight:800;font-family:Georgia,serif">Platform System Settings &amp; Brand Identity</h3>
+                  <span class="badge green" style="font-size:11px">Live &amp; Centralized</span>
+                </div>
+                <p class="muted" style="margin:6px 0 0;font-size:13.5px;max-width:860px;line-height:1.5">
+                  Manage the official PujaConnect contact helpline, official brand logo (with live Desktop/PC &amp; Mobile previews and file upload), and registered central headquarters office address. Changes update immediately across all devotee &amp; pandit portals and public pages without restarting the server.
+                </p>
               </div>
-              <div style="min-height:160px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);border-radius:8px;padding:12px;border:1px dashed rgba(255,216,138,0.3)">
-                <div id="dash-preview-pc-wrap" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px">
-                  <img id="dash-preview-pc-img" src="${esc(currLogo || '')}" alt="PC Logo Preview" style="${currLogo ? 'max-width:280px;max-height:140px;object-fit:contain;border-radius:8px;' : 'display:none;'}">
-                  <div id="dash-preview-pc-placeholder" style="${currLogo ? 'display:none;' : 'display:flex;flex-direction:column;align-items:center;gap:6px;'}">
-                    <span style="font-size:54px;color:#f5b942;line-height:1">ॐ</span>
-                    <span style="font-size:20px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
-                    <span style="font-size:11px;color:#d99a19;letter-spacing:1px">VEDIC RITUALS &amp; CERTIFIED ACHARYAS</span>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button type="button" class="btn btn-outline dark btn-sm" id="dash-btn-test-splash" style="font-weight:600">
+                  <span class="material-icons" style="font-size:15px;vertical-align:middle">visibility</span> Test Welcome Splash
+                </button>
+                <a href="/admin#settings" target="_blank" class="btn btn-outline dark btn-sm" style="font-weight:600;text-decoration:none">
+                  <span class="material-icons" style="font-size:15px;vertical-align:middle">open_in_new</span> Open in Executive Portal
+                </a>
+              </div>
+            </div>
+
+            <!-- Settings Fields: Spacious & Completely Uncompacted -->
+            <div style="display:flex;flex-direction:column;gap:22px">
+              <!-- 1. Official Helpline -->
+              <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+                  <span class="material-icons" style="color:#d99a19;font-size:22px">phone_in_talk</span>
+                  <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Official Contact Number / Helpline *</label>
+                </div>
+                <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                  Priority devotee assistance line and Purohit coordination desk. Renders with one-tap click-to-call on all public footers, booking slips, and user dashboards.
+                </p>
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                  <input type="text" id="dash-sys-contact" value="${esc(currContact)}" placeholder="+91 94370 12345" style="font-size:15px;font-weight:600;max-width:360px;flex:1;padding:10px 14px">
+                  <span class="badge" style="background:#e8f5e9;border:1px solid #c8e6c9;color:#1b5e20;padding:8px 14px;font-size:12px;display:inline-flex;align-items:center;gap:6px">
+                    <span class="material-icons" style="font-size:15px">call</span> Click-to-call active
+                  </span>
+                </div>
+              </div>
+
+              <!-- 2. Official Logo Image Configuration -->
+              <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <span class="material-icons" style="color:#d99a19;font-size:22px">photo_library</span>
+                    <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Official Platform Brand Logo *</label>
+                  </div>
+                  <span class="muted" style="font-size:12px">Supports PNG, JPG, WebP, SVG, and Data URLs</span>
+                </div>
+                <p class="muted" style="font-size:12.5px;margin:0 0 14px">
+                  Upload your official brand logo image file from your PC or mobile. This logo appears in the full-page welcome splash (4s on initial visit, 3s on login) and on the footers of the public site, devotee dashboard, and pandit portal.
+                </p>
+
+                <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+                  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                    <input type="file" id="dash-sys-logo-file" accept="image/*" style="display:none">
+                    <button type="button" class="btn btn-gold btn-sm" id="dash-btn-choose-logo-file" style="padding:9px 16px;font-weight:700">
+                      <span class="material-icons" style="font-size:16px;vertical-align:middle">upload_file</span> Choose Logo from Device (PC/Mobile)
+                    </button>
+                    <button type="button" class="btn btn-outline dark btn-sm" id="dash-btn-reset-default-logo" style="padding:9px 14px">
+                      <span class="material-icons" style="font-size:15px;vertical-align:middle">restart_alt</span> Reset to Default Golden Emblem
+                    </button>
+                    <span id="dash-sys-logo-filename" class="muted" style="font-size:12.5px;font-weight:600"></span>
+                  </div>
+                  <div>
+                    <label style="font-size:12px;font-weight:600;color:#634330">Or Direct Image URL / Base64 Data URL:</label>
+                    <input type="text" id="dash-sys-logo-url" value="${esc(currLogo)}" placeholder="Paste direct image URL or upload image file above" style="font-size:13px;margin-top:4px;padding:9px 12px">
+                  </div>
+                </div>
+
+                <!-- Dual Responsive Preview: PC View vs Mobile View -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;margin-top:14px">
+                  <div style="background:#1d0b03;border:1.5px solid #d99a19;border-radius:10px;padding:16px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,0.25)">
+                    <div style="display:flex;align-items:center;justify-content:center;gap:6px;color:#ffd88a;font-size:12px;font-weight:700;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">
+                      <span class="material-icons" style="font-size:16px">laptop_mac</span> PC / Desktop View
+                    </div>
+                    <div style="min-height:160px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);border-radius:8px;padding:12px;border:1px dashed rgba(255,216,138,0.3)">
+                      <div id="dash-preview-pc-wrap" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px">
+                        <img id="dash-preview-pc-img" src="${esc(currLogo || '')}" alt="PC Logo Preview" style="${currLogo ? 'max-width:280px;max-height:140px;object-fit:contain;border-radius:8px;' : 'display:none;'}">
+                        <div id="dash-preview-pc-placeholder" style="${currLogo ? 'display:none;' : 'display:flex;flex-direction:column;align-items:center;gap:6px;'}">
+                          <span style="font-size:54px;color:#f5b942;line-height:1">ॐ</span>
+                          <span style="font-size:20px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
+                          <span style="font-size:11px;color:#d99a19;letter-spacing:1px">VEDIC RITUALS &amp; CERTIFIED ACHARYAS</span>
+                        </div>
+                      </div>
+                    </div>
+                    <small style="display:block;margin-top:10px;color:#e8c697;font-size:11px">Auto-scaled for wide screens &amp; laptops</small>
+                  </div>
+
+                  <div style="background:#1d0b03;border:1.5px solid #d99a19;border-radius:10px;padding:16px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,0.25);max-width:320px;margin:0 auto;width:100%">
+                    <div style="display:flex;align-items:center;justify-content:center;gap:6px;color:#ffd88a;font-size:12px;font-weight:700;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">
+                      <span class="material-icons" style="font-size:16px">phone_iphone</span> Mobile Phone View
+                    </div>
+                    <div style="min-height:130px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);border-radius:8px;padding:10px;border:1px dashed rgba(255,216,138,0.3)">
+                      <div id="dash-preview-mobile-wrap" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px">
+                        <img id="dash-preview-mobile-img" src="${esc(currLogo || '')}" alt="Mobile Logo Preview" style="${currLogo ? 'max-width:180px;max-height:95px;object-fit:contain;border-radius:6px;' : 'display:none;'}">
+                        <div id="dash-preview-mobile-placeholder" style="${currLogo ? 'display:none;' : 'display:flex;flex-direction:column;align-items:center;gap:4px;'}">
+                          <span style="font-size:38px;color:#f5b942;line-height:1">ॐ</span>
+                          <span style="font-size:16px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
+                          <span style="font-size:9.5px;color:#d99a19;letter-spacing:0.5px">SACRED SERVICES</span>
+                        </div>
+                      </div>
+                    </div>
+                    <small style="display:block;margin-top:10px;color:#e8c697;font-size:11px">Responsive fit for Android &amp; iPhone</small>
                   </div>
                 </div>
               </div>
-              <small style="display:block;margin-top:10px;color:#e8c697;font-size:11px">Auto-scaled for wide screens &amp; laptops</small>
-            </div>
 
-            <!-- Mobile Phone Preview Box -->
-            <div style="background:#1d0b03;border:1.5px solid #d99a19;border-radius:10px;padding:16px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,0.25);max-width:320px;margin:0 auto;width:100%">
-              <div style="display:flex;align-items:center;justify-content:center;gap:6px;color:#ffd88a;font-size:12px;font-weight:700;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">
-                <span class="material-icons" style="font-size:16px">phone_iphone</span> Mobile Phone View
-              </div>
-              <div style="min-height:130px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);border-radius:8px;padding:10px;border:1px dashed rgba(255,216,138,0.3)">
-                <div id="dash-preview-mobile-wrap" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px">
-                  <img id="dash-preview-mobile-img" src="${esc(currLogo || '')}" alt="Mobile Logo Preview" style="${currLogo ? 'max-width:180px;max-height:95px;object-fit:contain;border-radius:6px;' : 'display:none;'}">
-                  <div id="dash-preview-mobile-placeholder" style="${currLogo ? 'display:none;' : 'display:flex;flex-direction:column;align-items:center;gap:4px;'}">
-                    <span style="font-size:38px;color:#f5b942;line-height:1">ॐ</span>
-                    <span style="font-size:16px;font-weight:800;color:#ffd88a;font-family:Georgia,serif">PujaConnect</span>
-                    <span style="font-size:9.5px;color:#d99a19;letter-spacing:0.5px">SACRED SERVICES</span>
-                  </div>
+              <!-- 3. Main Office Address -->
+              <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+                  <span class="material-icons" style="color:#d99a19;font-size:22px">apartment</span>
+                  <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Main Office Address *</label>
                 </div>
+                <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                  Official registered headquarters location, central Ashram, street, district, state, and PIN code.
+                </p>
+                <textarea id="dash-sys-address" rows="3" style="width:100%;font-size:14px;padding:11px 14px;line-height:1.5" placeholder="e.g. PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024">${esc(currAddress)}</textarea>
               </div>
-              <small style="display:block;margin-top:10px;color:#e8c697;font-size:11px">Responsive fit for Android &amp; iPhone</small>
+
+              <!-- 4. Save Button -->
+              <div style="display:flex;gap:12px;align-items:center">
+                <button type="button" class="btn btn-gold btn-lg" id="dash-btn-save-system-settings" style="flex:1;padding:14px 28px;font-size:16px;font-weight:800">
+                  <span class="material-icons" style="font-size:20px;vertical-align:middle;margin-right:6px">save</span> Save Official System Settings
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- 3. Main Office Address -->
-        <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-            <span class="material-icons" style="color:#d99a19;font-size:22px">apartment</span>
-            <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Main Office Address *</label>
-          </div>
-          <p class="muted" style="font-size:12.5px;margin:0 0 10px">
-            Official registered headquarters location, central Ashram, street, district, state, and PIN code.
-          </p>
-          <textarea id="dash-sys-address" rows="3" style="width:100%;font-size:14px;padding:11px 14px;line-height:1.5" placeholder="e.g. PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024">${esc(currAddress)}</textarea>
+        <!-- 2. Pandit KYC Review -->
+        <div id="admin-sec-kyc" class="admin-sec-panel" style="display:none">
+          <div class="panel"><h3>Pandit KYC Review</h3>${pend.length ? `<table><tr><th>Photo</th><th>Pandit</th><th>Location</th><th>Fee</th><th></th></tr>${pend.map((p) => `<tr>
+            <td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid var(--ochre)"></td>
+            <td>${esc(p.name)}<br><small>${esc(p.email)} · ${esc(p.phone)}</small></td><td>${esc(p.location || p.district)}</td><td>${inr(p.fee)}</td>
+            <td><button class="btn btn-green btn-sm" data-action="panditStatus" data-id="${esc(p._id)}" data-status="Verified">Approve</button><button class="btn btn-red btn-sm" data-action="panditStatus" data-id="${esc(p._id)}" data-status="Rejected">Reject</button></td></tr>`).join('')}</table>` : '<p class="muted">No Pandits awaiting review.</p>'}</div>
         </div>
 
-        <!-- 4. Save Button -->
-        <div style="display:flex;gap:12px;align-items:center">
-          <button type="button" class="btn btn-gold btn-lg" id="dash-btn-save-system-settings" style="flex:1;padding:14px 28px;font-size:16px;font-weight:800">
-            <span class="material-icons" style="font-size:20px;vertical-align:middle;margin-right:6px">save</span> Save Official System Settings
-          </button>
+        <!-- 3. Multi-Day Requests -->
+        <div id="admin-sec-longs" class="admin-sec-panel" style="display:none">
+          <div class="panel"><h3>Multi-Day Requests</h3>${longs.length ? `<table><tr><th>ID</th><th>Devotee</th><th>Ritual</th><th>Dates &amp; Schedule</th><th>Venue of Puja</th><th>Pandits</th><th>Status</th><th></th></tr>${longs.map((l) => `<tr><td>${esc(l.id)}</td><td>${esc(l.userName)}<br><small>${esc(l.userEmail)} · ${esc(l.phone || '')}</small></td><td>${esc(l.pujaName)}<br><small>${esc(l.district)}</small></td><td>${esc(l.fromDate)} → ${esc(l.toDate)}<br><small class="muted">${l.totalDays}d × ${l.dailyHours}h (Start: ${esc(l.startTime || '08:00 AM')})</small></td>
+            <td><span class="venue-badge-pill" style="font-size:10px">${esc(l.venueType || 'Venue')}</span><br><b>${esc(l.venueName || '')}</b><br><small class="muted">${esc(l.venueAddress || l.venue || l.address || '')}${l.venueLandmark ? ` (Nr: ${esc(l.venueLandmark)})` : ''}</small></td>
+            <td>${(l.assignedPandits || []).length}/${l.requiredPandits}</td>
+            <td>
+              ${statusBadge(l.status)}
+              ${['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? '<br><small class="badge red" style="font-size:10px;margin-top:4px;display:inline-block">⚠️ Re-assignment</small>' : ''}
+            </td>
+            <td>${['Pending Admin', 'Assigned', 'Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? `<button class="btn btn-gold btn-sm" data-action="assign" data-id="${esc(l.id)}">${l.status === 'Pending Admin' ? 'Assign' : 'Re-assign'}</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">No requests.</p>'}
+            ${unassigned.length ? `<p class="muted">${unassigned.length} request(s) need Pandit assignment or re-assignment.</p>` : ''}</div>
         </div>
-      </div>
-    </div>
 
-    <div class="panel"><h3>Pandit KYC Review</h3>${pend.length ? `<table><tr><th>Photo</th><th>Pandit</th><th>Location</th><th>Fee</th><th></th></tr>${pend.map((p) => `<tr>
-      <td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid var(--ochre)"></td>
-      <td>${esc(p.name)}<br><small>${esc(p.email)} · ${esc(p.phone)}</small></td><td>${esc(p.location || p.district)}</td><td>${inr(p.fee)}</td>
-      <td><button class="btn btn-green btn-sm" data-action="panditStatus" data-id="${esc(p._id)}" data-status="Verified">Approve</button><button class="btn btn-red btn-sm" data-action="panditStatus" data-id="${esc(p._id)}" data-status="Rejected">Reject</button></td></tr>`).join('')}</table>` : '<p class="muted">No Pandits awaiting review.</p>'}</div>
-    <div class="panel"><h3>Multi-Day Requests</h3>${longs.length ? `<table><tr><th>ID</th><th>Devotee</th><th>Ritual</th><th>Dates &amp; Schedule</th><th>Venue of Puja</th><th>Pandits</th><th>Status</th><th></th></tr>${longs.map((l) => `<tr><td>${esc(l.id)}</td><td>${esc(l.userName)}<br><small>${esc(l.userEmail)} · ${esc(l.phone || '')}</small></td><td>${esc(l.pujaName)}<br><small>${esc(l.district)}</small></td><td>${esc(l.fromDate)} → ${esc(l.toDate)}<br><small class="muted">${l.totalDays}d × ${l.dailyHours}h (Start: ${esc(l.startTime || '08:00 AM')})</small></td>
-      <td><span class="venue-badge-pill" style="font-size:10px">${esc(l.venueType || 'Venue')}</span><br><b>${esc(l.venueName || '')}</b><br><small class="muted">${esc(l.venueAddress || l.venue || l.address || '')}${l.venueLandmark ? ` (Nr: ${esc(l.venueLandmark)})` : ''}</small></td>
-      <td>${(l.assignedPandits || []).length}/${l.requiredPandits}</td>
-      <td>
-        ${statusBadge(l.status)}
-        ${['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? '<br><small class="badge red" style="font-size:10px;margin-top:4px;display:inline-block">⚠️ Re-assignment</small>' : ''}
-      </td>
-      <td>${['Pending Admin', 'Assigned', 'Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status) ? `<button class="btn btn-gold btn-sm" data-action="assign" data-id="${esc(l.id)}">${l.status === 'Pending Admin' ? 'Assign' : 'Re-assign'}</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">No requests.</p>'}
-      ${unassigned.length ? `<p class="muted">${unassigned.length} request(s) need Pandit assignment or re-assignment.</p>` : ''}</div>
-    <div class="panel"><div class="row"><h3>Service Catalog</h3><button class="btn btn-gold btn-sm" data-action="editPuja" data-id="">+ Add Puja</button></div><table><tr><th>Name</th><th>Type</th><th>Fee</th><th></th></tr>${pujas.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${p.type === 'Long' ? inr(p.perHourFee) + '/hr' : inr(p.baseFee)}</td><td><button class="btn btn-outline dark btn-sm" data-action="editPuja" data-id="${esc(p._id)}">Edit</button><button class="btn btn-red btn-sm" data-action="delPuja" data-id="${esc(p._id)}">Delete</button></td></tr>`).join('')}</table></div>
-    <div class="panel"><h3>All Pandits</h3><table><tr><th>Photo</th><th>Name</th><th>District</th><th>Experience</th><th>Status</th></tr>${pandits.map((p) => `<tr><td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid var(--ochre)"></td><td>${esc(p.name)}<br><small>${esc(p.email)}</small></td><td>${esc(p.district)}</td><td>${esc(p.exp)}</td><td>${statusBadge(p.status)}</td></tr>`).join('')}</table></div>
-    <div class="panel"><h3>Devotees</h3>${users.length ? `<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th></tr>${users.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${esc(u.phone)}</td><td>${new Date(u.createdAt).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No devotees yet.</p>'}</div>`;
+        <!-- 4. Service Catalog -->
+        <div id="admin-sec-pujas" class="admin-sec-panel" style="display:none">
+          <div class="panel"><div class="row"><h3>Service Catalog</h3><button class="btn btn-gold btn-sm" data-action="editPuja" data-id="">+ Add Puja</button></div><table><tr><th>Name</th><th>Type</th><th>Fee</th><th></th></tr>${pujas.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${p.type === 'Long' ? inr(p.perHourFee) + '/hr' : inr(p.baseFee)}</td><td><button class="btn btn-outline dark btn-sm" data-action="editPuja" data-id="${esc(p._id)}">Edit</button><button class="btn btn-red btn-sm" data-action="delPuja" data-id="${esc(p._id)}">Delete</button></td></tr>`).join('')}</table></div>
+        </div>
+
+        <!-- 5. All Pandits -->
+        <div id="admin-sec-pandits" class="admin-sec-panel" style="display:none">
+          <div class="panel"><h3>All Pandits</h3><table><tr><th>Photo</th><th>Name</th><th>District</th><th>Experience</th><th>Status</th></tr>${pandits.map((p) => `<tr><td><img src="${esc(p.photo || 'https://images.unsplash.com/photo-1544168190-79c15427015f?auto=format&fit=crop&q=80&w=200')}" alt="Pandit" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid var(--ochre)"></td><td>${esc(p.name)}<br><small>${esc(p.email)}</small></td><td>${esc(p.district)}</td><td>${esc(p.exp)}</td><td>${statusBadge(p.status)}</td></tr>`).join('')}</table></div>
+        </div>
+
+        <!-- 6. Devotees -->
+        <div id="admin-sec-users" class="admin-sec-panel" style="display:none">
+          <div class="panel"><h3>Devotees</h3>${users.length ? `<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th></tr>${users.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${esc(u.phone)}</td><td>${new Date(u.createdAt).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No devotees yet.</p>'}</div>
+        </div>
+      </section>
+    </div>`;
+
+  // Admin SPA interactive tab switcher
+  root.querySelectorAll('.admin-spa-tab-btn[data-admtab]').forEach(btn => {
+    btn.onclick = () => {
+      const tab = btn.dataset.admtab;
+      root.querySelectorAll('.admin-spa-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+      root.querySelectorAll('.admin-sec-panel').forEach(p => p.style.display = 'none');
+      const target = root.querySelector('#admin-sec-' + tab);
+      if (target) target.style.display = 'block';
+    };
+  });
 
   // System Settings live interactive handlers in adminDash
   const logoUrlInput = document.getElementById('dash-sys-logo-url');
@@ -7727,6 +7853,30 @@ const ACTIONS = {
     const bId = d && d.id;
     if (!bId) return toast('Booking identifier missing', true);
     openDevoteeCancellationModal(bId);
+  },
+  deleteBooking: (d) => {
+    const bId = d && d.id;
+    if (!bId) return toast('Booking identifier missing', true);
+    appConfirm({
+      title: 'Delete Booking Record',
+      message: 'Are you sure you want to delete this booking record? This action cannot be undone.',
+      confirmText: 'Yes, Delete',
+      confirmIcon: 'delete',
+      confirmClass: 'btn-red',
+      onConfirm: async () => {
+        try {
+          const userEmailParam = S.user && S.user.email ? `?userEmail=${encodeURIComponent(S.user.email)}` : '';
+          await api(`/bookings/${encodeURIComponent(bId)}${userEmailParam}`, { method: 'DELETE' });
+          toast('Booking deleted successfully! 🗑️');
+          if (S.bookings) {
+            S.bookings = S.bookings.filter((x) => x.bookingId !== bId && x._id !== bId && x.id !== bId);
+          }
+          renderDashboard();
+        } catch (e) {
+          toast(e.message || 'Failed to delete booking', true);
+        }
+      }
+    });
   },
   cancelLongPuja: (d) => {
     const lId = d && d.id;

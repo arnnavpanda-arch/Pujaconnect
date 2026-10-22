@@ -3574,3 +3574,277 @@ html.direct-dashboard-mode #view-dashboard { display: block !important; }
   }
 }
 
+/* Admin SPA 2-Column Responsive Layout: Left Sidebar Buttons, Right Data Content */
+.admin-spa-layout {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  margin-top: 20px;
+  width: 100%;
+}
+.admin-spa-sidebar {
+  width: 280px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #ffffff;
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 4px 18px rgba(53, 22, 5, 0.05);
+  position: sticky;
+  top: 80px;
+  flex-shrink: 0;
+}
+.admin-spa-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: #ffffff;
+  color: #3b2115;
+  font-weight: 600;
+  font-size: 13.5px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+.admin-spa-tab-btn:hover {
+  background: #fff8eb;
+  border-color: var(--ochre);
+  color: #2b1406;
+}
+.admin-spa-tab-btn.active {
+  background: linear-gradient(135deg, #2b1103 0%, #451b07 100%);
+  color: #ffd88a;
+  border-color: var(--ochre);
+  box-shadow: 0 4px 12px rgba(34, 14, 3, 0.2);
+}
+.admin-spa-tab-btn .material-icons {
+  font-size: 18px;
+  color: var(--ochre);
+}
+.admin-spa-tab-btn.active .material-icons {
+  color: #ffd88a;
+}
+.admin-spa-content {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+@media (max-width: 860px) {
+  .admin-spa-layout {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .admin-spa-sidebar {
+    width: 100%;
+    min-width: 100%;
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .admin-spa-tab-btn {
+    width: auto;
+    flex: 1 1 calc(50% - 6px);
+  }
+}
+
+/* Responsive Mobile Fixes for Puja Price Configuration (Zero Cut Off) */
+@media (max-width: 768px) {
+  #view-puja-prices {
+    padding: 10px 4px !important;
+    overflow-x: hidden !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    box-sizing: border-box !important;
+  }
+  #view-puja-prices .container {
+    padding: 8px 4px 32px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .puja-price-page-header {
+    margin-bottom: 14px !important;
+  }
+  .puja-price-page-header h1 {
+    font-size: 20px !important;
+    line-height: 1.3 !important;
+  }
+  .puja-price-page-header p {
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+  }
+  .a4-paper-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .a4-paper-sheet {
+    padding: 14px 8px !important;
+    border-radius: 8px !important;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    border-width: 1px !important;
+  }
+  .a4-paper-sheet::before {
+    display: none !important;
+  }
+  .a4-paper-inner-frame {
+    padding: 12px 6px !important;
+    border-radius: 6px !important;
+    border-width: 1px !important;
+    overflow-x: hidden !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .a4-doc-header {
+    margin-bottom: 14px !important;
+    padding-bottom: 12px !important;
+  }
+  .a4-doc-title {
+    font-size: 16px !important;
+    line-height: 1.3 !important;
+    word-break: break-word !important;
+  }
+  .a4-doc-subtitle {
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+  }
+  .a4-sanskrit-shloka {
+    font-size: 12px !important;
+    word-break: break-word !important;
+  }
+  .a4-meta-strip {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 6px !important;
+    font-size: 11px !important;
+    text-align: left !important;
+    padding: 8px 10px !important;
+  }
+  .a4-state-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    padding-bottom: 10px !important;
+  }
+  .a4-state-header h3 {
+    font-size: 16px !important;
+  }
+  .a4-state-badge {
+    font-size: 11px !important;
+    padding: 3px 8px !important;
+  }
+  .a4-pandit-card {
+    padding: 14px 10px !important;
+    border-radius: 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin-bottom: 14px !important;
+  }
+  .a4-pandit-card-top {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+  .a4-pandit-info {
+    width: 100% !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+  .a4-pandit-avatar {
+    width: 46px !important;
+    height: 46px !important;
+    flex-shrink: 0 !important;
+  }
+  .a4-pandit-name {
+    font-size: 15px !important;
+    line-height: 1.3 !important;
+  }
+  .a4-base-fee-badge {
+    text-align: left !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 8px 12px !important;
+  }
+  .a4-base-fee-val {
+    font-size: 18px !important;
+  }
+  .a4-district-rates-panel {
+    padding: 10px 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .a4-district-rates-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+  .a4-district-price-chip {
+    padding: 8px 10px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .a4-table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    display: block !important;
+    margin: 10px 0 16px !important;
+    border-radius: 8px !important;
+  }
+  .a4-rate-table {
+    min-width: 520px !important;
+    width: 100% !important;
+  }
+  .a4-rate-table th,
+  .a4-rate-table td {
+    padding: 8px 6px !important;
+    font-size: 12px !important;
+  }
+  .a4-doc-footer {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+    margin-top: 16px !important;
+    padding-top: 12px !important;
+  }
+  .a4-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    padding: 10px !important;
+  }
+  .a4-toolbar-filters {
+    flex-direction: column !important;
+    width: 100% !important;
+  }
+  .a4-toolbar-filters select,
+  .a4-toolbar-filters input {
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .a4-toolbar-actions {
+    width: 100% !important;
+    justify-content: stretch !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+  .a4-toolbar-actions button,
+  .a4-toolbar-actions a {
+    width: 100% !important;
+    text-align: center !important;
+    justify-content: center !important;
+  }
+}
+

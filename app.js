@@ -1490,10 +1490,40 @@ app.get('/api/bookings/:id', wrap(async (req, res) => {
   res.json(updated[0] || b);
 }));
 
-app.delete('/api/bookings/:id', adminOnly, wrap(async (req, res) => {
-  const b = await Booking.findOneAndDelete(bookingFindQuery(req.params.id));
+app.delete('/api/bookings/:id', wrap(async (req, res) => {
+  let authUser = null;
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  if (token) {
+    try { authUser = jwt.verify(token, JWT_SECRET()); } catch {}
+  }
+
+  let b = await Booking.findOne(bookingFindQuery(req.params.id));
+  let isLong = false;
+  if (!b) {
+    const q = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? { $or: [{ id: req.params.id }, { _id: req.params.id }] }
+      : { id: req.params.id };
+    b = await LongPujaRequest.findOne(q);
+    isLong = true;
+  }
   if (!b) return res.status(404).json({ error: 'Booking not found' });
-  res.json({ ok: true, deletedId: b.bookingId || b._id });
+
+  const isAdmin = authUser && authUser.role === 'admin';
+  const isOwner = authUser && authUser.email && (lc(authUser.email) === lc(b.userEmail));
+  const queryEmail = req.query.userEmail ? lc(req.query.userEmail) : (req.body && req.body.userEmail ? lc(req.body.userEmail) : '');
+  const isQueryOwner = queryEmail && (queryEmail === lc(b.userEmail));
+
+  if (!isAdmin && !isOwner && !isQueryOwner) {
+    return res.status(403).json({ error: 'Not authorized to delete this booking' });
+  }
+
+  if (isLong) {
+    await LongPujaRequest.deleteOne({ _id: b._id });
+  } else {
+    await Booking.deleteOne({ _id: b._id });
+  }
+  res.json({ ok: true, deletedId: b.bookingId || b.id || b._id });
 }));
 
 app.post('/api/bookings/bulk-delete', adminOnly, wrap(async (req, res) => {
