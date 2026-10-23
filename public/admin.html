@@ -7361,6 +7361,9 @@
       updateSidebarLockBadges();
       showAdminLoginGate();
 
+      // Initialize Real-time Multi-Device Synchronization
+      initAdminRealtimeSync();
+
       window.addEventListener('hashchange', () => {
         const tab = location.hash.replace('#', '');
         if (tab) switchAdminTab(tab);
@@ -7375,6 +7378,116 @@
         }
       }, 15000);
     })();
+
+    // =========================================================================
+    // ADMIN REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION (SSE + Broadcast Sync)
+    // Synchronizes all admin tables, badges, and figures live without refresh
+    // =========================================================================
+    let adminLastSyncVersion = 0;
+    let adminSyncEventSource = null;
+    let adminSyncPollInterval = null;
+    let isAdminSyncUpdating = false;
+
+    function initAdminRealtimeSync() {
+      if (adminSyncEventSource) {
+        try { adminSyncEventSource.close(); } catch (e) {}
+      }
+
+      // 1. Native Server-Sent Events (SSE) Stream
+      if (typeof EventSource !== 'undefined') {
+        try {
+          adminSyncEventSource = new EventSource('/api/live-sync');
+          adminSyncEventSource.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (data && data.version && data.version !== adminLastSyncVersion) {
+                if (adminLastSyncVersion > 0) {
+                  handleAdminSyncUpdate(data);
+                }
+                adminLastSyncVersion = data.version;
+              }
+            } catch (err) {
+              console.warn('Admin real-time sync parse notice:', err);
+            }
+          };
+          adminSyncEventSource.onerror = () => {
+            // Auto-reconnects; interval fallback ensures resilience
+          };
+        } catch (e) {
+          console.warn('Admin SSE notice:', e);
+        }
+      }
+
+      // 2. High-frequency 3-second heartbeat polling fallback for multi-device synchronization
+      if (!adminSyncPollInterval) {
+        adminSyncPollInterval = setInterval(async () => {
+          try {
+            const res = await fetch('/api/live-sync/status');
+            if (res.ok) {
+              const data = await res.json();
+              if (data && data.version && data.version !== adminLastSyncVersion) {
+                if (adminLastSyncVersion > 0) {
+                  handleAdminSyncUpdate(data);
+                }
+                adminLastSyncVersion = data.version;
+              }
+            }
+          } catch (e) {}
+        }, 3000);
+      }
+
+      // 3. Instant sync on tab visibility or window focus
+      window.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') checkAdminSyncNow();
+      });
+      window.addEventListener('focus', checkAdminSyncNow);
+    }
+
+    async function checkAdminSyncNow() {
+      try {
+        const res = await fetch('/api/live-sync/status');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.version && data.version !== adminLastSyncVersion) {
+            if (adminLastSyncVersion > 0) {
+              handleAdminSyncUpdate(data);
+            }
+            adminLastSyncVersion = data.version;
+          }
+        }
+      } catch (e) {}
+    }
+
+    async function handleAdminSyncUpdate(eventData = {}) {
+      // Only sync if admin is authenticated and logged in
+      if (!TOKEN) return;
+
+      // Check if modal is open to avoid interrupting active inputs
+      const modalRoot = document.getElementById('modal-root');
+      const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
+
+      if (isAdminSyncUpdating) return;
+      isAdminSyncUpdating = true;
+
+      try {
+        // Silently reload latest database records
+        await loadData();
+
+        // Refresh top KPI metrics cards
+        const kpiRoot = document.getElementById('admin-kpi-root');
+        if (kpiRoot) renderKPIs(kpiRoot);
+
+        // Re-render current tab without refreshing the webpage if no modal is open
+        if (!isModalOpen) {
+          renderActiveTab();
+        }
+        updateSidebarLockBadges();
+      } catch (err) {
+        console.warn('Admin live sync update notice:', err);
+      } finally {
+        isAdminSyncUpdating = false;
+      }
+    }
   </script>
 </body>
 </html>

@@ -9741,5 +9741,136 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
     const hash = location.hash.replace('#', '');
     if (['pandits', 'pujas', 'long', 'about', 'dashboard', 'puja-prices'].includes(hash)) showView(hash);
   }
+
+  // Initialize Real-time Multi-Device Synchronization
+  initRealtimeSync();
 })();
+
+// ============================================================================
+// REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION CLIENT (EventSource + Fallback)
+// Syncs data live across all open devices without page refresh
+// ============================================================================
+let pcLastSyncVersion = 0;
+let pcSyncEventSource = null;
+let pcSyncPollInterval = null;
+let isPcSyncUpdating = false;
+
+function initRealtimeSync() {
+  if (pcSyncEventSource) {
+    try { pcSyncEventSource.close(); } catch (e) {}
+  }
+
+  // 1. Native Server-Sent Events (SSE) Stream
+  if (typeof EventSource !== 'undefined') {
+    try {
+      pcSyncEventSource = new EventSource('/api/live-sync');
+      pcSyncEventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.version && data.version !== pcLastSyncVersion) {
+            if (pcLastSyncVersion > 0) {
+              handleIncomingSyncUpdate(data);
+            }
+            pcLastSyncVersion = data.version;
+          }
+        } catch (err) {
+          console.warn('Real-time sync parse notice:', err);
+        }
+      };
+      pcSyncEventSource.onerror = () => {
+        // SSE auto-reconnects; interval handles any intermittent network drop
+      };
+    } catch (e) {
+      console.warn('SSE initialization notice:', e);
+    }
+  }
+
+  // 2. High-frequency 3-second heartbeat polling fallback for multi-device synchronization
+  if (!pcSyncPollInterval) {
+    pcSyncPollInterval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/live-sync/status');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.version && data.version !== pcLastSyncVersion) {
+            if (pcLastSyncVersion > 0) {
+              handleIncomingSyncUpdate(data);
+            }
+            pcLastSyncVersion = data.version;
+          }
+        }
+      } catch (e) {}
+    }, 3000);
+  }
+
+  // 3. Instant sync on tab visibility or window focus
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkSyncNow();
+  });
+  window.addEventListener('focus', checkSyncNow);
+}
+
+async function checkSyncNow() {
+  try {
+    const res = await fetch('/api/live-sync/status');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.version && data.version !== pcLastSyncVersion) {
+        if (pcLastSyncVersion > 0) {
+          handleIncomingSyncUpdate(data);
+        }
+        pcLastSyncVersion = data.version;
+      }
+    }
+  } catch (e) {}
+}
+
+async function handleIncomingSyncUpdate(eventData = {}) {
+  // Prevent overlapping sync executions
+  if (isPcSyncUpdating) return;
+  isPcSyncUpdating = true;
+
+  try {
+    const entity = eventData.entity || 'general';
+
+    // Check if a modal is currently open to avoid disrupting active form input
+    const modalRoot = $('#modal-root');
+    const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
+
+    // A. If user is currently on Dashboard, refresh live dashboard data without page reload
+    if (S.view === 'dashboard' && S.user && !isModalOpen) {
+      await renderDashboard();
+    }
+
+    // B. If Pujas, Services, or Pricing changed
+    if (!entity || entity === 'pujas' || entity === 'settings' || entity === 'general') {
+      await loadPujas().catch(() => {});
+      renderHomePujas();
+      if (typeof renderPujas === 'function') renderPujas();
+      if (S.view === 'puja-prices' && typeof renderPujaPriceConfig === 'function') {
+        renderPujaPriceConfig(true).catch(() => {});
+      }
+    }
+
+    // C. If Pandits changed (e.g. approved KYC, new rates, coverage)
+    if (!entity || entity === 'pandits' || entity === 'general') {
+      if (typeof renderHomePandits === 'function') renderHomePandits().catch(() => {});
+      if (S.view === 'pandits' && typeof renderPandits === 'function') {
+        renderPandits().catch(() => {});
+      }
+    }
+
+    // D. If System Settings changed (helpline, logo, address)
+    if (!entity || entity === 'settings' || entity === 'general') {
+      if (typeof loadSystemSettings === 'function') {
+        await loadSystemSettings().catch(() => {});
+        renderNav();
+      }
+    }
+  } catch (err) {
+    console.warn('Sync update handler notice:', err);
+  } finally {
+    isPcSyncUpdating = false;
+  }
+}
 

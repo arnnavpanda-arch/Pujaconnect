@@ -46,9 +46,109 @@ app.get('/api/health', wrap(async (req, res) => {
   });
 }));
 
+// ============================================================================
+// REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION (SSE + BROADCAST HUB)
+// Enables instant multi-device live data updates without page refresh
+// ============================================================================
+let globalDataVersion = Date.now();
+const sseClients = new Set();
+
+function broadcastChange(event = {}) {
+  globalDataVersion = Date.now();
+  const payload = JSON.stringify({
+    version: globalDataVersion,
+    timestamp: Date.now(),
+    entity: event.entity || 'general',
+    action: event.action || 'update',
+    path: event.path || '',
+    id: event.id || null
+  });
+
+  for (const client of sseClients) {
+    try {
+      client.write(`data: ${payload}\n\n`);
+    } catch (err) {
+      sseClients.delete(client);
+    }
+  }
+}
+
+// SSE live sync stream for all open devices
+app.get('/api/live-sync', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+
+  res.write(`data: ${JSON.stringify({ version: globalDataVersion, type: 'connected', timestamp: Date.now() })}\n\n`);
+
+  sseClients.add(res);
+
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch (e) {
+      clearInterval(keepAlive);
+      sseClients.delete(res);
+    }
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(keepAlive);
+    sseClients.delete(res);
+  });
+});
+
+// Real-time status / heartbeat polling endpoint
+app.get('/api/live-sync/status', (req, res) => {
+  res.json({
+    version: globalDataVersion,
+    timestamp: Date.now(),
+    connectedClients: sseClients.size
+  });
+});
+
+// Automatic mutation detection middleware: broadcasts any successful POST/PUT/PATCH/DELETE
+app.use('/api', (req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    const skipPaths = [
+      '/auth/login',
+      '/auth/pandit-otp',
+      '/auth/admin-login',
+      '/admin/verify-section',
+      '/live-sync'
+    ];
+    if (!skipPaths.some(p => req.path.startsWith(p))) {
+      res.on('finish', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          let entity = 'general';
+          if (req.path.includes('/bookings')) entity = 'bookings';
+          else if (req.path.includes('/pandits')) entity = 'pandits';
+          else if (req.path.includes('/pujas')) entity = 'pujas';
+          else if (req.path.includes('/system-settings')) entity = 'settings';
+          else if (req.path.includes('/long-puja')) entity = 'longs';
+          else if (req.path.includes('/payments') || req.path.includes('/payouts') || req.path.includes('/platform-bank')) entity = 'payments';
+          else if (req.path.includes('/media')) entity = 'media';
+          else if (req.path.includes('/reviews')) entity = 'reviews';
+          else if (req.path.includes('/users')) entity = 'users';
+
+          broadcastChange({
+            entity,
+            action: req.method.toLowerCase(),
+            path: req.path
+          });
+        }
+      });
+    }
+  }
+  next();
+});
+
 // ---- Ensure DB connection for everything else ----
 app.use('/api', wrap(async (req, res, next) => {
-  if (req.path === '/health' || req.path === '/ping' || req.path === '/db-status' || req.path === '/auth/admin-login' || req.path === '/admin/verify-section' || req.path === '/admin/sections-info') {
+  if (req.path === '/health' || req.path === '/ping' || req.path === '/db-status' || req.path === '/live-sync' || req.path === '/live-sync/status' || req.path === '/auth/admin-login' || req.path === '/admin/verify-section' || req.path === '/admin/sections-info') {
     return next();
   }
   try {
