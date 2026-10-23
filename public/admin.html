@@ -1110,7 +1110,7 @@
       // Run DB status check concurrently in parallel so it never delays data fetching
       checkDb().catch(() => {});
       try {
-        const [stats, pandits, longs, users, pujas, bookings, commissionData, offers, announcements, mediaDevotees] = await Promise.all([
+        const [stats, pandits, longs, users, pujas, bookings, commissionData, offers, announcements] = await Promise.all([
           api('/admin/stats').catch(() => ({ users: 0, pandits: 0, verifiedPandits: 0, pendingPandits: 0, bookings: 0, completed: 0, revenue: 0, longRequests: 0, pendingLong: 0 })),
           api('/pandits').catch(() => []),
           api('/long-puja-requests').catch(() => []),
@@ -1119,8 +1119,7 @@
           api('/bookings').catch(() => []),
           api('/platform-commission').catch(() => ({ commissionPercent: 10 })),
           api('/media/offers').catch(() => []),
-          api('/media/announcements').catch(() => []),
-          api('/admin/media/devotees').catch(() => ({ totalDevotees: 0, states: {} }))
+          api('/media/announcements').catch(() => [])
         ]);
         S.stats = stats || {};
         S.adminPandits = Array.isArray(pandits) ? pandits : [];
@@ -1131,7 +1130,13 @@
         S.commissionPercent = (commissionData && (typeof commissionData.percent === 'number' ? commissionData.percent : commissionData.commissionPercent)) ?? 10;
         S.mediaOffers = Array.isArray(offers) ? offers : [];
         S.mediaAnnouncements = Array.isArray(announcements) ? announcements : [];
-        S.mediaDevotees = mediaDevotees || { totalDevotees: 0, states: {} };
+
+        // Fetch devotees directory asynchronously in background so it never holds up admin login or initial dashboard rendering
+        if (!S.mediaDevotees || !S.mediaDevotees.totalDevotees) {
+          api('/admin/media/devotees').then((md) => {
+            if (md) S.mediaDevotees = md;
+          }).catch(() => {});
+        }
 
         renderKpis();
         renderActiveTab();
@@ -1637,13 +1642,18 @@
         localStorage.setItem('admin_token', data.token);
         localStorage.setItem('pc_admin_token', data.token);
 
+        if (submitBtn) {
+          submitBtn.innerHTML = '<span class="material-icons spin">hourglass_top</span> Loading Portal...';
+        }
+
+        // Preload core data before revealing portal to eliminate any perception of hang mode
+        await loadData();
         hideAdminLoginGate();
         toast('Super Admin Access Granted 🛡️');
-        await loadData();
         updateSidebarLockBadges();
 
         const requestedTab = (location.hash && location.hash.replace('#', '')) || 'overview';
-        switchAdminTab(requestedTab);
+        openAdminTabDirect(requestedTab);
       } catch (err) {
         if (errBox) {
           errBox.style.display = 'flex';
@@ -7380,13 +7390,19 @@
     })();
 
     // =========================================================================
-    // ADMIN REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION (SSE + Broadcast Sync)
+    // ADMIN REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION (SSE + Polling + DB Sync)
     // Synchronizes all admin tables, badges, and figures live without refresh
     // =========================================================================
     let adminLastSyncVersion = 0;
     let adminSyncEventSource = null;
     let adminSyncPollInterval = null;
     let isAdminSyncUpdating = false;
+    let adminSyncDebounceTimer = null;
+
+    function getSyncEndpoint(path) {
+      const base = (typeof API_BASE !== 'undefined' && API_BASE) ? API_BASE : '/api';
+      return base.replace(/\/$/, '') + path;
+    }
 
     function initAdminRealtimeSync() {
       if (adminSyncEventSource) {
@@ -7396,7 +7412,7 @@
       // 1. Native Server-Sent Events (SSE) Stream
       if (typeof EventSource !== 'undefined') {
         try {
-          adminSyncEventSource = new EventSource('/api/live-sync');
+          adminSyncEventSource = new EventSource(getSyncEndpoint('/live-sync'));
           adminSyncEventSource.onmessage = (event) => {
             try {
               const data = JSON.parse(event.data);
@@ -7418,11 +7434,12 @@
         }
       }
 
-      // 2. High-frequency 3-second heartbeat polling fallback for multi-device synchronization
+      // 2. High-frequency heartbeat polling fallback for multi-device synchronization
       if (!adminSyncPollInterval) {
         adminSyncPollInterval = setInterval(async () => {
+          if (!TOKEN) return; // Only poll live status if admin is authenticated
           try {
-            const res = await fetch('/api/live-sync/status');
+            const res = await fetch(getSyncEndpoint('/live-sync/status'));
             if (res.ok) {
               const data = await res.json();
               if (data && data.version && data.version !== adminLastSyncVersion) {
@@ -7433,19 +7450,22 @@
               }
             }
           } catch (e) {}
-        }, 3000);
+        }, 2500);
       }
 
       // 3. Instant sync on tab visibility or window focus
       window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') checkAdminSyncNow();
+        if (document.visibilityState === 'visible' && TOKEN) checkAdminSyncNow();
       });
-      window.addEventListener('focus', checkAdminSyncNow);
+      window.addEventListener('focus', () => {
+        if (TOKEN) checkAdminSyncNow();
+      });
     }
 
     async function checkAdminSyncNow() {
+      if (!TOKEN) return;
       try {
-        const res = await fetch('/api/live-sync/status');
+        const res = await fetch(getSyncEndpoint('/live-sync/status'));
         if (res.ok) {
           const data = await res.json();
           if (data && data.version && data.version !== adminLastSyncVersion) {
@@ -7462,31 +7482,36 @@
       // Only sync if admin is authenticated and logged in
       if (!TOKEN) return;
 
-      // Check if modal is open to avoid interrupting active inputs
-      const modalRoot = document.getElementById('modal-root');
-      const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
-
-      if (isAdminSyncUpdating) return;
-      isAdminSyncUpdating = true;
-
-      try {
-        // Silently reload latest database records
-        await loadData();
-
-        // Refresh top KPI metrics cards
-        const kpiRoot = document.getElementById('admin-kpi-root');
-        if (kpiRoot) renderKPIs(kpiRoot);
-
-        // Re-render current tab without refreshing the webpage if no modal is open
-        if (!isModalOpen) {
-          renderActiveTab();
+      // Debounce sync execution by 300ms so rapid concurrent updates merge cleanly without dropping
+      if (adminSyncDebounceTimer) clearTimeout(adminSyncDebounceTimer);
+      adminSyncDebounceTimer = setTimeout(async () => {
+        if (isAdminSyncUpdating) {
+          // If already in flight, retry in 300ms so latest mobile data is never missed
+          handleAdminSyncUpdate(eventData);
+          return;
         }
-        updateSidebarLockBadges();
-      } catch (err) {
-        console.warn('Admin live sync update notice:', err);
-      } finally {
-        isAdminSyncUpdating = false;
-      }
+        isAdminSyncUpdating = true;
+
+        try {
+          // Silently reload latest database records
+          await loadData();
+
+          // Refresh top KPI metrics cards
+          renderKpis();
+
+          // Re-render current tab without refreshing the webpage if no modal is open
+          const modalRoot = document.getElementById('modal-root');
+          const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
+          if (!isModalOpen) {
+            renderActiveTab();
+          }
+          updateSidebarLockBadges();
+        } catch (err) {
+          console.warn('Admin live sync update notice:', err);
+        } finally {
+          isAdminSyncUpdating = false;
+        }
+      }, 300);
     }
   </script>
 </body>

@@ -47,13 +47,14 @@ app.get('/api/health', wrap(async (req, res) => {
 }));
 
 // ============================================================================
-// REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION (SSE + BROADCAST HUB)
-// Enables instant multi-device live data updates without page refresh
+// ============================================================================
+// REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION (SSE + BROADCAST HUB + DB PERSIST)
+// Enables instant multi-device live data updates across mobile, desktop & serverless
 // ============================================================================
 let globalDataVersion = Date.now();
 const sseClients = new Set();
 
-function broadcastChange(event = {}) {
+async function broadcastChange(event = {}) {
   globalDataVersion = Date.now();
   const payload = JSON.stringify({
     version: globalDataVersion,
@@ -64,12 +65,33 @@ function broadcastChange(event = {}) {
     id: event.id || null
   });
 
+  // 1. Broadcast to all active SSE clients on this server instance
   for (const client of sseClients) {
     try {
       client.write(`data: ${payload}\n\n`);
     } catch (err) {
       sseClients.delete(client);
     }
+  }
+
+  // 2. Persist version to MongoDB Atlas AppSetting so all other devices (mobile, laptop, multi-instance) stay synchronized!
+  try {
+    if (mongoose.connection && mongoose.connection.readyState === 1) {
+      await AppSetting.findOneAndUpdate(
+        { key: 'live_sync_version' },
+        {
+          value: {
+            version: globalDataVersion,
+            entity: event.entity || 'general',
+            action: event.action || 'update',
+            timestamp: Date.now()
+          }
+        },
+        { upsert: true, new: true }
+      );
+    }
+  } catch (err) {
+    console.warn('[Sync Version Persist Warning]:', err.message);
   }
 }
 
@@ -101,14 +123,32 @@ app.get('/api/live-sync', (req, res) => {
   });
 });
 
-// Real-time status / heartbeat polling endpoint
-app.get('/api/live-sync/status', (req, res) => {
+// Real-time status / heartbeat polling endpoint – queries MongoDB so all devices share the exact same state
+app.get('/api/live-sync/status', wrap(async (req, res) => {
+  let ver = globalDataVersion;
+  let entity = 'general';
+  try {
+    if (mongoose.connection && mongoose.connection.readyState === 1) {
+      const setting = await AppSetting.findOne({ key: 'live_sync_version' }).lean();
+      if (setting && setting.value) {
+        const v = typeof setting.value === 'object' ? Number(setting.value.version) : Number(setting.value);
+        if (v && v > ver) {
+          ver = v;
+          globalDataVersion = ver;
+        }
+        if (typeof setting.value === 'object' && setting.value.entity) {
+          entity = setting.value.entity;
+        }
+      }
+    }
+  } catch (e) {}
   res.json({
-    version: globalDataVersion,
+    version: ver,
+    entity,
     timestamp: Date.now(),
     connectedClients: sseClients.size
   });
-});
+}));
 
 // Automatic mutation detection middleware: broadcasts any successful POST/PUT/PATCH/DELETE
 app.use('/api', (req, res, next) => {
@@ -149,6 +189,10 @@ app.use('/api', (req, res, next) => {
 // ---- Ensure DB connection for everything else ----
 app.use('/api', wrap(async (req, res, next) => {
   if (req.path === '/health' || req.path === '/ping' || req.path === '/db-status' || req.path === '/live-sync' || req.path === '/live-sync/status' || req.path === '/auth/admin-login' || req.path === '/admin/verify-section' || req.path === '/admin/sections-info') {
+    return next();
+  }
+  // If MongoDB Atlas connection is already active and healthy, proceed synchronously with zero delay
+  if (mongoose.connection && mongoose.connection.readyState === 1) {
     return next();
   }
   try {
@@ -937,8 +981,13 @@ app.get('/api/pandits', wrap(async (req, res) => {
   if (req.query.email) q.email = new RegExp('^' + req.query.email.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
   if (req.query.district) q.$or = [{ district: req.query.district }, { workingDistricts: req.query.district }];
   if (req.query.state) q.$and = [{ $or: [{ state: req.query.state }, { workingState: req.query.state }] }];
-  // All registered pandits can perform all pujas; pandits are not excluded by service
-  res.json(await Pandit.find(q).sort({ experience: -1 }).lean());
+  
+  let queryBuilder = Pandit.find(q).sort({ experience: -1 });
+  // Omit large base64 KYC documents and banking details for general verified queries to accelerate dashboard loading
+  if (req.query.verified === 'true' && !req.query.email) {
+    queryBuilder = queryBuilder.select('-idDoc -documentUrl -bankAccount -ifscCode -qrCode');
+  }
+  res.json(await queryBuilder.lean());
 }));
 
 // Public endpoint for Puja Price Configuration (State-wise & District-wise pricing chart)
@@ -1827,26 +1876,29 @@ app.get('/api/bookings', wrap(async (req, res) => {
   if (req.query.bookingId) q.bookingId = req.query.bookingId;
   const list = await Booking.find(q).sort({ transactionDate: -1 });
 
-  // Recalculate discount if offer became active after booking creation and payment is still pending
-  const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
-  for (const b of list) {
-    if (b.paymentStatus === 'Pending' && !b.discountAmount && b.fee > 0) {
-      const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
-      const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
-      const applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
-      if (applicableOffer) {
-        const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
-        const feeCalc = calculateFeeWithDiscount(b.originalFee || b.fee, applicableOffer, commPct);
-        b.fee = feeCalc.finalFee;
-        b.originalFee = feeCalc.originalFee;
-        b.discountPercent = feeCalc.discountPercent;
-        b.discountAmount = feeCalc.discountAmount;
-        b.discountOfferId = feeCalc.offerId;
-        b.discountOfferTitle = feeCalc.offerTitle;
-        b.adminFeePercent = commPct;
-        b.adminFeeAmount = feeCalc.adminFeeAmount;
-        b.panditNetPayout = feeCalc.panditNetPayout;
-        await b.save().catch(() => {});
+  // Recalculate discount if offer became active after booking creation and payment is still pending (optimized to avoid N+1 query overhead)
+  const pendingDiscountCandidates = list.filter((b) => b.paymentStatus === 'Pending' && !b.discountAmount && b.fee > 0);
+  if (pendingDiscountCandidates.length > 0) {
+    const hasActiveOffers = await MediaOffer.exists({ status: 'Active' });
+    if (hasActiveOffers) {
+      const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
+      for (const b of pendingDiscountCandidates) {
+        const devoteeState = b.state || 'Odisha';
+        const applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
+        if (applicableOffer) {
+          const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
+          const feeCalc = calculateFeeWithDiscount(b.originalFee || b.fee, applicableOffer, commPct);
+          b.fee = feeCalc.finalFee;
+          b.originalFee = feeCalc.originalFee;
+          b.discountPercent = feeCalc.discountPercent;
+          b.discountAmount = feeCalc.discountAmount;
+          b.discountOfferId = feeCalc.offerId;
+          b.discountOfferTitle = feeCalc.offerTitle;
+          b.adminFeePercent = commPct;
+          b.adminFeeAmount = feeCalc.adminFeeAmount;
+          b.panditNetPayout = feeCalc.panditNetPayout;
+          await b.save().catch(() => {});
+        }
       }
     }
   }
@@ -2147,6 +2199,9 @@ app.post('/api/bookings', wrap(async (req, res) => {
     locationReport
   };
   const mailResult = await sendSafe('BOOKING_REQUEST_RECEIVED', booking.userEmail, mailPayload);
+
+  // Broadcast live change across all open devices in real-time
+  broadcastChange({ entity: 'bookings', action: 'create', id: booking.bookingId });
 
   res.status(201).json({
     ok: true,
@@ -3026,6 +3081,7 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
       r.advancePaid = false;
       r.paymentRejectionReason = '';
       await r.save();
+      broadcastChange({ entity: 'bookings', action: 'payment', id: r.requestId || r.id });
       return res.json({ ok: true, request: r, message: 'Dakshina payment submitted successfully! Your payment is under processing and awaiting Admin verification.' });
     }
     return res.status(404).json({ error: 'Booking not found' });
@@ -3050,6 +3106,9 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
     b.status = 'Confirmed';
   }
   await b.save();
+
+  // Broadcast live change across all open devices in real-time
+  broadcastChange({ entity: 'bookings', action: 'payment', id: b.bookingId });
 
   res.json({
     ok: true,
@@ -3139,6 +3198,8 @@ app.post('/api/bookings/:id/verify-payment', wrap(async (req, res) => {
     paymentProof: b.paymentProof,
     paymentMethod: b.paymentMethod
   });
+
+  broadcastChange({ entity: 'bookings', action: 'verify-payment', id: b.bookingId });
 
   res.json({ ok: true, booking: b });
 }));
@@ -3599,7 +3660,7 @@ app.post('/api/long-puja-requests', wrap(async (req, res) => {
     termsAccepted: Boolean(b.termsAccepted !== undefined ? b.termsAccepted : true)
   });
   await sendSafe('LONG_PUJA_SUBMITTED', reqDoc.userEmail, reqDoc.toObject());
-  if (advanceAmount > 0) await sendSafe('PAYMENT_RECEIPT', reqDoc.userEmail, { userName: reqDoc.userName, reference: reqDoc.id, service: reqDoc.pujaName, total: estimatedCost, advanceAmount });
+  broadcastChange({ entity: 'longs', action: 'create', id: reqDoc.id });
   res.status(201).json(reqDoc);
 }));
 
@@ -4076,6 +4137,8 @@ app.post('/api/long-puja-requests/:id/submit-payment', wrap(async (req, res) => 
       paymentProof: r.paymentProof
     });
   } catch (mailErr) {}
+
+  broadcastChange({ entity: 'longs', action: 'payment', id: r.id });
 
   res.json({
     ok: true,
@@ -4664,14 +4727,14 @@ app.get('/api/media/active-popups', wrap(async (req, res) => {
 app.get('/api/admin/stats', adminOnly, wrap(async (req, res) => {
   const [users, pandits, verified, pending, rawBookings, longReqs, pendingLong] = await Promise.all([
     User.countDocuments({ role: 'user' }), Pandit.countDocuments(), Pandit.countDocuments({ verified: true }),
-    Pandit.countDocuments({ status: 'Pending Review' }), Booking.find({}, { fee: 1, status: 1, date: 1, time: 1, havanConducted: 1 }), LongPujaRequest.countDocuments(),
+    Pandit.countDocuments({ status: 'Pending Review' }), Booking.find({}, { fee: 1, status: 1, date: 1, time: 1, havanConducted: 1 }).lean(), LongPujaRequest.countDocuments(),
     LongPujaRequest.countDocuments({ status: { $in: ['Pending Admin', 'Rejected', 'Declined', 'Rejected by Pandit'] } })
   ]);
-  const bookings = await autoUpdatePassedSlots(rawBookings);
+  const bookings = rawBookings || [];
   const active = bookings.filter((b) => b.status !== 'Cancelled');
   res.json({
     users, pandits, verifiedPandits: verified, pendingPandits: pending,
-    bookings: bookings.length, completed: bookings.filter((b) => b.status === 'Completed').length,
+    bookings: bookings.length, completed: bookings.filter((b) => b.status === 'Completed' || (!['Cancelled', 'Rejected'].includes(b.status) && isPujaSlotPassed(b.date, b.time))).length,
     revenue: active.reduce((s, b) => s + (b.fee || 0), 0), longRequests: longReqs, pendingLong
   });
 }));
