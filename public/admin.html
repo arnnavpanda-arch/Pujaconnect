@@ -1746,8 +1746,10 @@
         clearLockout('admin_login');
         clearClientAttempts('admin_login');
         TOKEN = data.token;
-        localStorage.setItem('admin_token', data.token);
-        localStorage.setItem('pc_admin_token', data.token);
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('pc_admin_token');
+        sessionStorage.removeItem('admin_token');
+        sessionStorage.removeItem('pc_admin_token');
 
         if (submitBtn) {
           submitBtn.innerHTML = '<span class="material-icons spin">hourglass_top</span> Loading Portal...';
@@ -1761,6 +1763,8 @@
 
         const requestedTab = (location.hash && location.hash.replace('#', '')) || 'overview';
         openAdminTabDirect(requestedTab);
+        initAdminRealtimeSync();
+        checkAdminSyncNow();
       } catch (err) {
         if (errBox) {
           errBox.style.display = 'flex';
@@ -7462,66 +7466,6 @@
       });
     }
 
-    (async function init() {
-      const dbBadge = document.getElementById('admin-db-badge');
-      if (dbBadge) {
-        dbBadge.style.cursor = 'pointer';
-        dbBadge.title = 'Click to test and reconnect MongoDB Atlas';
-        dbBadge.onclick = async () => {
-          const text = document.getElementById('admin-db-text');
-          if (text) text.textContent = 'Connecting to MongoDB Atlas... ⏳';
-          await checkDb(true);
-          await loadData();
-        };
-      }
-
-      document.getElementById('btn-refresh-db').onclick = async () => {
-        toast('Refreshing database connection & data... 🔄');
-        await checkDb(false);
-        await loadData();
-      };
-
-      const toggleBtn = document.getElementById('btn-toggle-admin-menu');
-      if (toggleBtn) toggleBtn.onclick = openAdminSidebar;
-      const closeBtn = document.getElementById('btn-close-admin-sidebar');
-      if (closeBtn) closeBtn.onclick = closeAdminSidebar;
-      const backdrop = document.getElementById('admin-sidebar-backdrop');
-      if (backdrop) backdrop.onclick = closeAdminSidebar;
-
-      // Restore Admin session if token exists in localStorage (no login page on refresh)
-      const savedToken = localStorage.getItem('admin_token') || localStorage.getItem('pc_admin_token');
-      if (savedToken) {
-        TOKEN = savedToken;
-        hideAdminLoginGate();
-        updateSidebarLockBadges();
-        loadData().catch(() => {});
-        const requestedTab = (location.hash && location.hash.replace('#', '')) || 'overview';
-        openAdminTabDirect(requestedTab);
-      } else {
-        TOKEN = '';
-        Object.keys(SECTION_DEFS).forEach(secId => sessionStorage.removeItem('pc_sec_unlocked_' + secId));
-        updateSidebarLockBadges();
-        showAdminLoginGate();
-      }
-
-      // Initialize Real-time Multi-Device Synchronization
-      initAdminRealtimeSync();
-
-      window.addEventListener('hashchange', () => {
-        const tab = location.hash.replace('#', '');
-        if (tab) switchAdminTab(tab);
-      });
-
-      // Periodic connection check every 15s to auto-reconnect if connection was dropped
-      setInterval(async () => {
-        const text = document.getElementById('admin-db-text');
-        const isDisconnected = text && text.textContent.includes('Disconnected');
-        if (isDisconnected || document.visibilityState === 'visible') {
-          await checkDb(false);
-        }
-      }, 15000);
-    })();
-
     // =========================================================================
     // ADMIN REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION (SSE + Polling + DB Sync)
     // Synchronizes all admin tables, badges, and figures live without refresh
@@ -7596,9 +7540,6 @@
       // 2. High-frequency heartbeat polling fallback (2.0s) for cross-device synchronization (Mobile <-> Desktop)
       if (!adminSyncPollInterval) {
         adminSyncPollInterval = setInterval(async () => {
-          if (!TOKEN) {
-            TOKEN = localStorage.getItem('admin_token') || localStorage.getItem('pc_admin_token') || '';
-          }
           if (!TOKEN) return; // Only poll live status if admin is authenticated
           const dashApp = document.getElementById('admin-dashboard-app');
           if (dashApp && dashApp.style.display === 'none') return;
@@ -7635,9 +7576,6 @@
     }
 
     async function checkAdminSyncNow() {
-      if (!TOKEN) {
-        TOKEN = localStorage.getItem('admin_token') || localStorage.getItem('pc_admin_token') || '';
-      }
       if (!TOKEN) return;
       const dashApp = document.getElementById('admin-dashboard-app');
       if (dashApp && dashApp.style.display === 'none') return;
@@ -7664,9 +7602,7 @@
 
     let adminSyncPending = false;
     async function handleAdminSyncUpdate(eventData = {}) {
-      if (!TOKEN) {
-        TOKEN = localStorage.getItem('admin_token') || localStorage.getItem('pc_admin_token') || '';
-      }
+      if (!TOKEN) return;
       const dashApp = document.getElementById('admin-dashboard-app');
       if (dashApp && dashApp.style.display === 'none') return; // Skip if admin portal is not currently unlocked
 
@@ -7690,6 +7626,60 @@
         }
       }
     }
+
+    (async function init() {
+      const dbBadge = document.getElementById('admin-db-badge');
+      if (dbBadge) {
+        dbBadge.style.cursor = 'pointer';
+        dbBadge.title = 'Click to test and reconnect MongoDB Atlas';
+        dbBadge.onclick = async () => {
+          const text = document.getElementById('admin-db-text');
+          if (text) text.textContent = 'Connecting to MongoDB Atlas... ⏳';
+          await checkDb(true);
+          await loadData();
+        };
+      }
+
+      document.getElementById('btn-refresh-db').onclick = async () => {
+        toast('Refreshing database connection & data... 🔄');
+        await checkDb(false);
+        await loadData();
+      };
+
+      const toggleBtn = document.getElementById('btn-toggle-admin-menu');
+      if (toggleBtn) toggleBtn.onclick = openAdminSidebar;
+      const closeBtn = document.getElementById('btn-close-admin-sidebar');
+      if (closeBtn) closeBtn.onclick = closeAdminSidebar;
+      const backdrop = document.getElementById('admin-sidebar-backdrop');
+      if (backdrop) backdrop.onclick = closeAdminSidebar;
+
+      // Always require Admin credentials (username & password) on every page load/open/refresh
+      TOKEN = '';
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('pc_admin_token');
+      sessionStorage.removeItem('admin_token');
+      sessionStorage.removeItem('pc_admin_token');
+      Object.keys(SECTION_DEFS).forEach(secId => sessionStorage.removeItem('pc_sec_unlocked_' + secId));
+      updateSidebarLockBadges();
+      showAdminLoginGate();
+
+      // Initialize Real-time Multi-Device Synchronization
+      initAdminRealtimeSync();
+
+      window.addEventListener('hashchange', () => {
+        const tab = location.hash.replace('#', '');
+        if (tab) switchAdminTab(tab);
+      });
+
+      // Periodic connection check every 15s to auto-reconnect if connection was dropped
+      setInterval(async () => {
+        const text = document.getElementById('admin-db-text');
+        const isDisconnected = text && text.textContent.includes('Disconnected');
+        if (isDisconnected || document.visibilityState === 'visible') {
+          await checkDb(false);
+        }
+      }, 15000);
+    })();
   </script>
 </body>
 </html>

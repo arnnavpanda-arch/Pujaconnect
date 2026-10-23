@@ -156,26 +156,26 @@ app.get('/api/live-sync/status', wrap(async (req, res) => {
       }
 
       // Live MongoDB collection counts & latest booking fingerprint for bulletproof multi-device sync
-      const [bCount, lCount, pCount, lpCount, kCount, latestB, latestL] = await Promise.all([
+      const [bCount, lCount, pCount, lpCount, kCount, recentBookings, latestL] = await Promise.all([
         Booking.countDocuments().catch(() => 0),
         LongPujaRequest.countDocuments().catch(() => 0),
         Booking.countDocuments({ paymentStatus: { $in: ['Under Processing', 'Verification Pending'] } }).catch(() => 0),
         LongPujaRequest.countDocuments({ paymentStatus: { $in: ['Under Processing', 'Verification Pending'] } }).catch(() => 0),
         Pandit.countDocuments({ status: 'Pending Review' }).catch(() => 0),
-        Booking.findOne({}, { _id: 1, bookingId: 1, status: 1, paymentStatus: 1, panditApproval: 1, panditEmail: 1 }).sort({ updatedAt: -1, transactionDate: -1, _id: -1 }).lean().catch(() => null),
-        LongPujaRequest.findOne({}, { _id: 1, id: 1, status: 1, paymentStatus: 1 }).sort({ updatedAt: -1, _id: -1 }).lean().catch(() => null)
+        Booking.find({}, { _id: 1, bookingId: 1, status: 1, paymentStatus: 1, panditApproval: 1, panditEmail: 1, updatedAt: 1, transactionDate: 1 }).sort({ updatedAt: -1, transactionDate: -1, _id: -1 }).limit(3).lean().catch(() => []),
+        LongPujaRequest.findOne({}, { _id: 1, id: 1, status: 1, paymentStatus: 1, updatedAt: 1 }).sort({ updatedAt: -1, _id: -1 }).lean().catch(() => null)
       ]);
 
       counts.bookings = bCount;
       counts.longs = lCount;
       counts.pendingPayments = pCount + lpCount;
       counts.kyc = kCount;
-      if (latestB) {
-        latestBookingId = String(latestB.bookingId || latestB._id || '');
-        latestBookingStatus = `${latestB.status}_${latestB.paymentStatus}_${latestB.panditApproval || ''}_${latestB.panditEmail || ''}`;
+      if (recentBookings && recentBookings.length > 0) {
+        latestBookingId = String(recentBookings[0].bookingId || recentBookings[0]._id || '');
+        latestBookingStatus = recentBookings.map(b => `${b.bookingId || b._id}:${b.status}_${b.paymentStatus}_${b.panditApproval || ''}_${b.panditEmail || ''}_${b.updatedAt ? new Date(b.updatedAt).getTime() : (b.transactionDate ? new Date(b.transactionDate).getTime() : '')}`).join('|');
       }
       if (latestL) {
-        latestBookingStatus += `_L:${latestL.id || latestL._id || ''}_${latestL.status}_${latestL.paymentStatus}`;
+        latestBookingStatus += `_L:${latestL.id || latestL._id || ''}_${latestL.status}_${latestL.paymentStatus}_${latestL.updatedAt ? new Date(latestL.updatedAt).getTime() : ''}`;
       }
     }
   } catch (e) {}
@@ -218,18 +218,22 @@ app.use('/api', (req, res, next) => {
         return 'general';
       };
 
-      res.on('finish', () => {
+      const origJson = res.json.bind(res);
+      res.json = async function(body) {
         if (!broadcastFired && res.statusCode >= 200 && res.statusCode < 300) {
           broadcastFired = true;
-          broadcastChange({
-            entity: getEntity(),
-            action: req.method.toLowerCase(),
-            path: req.path
-          }).catch((err) => {
+          try {
+            await broadcastChange({
+              entity: getEntity(),
+              action: req.method.toLowerCase(),
+              path: req.path
+            });
+          } catch (err) {
             console.warn('[Sync Auto-Broadcast Error]:', err.message);
-          });
+          }
         }
-      });
+        return origJson(body);
+      };
     }
   }
   next();
@@ -2250,7 +2254,7 @@ app.post('/api/bookings', wrap(async (req, res) => {
   const mailResult = await sendSafe('BOOKING_REQUEST_RECEIVED', booking.userEmail, mailPayload);
 
   // Broadcast live change across all open devices in real-time
-  broadcastChange({ entity: 'bookings', action: 'create', id: booking.bookingId });
+  await broadcastChange({ entity: 'bookings', action: 'create', id: booking.bookingId });
 
   res.status(201).json({
     ok: true,
@@ -3130,7 +3134,7 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
       r.advancePaid = false;
       r.paymentRejectionReason = '';
       await r.save();
-      broadcastChange({ entity: 'bookings', action: 'payment', id: r.requestId || r.id });
+      await broadcastChange({ entity: 'bookings', action: 'payment', id: r.requestId || r.id });
       return res.json({ ok: true, request: r, message: 'Dakshina payment submitted successfully! Your payment is under processing and awaiting Admin verification.' });
     }
     return res.status(404).json({ error: 'Booking not found' });
@@ -3157,7 +3161,7 @@ app.post('/api/bookings/:id/submit-payment', wrap(async (req, res) => {
   await b.save();
 
   // Broadcast live change across all open devices in real-time
-  broadcastChange({ entity: 'bookings', action: 'payment', id: b.bookingId });
+  await broadcastChange({ entity: 'bookings', action: 'payment', id: b.bookingId });
 
   res.json({
     ok: true,
@@ -3248,7 +3252,7 @@ app.post('/api/bookings/:id/verify-payment', wrap(async (req, res) => {
     paymentMethod: b.paymentMethod
   });
 
-  broadcastChange({ entity: 'bookings', action: 'verify-payment', id: b.bookingId });
+  await broadcastChange({ entity: 'bookings', action: 'verify-payment', id: b.bookingId });
 
   res.json({ ok: true, booking: b });
 }));
