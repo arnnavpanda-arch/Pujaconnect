@@ -76,6 +76,9 @@ async function broadcastChange(event = {}) {
 
   // 2. Persist version to MongoDB Atlas AppSetting so all other devices (mobile, laptop, multi-instance) stay synchronized!
   try {
+    if (mongoose.connection && mongoose.connection.readyState !== 1) {
+      try { await connectDB(); } catch (e) {}
+    }
     if (mongoose.connection && mongoose.connection.readyState === 1) {
       await AppSetting.findOneAndUpdate(
         { key: 'live_sync_version' },
@@ -125,9 +128,16 @@ app.get('/api/live-sync', (req, res) => {
 
 // Real-time status / heartbeat polling endpoint – queries MongoDB so all devices share the exact same state
 app.get('/api/live-sync/status', wrap(async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
   let ver = globalDataVersion;
   let entity = 'general';
   try {
+    if (mongoose.connection && mongoose.connection.readyState !== 1) {
+      try { await connectDB(); } catch (e) {}
+    }
     if (mongoose.connection && mongoose.connection.readyState === 1) {
       const setting = await AppSetting.findOne({ key: 'live_sync_version' }).lean();
       if (setting && setting.value) {
@@ -151,6 +161,7 @@ app.get('/api/live-sync/status', wrap(async (req, res) => {
 }));
 
 // Automatic mutation detection middleware: broadcasts any successful POST/PUT/PATCH/DELETE
+// Intercepts responses so MongoDB Atlas sync version commits BEFORE returning to client (critical for Vercel Serverless execution lifecycle)
 app.use('/api', (req, res, next) => {
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     const skipPaths = [
@@ -161,24 +172,63 @@ app.use('/api', (req, res, next) => {
       '/live-sync'
     ];
     if (!skipPaths.some(p => req.path.startsWith(p))) {
-      res.on('finish', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          let entity = 'general';
-          if (req.path.includes('/bookings')) entity = 'bookings';
-          else if (req.path.includes('/pandits')) entity = 'pandits';
-          else if (req.path.includes('/pujas')) entity = 'pujas';
-          else if (req.path.includes('/system-settings')) entity = 'settings';
-          else if (req.path.includes('/long-puja')) entity = 'longs';
-          else if (req.path.includes('/payments') || req.path.includes('/payouts') || req.path.includes('/platform-bank')) entity = 'payments';
-          else if (req.path.includes('/media')) entity = 'media';
-          else if (req.path.includes('/reviews')) entity = 'reviews';
-          else if (req.path.includes('/users')) entity = 'users';
+      let broadcastFired = false;
+      const getEntity = () => {
+        if (req.path.includes('/bookings')) return 'bookings';
+        if (req.path.includes('/pandits')) return 'pandits';
+        if (req.path.includes('/pujas')) return 'pujas';
+        if (req.path.includes('/system-settings')) return 'settings';
+        if (req.path.includes('/long-puja')) return 'longs';
+        if (req.path.includes('/payments') || req.path.includes('/payouts') || req.path.includes('/platform-bank')) return 'payments';
+        if (req.path.includes('/media')) return 'media';
+        if (req.path.includes('/reviews')) return 'reviews';
+        if (req.path.includes('/users')) return 'users';
+        return 'general';
+      };
 
-          broadcastChange({
-            entity,
-            action: req.method.toLowerCase(),
-            path: req.path
+      const doBroadcast = async (status) => {
+        if (!broadcastFired && status >= 200 && status < 300) {
+          broadcastFired = true;
+          try {
+            await broadcastChange({
+              entity: getEntity(),
+              action: req.method.toLowerCase(),
+              path: req.path
+            });
+          } catch (err) {
+            console.warn('[Sync Auto-Broadcast Error]:', err.message);
+          }
+        }
+      };
+
+      const origJson = res.json.bind(res);
+      const origSend = res.send.bind(res);
+
+      res.json = function(data) {
+        const code = res.statusCode || 200;
+        if (code >= 200 && code < 300 && !broadcastFired) {
+          doBroadcast(code).finally(() => {
+            origJson(data);
           });
+        } else {
+          origJson(data);
+        }
+      };
+
+      res.send = function(data) {
+        const code = res.statusCode || 200;
+        if (code >= 200 && code < 300 && !broadcastFired) {
+          doBroadcast(code).finally(() => {
+            origSend(data);
+          });
+        } else {
+          origSend(data);
+        }
+      };
+
+      res.on('finish', () => {
+        if (!broadcastFired && res.statusCode >= 200 && res.statusCode < 300) {
+          doBroadcast(res.statusCode);
         }
       });
     }

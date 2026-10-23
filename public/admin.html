@@ -977,10 +977,18 @@
     })();
 
     async function api(path, { method = 'GET', body } = {}) {
-      const res = await fetch(API_BASE + path, {
-        method,
+      const m = method.toUpperCase();
+      const sep = path.includes('?') ? '&' : '?';
+      const url = m === 'GET'
+        ? `${API_BASE}${path}${sep}_t=${Date.now()}`
+        : `${API_BASE}${path}`;
+      const res = await fetch(url, {
+        method: m,
+        cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
           ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {})
         },
         body: body ? JSON.stringify(body) : undefined
@@ -988,6 +996,9 @@
       let data = null;
       try { data = await res.json(); } catch {}
       if (!res.ok) throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
+      if (m !== 'GET' && typeof broadcastLocalSync === 'function') {
+        broadcastLocalSync({ entity: 'general', action: m.toLowerCase(), path });
+      }
       return data;
     }
 
@@ -7399,6 +7410,36 @@
     let isAdminSyncUpdating = false;
     let adminSyncDebounceTimer = null;
 
+    // Cross-tab broadcast channel & localStorage triggers for instant 0ms same-origin multi-tab sync
+    const adminSyncChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('pujaconnect_live_sync') : null;
+    if (adminSyncChannel) {
+      adminSyncChannel.onmessage = (evt) => {
+        if (evt.data && evt.data.version && evt.data.version !== adminLastSyncVersion) {
+          adminLastSyncVersion = evt.data.version;
+          handleAdminSyncUpdate(evt.data);
+        }
+      };
+    }
+    window.addEventListener('storage', (evt) => {
+      if (evt.key === 'pc_live_sync_trigger' && evt.newValue) {
+        try {
+          const d = JSON.parse(evt.newValue);
+          if (d && d.version && d.version !== adminLastSyncVersion) {
+            adminLastSyncVersion = d.version;
+            handleAdminSyncUpdate(d);
+          }
+        } catch (e) {}
+      }
+    });
+
+    function broadcastLocalSync(eventData = {}) {
+      try {
+        const payload = { ...eventData, version: Date.now(), _t: Date.now() };
+        if (adminSyncChannel) adminSyncChannel.postMessage(payload);
+        localStorage.setItem('pc_live_sync_trigger', JSON.stringify(payload));
+      } catch (e) {}
+    }
+
     function getSyncEndpoint(path) {
       const base = (typeof API_BASE !== 'undefined' && API_BASE) ? API_BASE : '/api';
       return base.replace(/\/$/, '') + path;
@@ -7427,19 +7468,25 @@
             }
           };
           adminSyncEventSource.onerror = () => {
-            // Auto-reconnects; interval fallback ensures resilience
+            // Auto-reconnects; polling fallback below guarantees live synchronization on Vercel serverless
           };
         } catch (e) {
           console.warn('Admin SSE notice:', e);
         }
       }
 
-      // 2. High-frequency heartbeat polling fallback for multi-device synchronization
+      // 2. High-frequency heartbeat polling fallback (2.0s) for cross-device synchronization (Mobile <-> Desktop)
       if (!adminSyncPollInterval) {
         adminSyncPollInterval = setInterval(async () => {
           if (!TOKEN) return; // Only poll live status if admin is authenticated
           try {
-            const res = await fetch(getSyncEndpoint('/live-sync/status'));
+            const res = await fetch(getSyncEndpoint('/live-sync/status?_t=' + Date.now()), {
+              cache: 'no-store',
+              headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+              }
+            });
             if (res.ok) {
               const data = await res.json();
               if (data && data.version && data.version !== adminLastSyncVersion) {
@@ -7450,7 +7497,7 @@
               }
             }
           } catch (e) {}
-        }, 2500);
+        }, 2000);
       }
 
       // 3. Instant sync on tab visibility or window focus
@@ -7465,7 +7512,13 @@
     async function checkAdminSyncNow() {
       if (!TOKEN) return;
       try {
-        const res = await fetch(getSyncEndpoint('/live-sync/status'));
+        const res = await fetch(getSyncEndpoint('/live-sync/status?_t=' + Date.now()), {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        });
         if (res.ok) {
           const data = await res.json();
           if (data && data.version && data.version !== adminLastSyncVersion) {

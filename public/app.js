@@ -490,15 +490,28 @@ const API_BASE = (function() {
 })();
 
 async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(API_BASE + path, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: 'Bearer ' + S.token } : {}) },
+  const m = method.toUpperCase();
+  const sep = path.includes('?') ? '&' : '?';
+  const url = m === 'GET'
+    ? `${API_BASE}${path}${sep}_t=${Date.now()}`
+    : `${API_BASE}${path}`;
+  const res = await fetch(url, {
+    method: m,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      ...(S.token ? { Authorization: 'Bearer ' + S.token } : {})
+    },
     body: body ? JSON.stringify(body) : undefined,
     cache: 'no-store'
   });
   let data = null;
   try { data = await res.json(); } catch { /* ignore */ }
   if (!res.ok) throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
+  if (m !== 'GET' && typeof broadcastPcLocalSync === 'function') {
+    broadcastPcLocalSync({ entity: 'general', action: m.toLowerCase(), path });
+  }
   return data;
 }
 
@@ -9800,13 +9813,43 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
 })();
 
 // ============================================================================
-// REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION CLIENT (EventSource + Fallback)
+// REAL-TIME MULTI-DEVICE DATA SYNCHRONIZATION CLIENT (EventSource + Polling + DB Sync)
 // Syncs data live across all open devices without page refresh
 // ============================================================================
 let pcLastSyncVersion = 0;
 let pcSyncEventSource = null;
 let pcSyncPollInterval = null;
 let isPcSyncUpdating = false;
+
+// Cross-tab broadcast channel & localStorage triggers for instant 0ms same-origin multi-tab sync
+const pcSyncChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('pujaconnect_live_sync') : null;
+if (pcSyncChannel) {
+  pcSyncChannel.onmessage = (evt) => {
+    if (evt.data && evt.data.version && evt.data.version !== pcLastSyncVersion) {
+      pcLastSyncVersion = evt.data.version;
+      handleIncomingSyncUpdate(evt.data);
+    }
+  };
+}
+window.addEventListener('storage', (evt) => {
+  if (evt.key === 'pc_live_sync_trigger' && evt.newValue) {
+    try {
+      const d = JSON.parse(evt.newValue);
+      if (d && d.version && d.version !== pcLastSyncVersion) {
+        pcLastSyncVersion = d.version;
+        handleIncomingSyncUpdate(d);
+      }
+    } catch (e) {}
+  }
+});
+
+function broadcastPcLocalSync(eventData = {}) {
+  try {
+    const payload = { ...eventData, version: Date.now(), _t: Date.now() };
+    if (pcSyncChannel) pcSyncChannel.postMessage(payload);
+    localStorage.setItem('pc_live_sync_trigger', JSON.stringify(payload));
+  } catch (e) {}
+}
 
 function getPcSyncEndpoint(path) {
   const base = (typeof API_BASE !== 'undefined' && API_BASE) ? API_BASE : '/api';
@@ -9838,20 +9881,26 @@ function initRealtimeSync() {
         }
       };
       pcSyncEventSource.onerror = () => {
-        // SSE auto-reconnects; interval handles any intermittent network drop
+        // SSE auto-reconnects; polling fallback below guarantees live synchronization on Vercel serverless
       };
     } catch (e) {
       console.warn('SSE initialization notice:', e);
     }
   }
 
-  // 2. High-frequency heartbeat polling fallback for multi-device synchronization
+  // 2. High-frequency heartbeat polling fallback (2.0s) for cross-device synchronization (Mobile <-> Desktop)
   if (!pcSyncPollInterval) {
     pcSyncPollInterval = setInterval(async () => {
-      // If browser tab is in background or hidden, skip polling to conserve CPU & memory
+      // If browser tab is in background or hidden, skip polling to conserve CPU & battery
       if (document.hidden) return;
       try {
-        const res = await fetch(getPcSyncEndpoint('/live-sync/status'));
+        const res = await fetch(getPcSyncEndpoint('/live-sync/status?_t=' + Date.now()), {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        });
         if (res.ok) {
           const data = await res.json();
           if (data && data.version && data.version !== pcLastSyncVersion) {
@@ -9862,7 +9911,7 @@ function initRealtimeSync() {
           }
         }
       } catch (e) {}
-    }, 2500);
+    }, 2000);
   }
 
   // 3. Instant sync on tab visibility or window focus
@@ -9874,7 +9923,13 @@ function initRealtimeSync() {
 
 async function checkSyncNow() {
   try {
-    const res = await fetch(getPcSyncEndpoint('/live-sync/status'));
+    const res = await fetch(getPcSyncEndpoint('/live-sync/status?_t=' + Date.now()), {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
+    });
     if (res.ok) {
       const data = await res.json();
       if (data && data.version && data.version !== pcLastSyncVersion) {
@@ -9900,17 +9955,19 @@ async function handleIncomingSyncUpdate(eventData = {}) {
     try {
       const entity = eventData.entity || 'general';
 
+      // Always invalidate cached data to ensure subsequent views fetch fresh data from MongoDB
+      S.bookings = null;
+      S.longs = null;
+      S._panditBookings = null;
+
       // Check if a modal is currently open to avoid disrupting active form input
       const modalRoot = $('#modal-root');
       const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
 
       // A. If user is currently on Dashboard, refresh live dashboard data without page reload
       if (S.view === 'dashboard' && S.user && !isModalOpen) {
-        // Reset cached bookings to force fresh pull from DB
-        S.bookings = null;
-        S.longs = null;
         await renderDashboard();
-        return; // Do not waste cycles re-rendering background views when user is on dashboard
+        return; // Cycles conserved
       }
 
       // B. If Pujas, Services, or Pricing changed
