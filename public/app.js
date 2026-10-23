@@ -2617,18 +2617,9 @@ async function openBooking(arg) {
 }
 
 
-/* ---------- admin direct portal (passwordless) ---------- */
-async function openAdminDirect() {
-  try {
-    const r = await api('/auth/admin-direct', { method: 'POST' });
-    saveSession(r.user, r.token);
-    toast('Welcome, Super Admin! 🛡️ Access granted without password.');
-    showView('dashboard');
-  } catch (e) {
-    saveSession({ name: 'Super Admin', email: 'admin@pujaconnect.com', phone: '0000000000', role: 'admin' }, 'super_admin_token');
-    toast('Access granted: Admin Dashboard');
-    showView('dashboard');
-  }
+/* ---------- admin portal gateway ---------- */
+function openAdminDirect() {
+  window.location.href = '/admin';
 }
 
 /* ---------- auth ---------- */

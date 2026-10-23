@@ -431,10 +431,241 @@
       .th-cb, .td-cb, .admin-table th:last-child, .admin-table td:last-child {
         display: none !important;
       }
+      /* =========================================================
+         SUPER ADMIN SECURITY & SECTION LOCKOUT STYLING
+         ========================================================= */
+      .admin-login-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 999999;
+        background: radial-gradient(circle at 50% 35%, #2d1405 0%, #120501 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        overflow-y: auto;
+      }
+      .admin-login-card {
+        background: #ffffff;
+        border: 2.5px solid #d99a19;
+        border-radius: 18px;
+        padding: 34px 28px;
+        max-width: 440px;
+        width: 100%;
+        box-shadow: 0 24px 64px rgba(0,0,0,0.65);
+        color: #2b1103;
+        position: relative;
+      }
+      .admin-login-header {
+        text-align: center;
+        margin-bottom: 24px;
+      }
+      .admin-login-icon {
+        width: 68px;
+        height: 68px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #d99a19 0%, #8c5305 100%);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #ffffff;
+        box-shadow: 0 6px 18px rgba(217,154,25,0.45);
+        margin-bottom: 14px;
+      }
+      .admin-login-title {
+        font-size: 21px;
+        font-weight: 800;
+        color: #2b1103;
+        margin: 0 0 6px 0;
+      }
+      .admin-login-sub {
+        font-size: 13px;
+        color: #7a5840;
+        line-height: 1.45;
+        margin: 0;
+      }
+      .admin-lockout-banner {
+        background: #fff3f0;
+        border: 2px solid #d32f2f;
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin-bottom: 18px;
+        text-align: center;
+        color: #b71c1c;
+        animation: sec-pulse 2s infinite ease-in-out;
+      }
+      @keyframes sec-pulse {
+        0%, 100% { border-color: #d32f2f; box-shadow: 0 0 0 0 rgba(211,47,47,0.35); }
+        50% { border-color: #ff5252; box-shadow: 0 0 0 6px rgba(211,47,47,0.12); }
+      }
+      .lockout-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: #d32f2f;
+        background: #ffebee;
+        padding: 3px 12px;
+        border-radius: 20px;
+        margin-bottom: 6px;
+      }
+      .lockout-timer-val {
+        font-size: 34px;
+        font-weight: 900;
+        font-family: 'Courier New', Courier, monospace;
+        letter-spacing: 3px;
+        color: #d32f2f;
+        line-height: 1.1;
+        margin: 6px 0;
+      }
+      .lockout-timer-desc {
+        font-size: 12px;
+        font-weight: 600;
+        color: #8a1f1d;
+        line-height: 1.4;
+      }
+      .admin-auth-error {
+        background: #fff1f0;
+        border: 1px solid #ffccc7;
+        color: #cf1322;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 12.5px;
+        font-weight: 600;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .admin-form-group {
+        margin-bottom: 16px;
+      }
+      .admin-form-group label {
+        display: block;
+        font-size: 12.5px;
+        font-weight: 700;
+        color: #451b07;
+        margin-bottom: 6px;
+      }
+      .admin-form-input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 11px 14px;
+        border: 1.5px solid #ebd9c2;
+        border-radius: 8px;
+        font-size: 14px;
+        background: #fffcf8;
+        color: #2b1103;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+      .admin-form-input:focus {
+        border-color: #d99a19;
+        box-shadow: 0 0 0 3px rgba(217,154,25,0.2);
+        outline: none;
+        background: #ffffff;
+      }
+      .admin-form-input:disabled {
+        background: #f5f5f5;
+        color: #999999;
+        cursor: not-allowed;
+        border-color: #dddddd;
+      }
+      .admin-sidebar-section {
+        margin-bottom: 14px;
+      }
+      .admin-sidebar-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #ffd88a;
+        background: rgba(217,154,25,0.12);
+        border-left: 3px solid #d99a19;
+        border-radius: 4px;
+        margin: 10px 6px 6px 6px;
+      }
+      .sec-lock-indicator {
+        display: inline-flex;
+        align-items: center;
+        font-size: 13px;
+        padding: 1px 4px;
+        border-radius: 4px;
+      }
+      .sec-lock-indicator.locked {
+        color: #ff8080;
+      }
+      .sec-lock-indicator.unlocked {
+        color: #81c784;
+      }
     }
   </style>
 </head>
 <body>
+  <!-- ============================================================
+       SUPER ADMIN GATEWAY: CREDENTIALS & LOCKOUT PROTECTION
+       Username: puja | Password: unified mentor
+       ============================================================ -->
+  <div id="admin-login-overlay" class="admin-login-overlay" style="display:none">
+    <div class="admin-login-card">
+      <div class="admin-login-header">
+        <div class="admin-login-icon">
+          <span class="material-icons" style="font-size:36px">shield</span>
+        </div>
+        <h2 class="admin-login-title">PujaConnect Executive Portal</h2>
+        <p class="admin-login-sub">Super Administrator Authentication Gateway. High-security access with rate limiting.</p>
+      </div>
+
+      <!-- Live Lockout Banner (2-Minute Countdown Timer) -->
+      <div id="admin-login-lockout-box" class="admin-lockout-banner" style="display:none">
+        <div class="lockout-badge">
+          <span class="material-icons" style="font-size:14px">timer</span>
+          <span>Security Lockout Active</span>
+        </div>
+        <div id="admin-login-timer-val" class="lockout-timer-val">02:00</div>
+        <div class="lockout-timer-desc">
+          Maximum 2 attempts allowed per minute.<br>
+          Please wait before re-entering your admin password.
+        </div>
+      </div>
+
+      <!-- Error message container -->
+      <div id="admin-login-err" class="admin-auth-error" style="display:none">
+        <span class="material-icons" style="font-size:18px">error_outline</span>
+        <span id="admin-login-err-text">Invalid admin username or password.</span>
+      </div>
+
+      <form id="form-admin-login" onsubmit="event.preventDefault();submitAdminLogin();">
+        <div class="admin-form-group">
+          <label for="adm-login-user">Admin Username</label>
+          <input type="text" id="adm-login-user" class="admin-form-input" placeholder="e.g. puja" autocomplete="username" required>
+        </div>
+        <div class="admin-form-group">
+          <label for="adm-login-pass">Admin Password</label>
+          <input type="password" id="adm-login-pass" class="admin-form-input" placeholder="Enter admin password" autocomplete="current-password" required>
+        </div>
+        <div style="font-size:11.5px;color:#7a5840;margin-bottom:16px;line-height:1.4">
+          <span class="material-icons" style="font-size:13px;vertical-align:middle;color:#d99a19">verified_user</span>
+          Security policy: 2 attempts / min limit. 3rd attempt or 2 failures locks access for 2 minutes.
+        </div>
+        <button type="submit" id="btn-admin-login-submit" class="btn btn-gold btn-lg" style="width:100%;font-weight:800;display:inline-flex;align-items:center;justify-content:center;gap:8px">
+          <span class="material-icons">lock_open</span> Verify Credentials &amp; Enter
+        </button>
+      </form>
+      <div style="text-align:center;margin-top:16px">
+        <a href="/" style="font-size:12.5px;color:#8c5305;text-decoration:none;font-weight:600">
+          <span class="material-icons" style="font-size:14px;vertical-align:middle">arrow_back</span> Return to Public Website
+        </a>
+      </div>
+    </div>
+  </div>
+
   <header class="admin-header">
     <div class="admin-title">
       <span class="om">ॐ</span>
@@ -454,6 +685,12 @@
       </a>
       <button class="btn btn-gold" onclick="switchAdminTab('settings')" style="padding:7px 16px;font-size:13.5px;font-weight:700;display:inline-flex;align-items:center;gap:6px">
         <span class="material-icons" style="font-size:18px">settings</span> System Settings
+      </button>
+      <button type="button" class="btn btn-outline" onclick="lockAllSections()" style="padding:6px 12px;font-size:12px;color:#ffd88a;border-color:#ffd88a;display:inline-flex;align-items:center;gap:4px" title="Re-lock all 4 protected sections">
+        <span class="material-icons" style="font-size:14px">lock</span> Lock Sections
+      </button>
+      <button type="button" class="btn btn-outline red" onclick="adminLogout()" style="padding:6px 12px;font-size:12px;color:#ff9e9e;border-color:#ff9e9e;display:inline-flex;align-items:center;gap:4px" title="Secure Admin Logout">
+        <span class="material-icons" style="font-size:14px">logout</span> Logout
       </button>
       <a href="/" class="btn btn-outline" style="padding:6px 14px;font-size:13px;color:#ffd88a;border-color:#ffd88a;text-decoration:none">
         <span class="material-icons" style="font-size:16px;vertical-align:middle">public</span> View Website
@@ -492,7 +729,7 @@
     <div class="admin-sidebar-backdrop" id="admin-sidebar-backdrop"></div>
 
     <div class="admin-layout-wrapper">
-      <!-- Left-side Navigation Sidebar with All Buttons -->
+      <!-- Left-side Navigation Sidebar with All Buttons Grouped by Section -->
       <aside class="admin-sidebar" id="admin-sidebar">
         <div class="admin-sidebar-header">
           <h4><span class="material-icons" style="color:var(--admin-gold);font-size:18px">admin_panel_settings</span> Admin Sections</h4>
@@ -501,56 +738,104 @@
           </button>
         </div>
         <div class="admin-tabs">
-          <button class="admin-tab" data-tab="settings" onclick="switchAdminTab('settings')">
-            <span class="material-icons">settings</span>
-            <span class="admin-tab-label">System Settings</span>
-          </button>
-          <button class="admin-tab active" data-tab="bookings" onclick="switchAdminTab('bookings')">
-            <span class="material-icons">event_available</span>
-            <span class="admin-tab-label">Bookings &amp; Assignments</span>
-            <span id="badge-bookings-count" class="admin-tab-pill">0</span>
-          </button>
-          <button class="admin-tab" data-tab="kyc" onclick="switchAdminTab('kyc')">
-            <span class="material-icons">verified_user</span>
-            <span class="admin-tab-label">KYC Queue</span>
-            <span id="badge-kyc-count" class="admin-tab-pill">0</span>
-          </button>
-          <button class="admin-tab" data-tab="pandits" onclick="switchAdminTab('pandits')">
-            <span class="material-icons">badge</span>
-            <span class="admin-tab-label">Pandits Directory</span>
-          </button>
-          <button class="admin-tab" data-tab="pujas" onclick="switchAdminTab('pujas')">
-            <span class="material-icons">spa</span>
-            <span class="admin-tab-label">Puja Catalog</span>
-          </button>
-          <button class="admin-tab" data-tab="longs" onclick="switchAdminTab('longs')">
-            <span class="material-icons">event_note</span>
-            <span class="admin-tab-label">Multi-Day Requests</span>
-            <span id="badge-long-count" class="admin-tab-pill">0</span>
-          </button>
-          <button class="admin-tab" data-tab="payments" onclick="switchAdminTab('payments')">
-            <span class="material-icons">payments</span>
-            <span class="admin-tab-label">Payment Verifications</span>
-            <span id="badge-payments-count" class="admin-tab-pill">0</span>
-          </button>
-          <button class="admin-tab" data-tab="pandit-payouts" onclick="switchAdminTab('pandit-payouts')">
-            <span class="material-icons">account_balance_wallet</span>
-            <span class="admin-tab-label">Pandit Payment</span>
-            <span id="badge-pandit-payouts-count" class="admin-tab-pill">0</span>
-          </button>
-          <button class="admin-tab" data-tab="platform-bank" onclick="switchAdminTab('platform-bank')">
-            <span class="material-icons">account_balance</span>
-            <span class="admin-tab-label">Platform Bank &amp; UPI</span>
-          </button>
-          <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">
-            <span class="material-icons">group</span>
-            <span class="admin-tab-label">Devotees</span>
-          </button>
-          <button class="admin-tab" data-tab="media" onclick="switchAdminTab('media')">
-            <span class="material-icons">campaign</span>
-            <span class="admin-tab-label">Media &amp; Offers</span>
-            <span id="badge-media-count" class="admin-tab-pill">0</span>
-          </button>
+          <!-- Section 1: Bookings & Operations (Pass: unified mentor) -->
+          <div class="admin-sidebar-section">
+            <div class="admin-sidebar-section-header">
+              <span>Section 1: Operations</span>
+              <span class="sec-lock-indicator locked" id="sec-ind-section_1" title="Section 1 Password Status">
+                <span class="material-icons" style="font-size:14px">lock</span>
+              </span>
+            </div>
+            <button class="admin-tab active" data-tab="bookings" onclick="switchAdminTab('bookings')">
+              <span class="material-icons">event_available</span>
+              <span class="admin-tab-label">Bookings &amp; Assignments</span>
+              <span id="badge-bookings-count" class="admin-tab-pill">0</span>
+            </button>
+            <button class="admin-tab" data-tab="longs" onclick="switchAdminTab('longs')">
+              <span class="material-icons">event_note</span>
+              <span class="admin-tab-label">Multi-Day Requests</span>
+              <span id="badge-long-count" class="admin-tab-pill">0</span>
+            </button>
+          </div>
+
+          <!-- Section 2: Scholars, Catalog & Settings (Pass: unified mentor) -->
+          <div class="admin-sidebar-section">
+            <div class="admin-sidebar-section-header">
+              <span>Section 2: Scholars &amp; Catalog</span>
+              <span class="sec-lock-indicator locked" id="sec-ind-section_2" title="Section 2 Password Status">
+                <span class="material-icons" style="font-size:14px">lock</span>
+              </span>
+            </div>
+            <button class="admin-tab" data-tab="kyc" onclick="switchAdminTab('kyc')">
+              <span class="material-icons">verified_user</span>
+              <span class="admin-tab-label">KYC Queue</span>
+              <span id="badge-kyc-count" class="admin-tab-pill">0</span>
+            </button>
+            <button class="admin-tab" data-tab="pandits" onclick="switchAdminTab('pandits')">
+              <span class="material-icons">badge</span>
+              <span class="admin-tab-label">Pandits Directory</span>
+            </button>
+            <button class="admin-tab" data-tab="pujas" onclick="switchAdminTab('pujas')">
+              <span class="material-icons">spa</span>
+              <span class="admin-tab-label">Puja Catalog</span>
+            </button>
+            <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">
+              <span class="material-icons">group</span>
+              <span class="admin-tab-label">Devotees</span>
+            </button>
+            <button class="admin-tab" data-tab="settings" onclick="switchAdminTab('settings')">
+              <span class="material-icons">settings</span>
+              <span class="admin-tab-label">System Settings</span>
+            </button>
+          </div>
+
+          <!-- Section 3: Finance & Payouts (Pass: pandit) -->
+          <div class="admin-sidebar-section">
+            <div class="admin-sidebar-section-header">
+              <span>Section 3: Finance &amp; Payouts</span>
+              <span class="sec-lock-indicator locked" id="sec-ind-section_3" title="Section 3 Password Status">
+                <span class="material-icons" style="font-size:14px">lock</span>
+              </span>
+            </div>
+            <button class="admin-tab" data-tab="payments" onclick="switchAdminTab('payments')">
+              <span class="material-icons">payments</span>
+              <span class="admin-tab-label">Payment Verifications</span>
+              <span id="badge-payments-count" class="admin-tab-pill">0</span>
+            </button>
+            <button class="admin-tab" data-tab="platform-bank" onclick="switchAdminTab('platform-bank')">
+              <span class="material-icons">account_balance</span>
+              <span class="admin-tab-label">Platform Bank &amp; UPI</span>
+            </button>
+            <button class="admin-tab" data-tab="pandit-payouts" onclick="switchAdminTab('pandit-payouts')">
+              <span class="material-icons">account_balance_wallet</span>
+              <span class="admin-tab-label">Pandit Payment</span>
+              <span id="badge-pandit-payouts-count" class="admin-tab-pill">0</span>
+            </button>
+          </div>
+
+          <!-- Section 4: Media & Offers (Pass: media) -->
+          <div class="admin-sidebar-section">
+            <div class="admin-sidebar-section-header">
+              <span>Section 4: Media &amp; Offers</span>
+              <span class="sec-lock-indicator locked" id="sec-ind-section_4" title="Section 4 Password Status">
+                <span class="material-icons" style="font-size:14px">lock</span>
+              </span>
+            </div>
+            <button class="admin-tab" data-tab="media" onclick="switchAdminTab('media')">
+              <span class="material-icons">campaign</span>
+              <span class="admin-tab-label">Media &amp; Offers</span>
+              <span id="badge-media-count" class="admin-tab-pill">0</span>
+            </button>
+          </div>
+
+          <div style="padding:10px 6px;display:flex;flex-direction:column;gap:8px;border-top:1px solid rgba(255,255,255,0.1);margin-top:8px">
+            <button type="button" class="btn btn-outline btn-sm" onclick="lockAllSections()" style="width:100%;font-size:12px;color:#ffd88a;border-color:#ffd88a;display:inline-flex;align-items:center;justify-content:center;gap:6px">
+              <span class="material-icons" style="font-size:15px">lock</span> Re-lock Sections
+            </button>
+            <button type="button" class="btn btn-outline red btn-sm" onclick="adminLogout()" style="width:100%;font-size:12px;display:inline-flex;align-items:center;justify-content:center;gap:6px">
+              <span class="material-icons" style="font-size:15px">logout</span> Logout Super Admin
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -1056,7 +1341,514 @@
       if (backdrop) backdrop.classList.remove('active');
     }
 
+    // =========================================================================
+    // 4 PROTECTED SECTIONS & SECURITY CONFIGURATION
+    // 1: Bookings & Assignments, Multi-Day Requests (unified mentor)
+    // 2: KYC Queue, Pandits Directory & Rates, Puja Catalog, Devotees, System Settings (unified mentor)
+    // 3: Payment Verifications, Platform Bank & UPI, Pandit Payment (pandit)
+    // 4: Media & Offers (media)
+    // =========================================================================
+    const SECTION_DEFS = {
+      section_1: {
+        id: 'section_1',
+        name: 'Bookings & Operations',
+        description: 'Bookings & Assignments, Multi-Day Requests',
+        tabs: ['bookings', 'longs', 'long'],
+        tabLabels: ['Bookings & Assignments', 'Multi-Day Requests']
+      },
+      section_2: {
+        id: 'section_2',
+        name: 'Scholars, Catalog & Settings',
+        description: 'KYC Queue, Pandits Directory & Rates, Puja Catalog, Devotees, System Settings',
+        tabs: ['kyc', 'pandits', 'pujas', 'users', 'devotees', 'settings'],
+        tabLabels: ['KYC Queue', 'Pandits Directory', 'Puja Catalog', 'Devotees', 'System Settings']
+      },
+      section_3: {
+        id: 'section_3',
+        name: 'Finance & Payouts',
+        description: 'Payment Verifications, Platform Bank & UPI, Pandit Payment',
+        tabs: ['payments', 'platform-bank', 'bank', 'pandit-payouts', 'pandit-settlements'],
+        tabLabels: ['Payment Verifications', 'Platform Bank & UPI', 'Pandit Payment']
+      },
+      section_4: {
+        id: 'section_4',
+        name: 'Media & Offers',
+        description: 'Media and Offers',
+        tabs: ['media', 'media-offers'],
+        tabLabels: ['Media & Offers']
+      }
+    };
+
+    function getSectionByTab(tab) {
+      for (const k of Object.keys(SECTION_DEFS)) {
+        if (SECTION_DEFS[k].tabs.includes(tab)) return SECTION_DEFS[k];
+      }
+      return null;
+    }
+
+    function isSectionUnlocked(secId) {
+      return sessionStorage.getItem('pc_sec_unlocked_' + secId) === 'true';
+    }
+
+    function setSectionUnlocked(secId) {
+      sessionStorage.setItem('pc_sec_unlocked_' + secId, 'true');
+      updateSidebarLockBadges();
+    }
+
+    function updateSidebarLockBadges() {
+      Object.keys(SECTION_DEFS).forEach(secId => {
+        const ind = document.getElementById('sec-ind-' + secId);
+        if (!ind) return;
+        const unlocked = isSectionUnlocked(secId);
+        ind.className = 'sec-lock-indicator ' + (unlocked ? 'unlocked' : 'locked');
+        ind.title = unlocked ? 'Section Unlocked' : 'Section Locked - Password Required';
+        ind.innerHTML = `<span class="material-icons" style="font-size:14px">${unlocked ? 'lock_open' : 'lock'}</span>`;
+      });
+    }
+
+    function lockAllSections() {
+      Object.keys(SECTION_DEFS).forEach(secId => {
+        sessionStorage.removeItem('pc_sec_unlocked_' + secId);
+      });
+      updateSidebarLockBadges();
+      toast('All 4 protected sections have been re-locked 🔒');
+      const sec = getSectionByTab(CURRENT_TAB);
+      if (sec) {
+        showSectionPasswordModal(sec, CURRENT_TAB);
+      }
+    }
+
+    // =========================================================================
+    // Rate Limiting & Lockout Client Controller
+    // Policy: Maximum 2 attempts per 1 minute window.
+    // If 2 failures occur, or 3rd attempt is made: 2-minute (120s) lockout.
+    // Timer is displayed live and persists across page reloads in localStorage.
+    // =========================================================================
+    function getLockoutRemaining(key) {
+      const until = parseInt(localStorage.getItem('lockout_' + key) || '0', 10);
+      const now = Date.now();
+      if (until > now) {
+        return Math.ceil((until - now) / 1000);
+      }
+      return 0;
+    }
+
+    function setLockout(key, seconds = 120) {
+      const until = Date.now() + (seconds * 1000);
+      localStorage.setItem('lockout_' + key, String(until));
+      return until;
+    }
+
+    function clearLockout(key) {
+      localStorage.removeItem('lockout_' + key);
+    }
+
+    function recordClientAttempt(key) {
+      const now = Date.now();
+      const storageKey = 'attempts_' + key;
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem(storageKey)) || []; } catch {}
+      list = list.filter(ts => (now - ts) < 60000);
+      list.push(now);
+      localStorage.setItem(storageKey, JSON.stringify(list));
+      return list.length;
+    }
+
+    function clearClientAttempts(key) {
+      localStorage.removeItem('attempts_' + key);
+    }
+
+    // =========================================================================
+    // Super Admin Gateway: Login, Lockout Countdown & Authentication
+    // =========================================================================
+    let loginTimerInterval = null;
+
+    function checkAndRunLoginTimer() {
+      const lockoutBox = document.getElementById('admin-login-lockout-box');
+      const timerVal = document.getElementById('admin-login-timer-val');
+      const userInput = document.getElementById('adm-login-user');
+      const passInput = document.getElementById('adm-login-pass');
+      const submitBtn = document.getElementById('btn-admin-login-submit');
+      const errBox = document.getElementById('admin-login-err');
+
+      if (loginTimerInterval) {
+        clearInterval(loginTimerInterval);
+        loginTimerInterval = null;
+      }
+
+      function tick() {
+        const remaining = getLockoutRemaining('admin_login');
+        if (remaining > 0) {
+          if (lockoutBox) lockoutBox.style.display = 'block';
+          if (errBox) errBox.style.display = 'none';
+          const m = String(Math.floor(remaining / 60)).padStart(2, '0');
+          const s = String(remaining % 60).padStart(2, '0');
+          if (timerVal) timerVal.textContent = `${m}:${s}`;
+          if (userInput) userInput.disabled = true;
+          if (passInput) passInput.disabled = true;
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `<span class="material-icons spin">hourglass_empty</span> Locked for ${m}:${s}`;
+          }
+          return true;
+        } else {
+          if (lockoutBox) lockoutBox.style.display = 'none';
+          if (userInput) userInput.disabled = false;
+          if (passInput) passInput.disabled = false;
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span class="material-icons">lock_open</span> Verify Credentials &amp; Enter';
+          }
+          clearLockout('admin_login');
+          if (loginTimerInterval) {
+            clearInterval(loginTimerInterval);
+            loginTimerInterval = null;
+          }
+          return false;
+        }
+      }
+
+      const isLocked = tick();
+      if (isLocked) {
+        loginTimerInterval = setInterval(tick, 1000);
+      }
+      return isLocked;
+    }
+
+    function showAdminLoginGate() {
+      const overlay = document.getElementById('admin-login-overlay');
+      if (overlay) overlay.style.display = 'flex';
+      checkAndRunLoginTimer();
+      const passInput = document.getElementById('adm-login-pass');
+      if (passInput && !passInput.disabled) {
+        setTimeout(() => passInput.focus(), 150);
+      }
+    }
+
+    function hideAdminLoginGate() {
+      const overlay = document.getElementById('admin-login-overlay');
+      if (overlay) overlay.style.display = 'none';
+      if (loginTimerInterval) {
+        clearInterval(loginTimerInterval);
+        loginTimerInterval = null;
+      }
+    }
+
+    async function submitAdminLogin() {
+      const userEl = document.getElementById('adm-login-user');
+      const passEl = document.getElementById('adm-login-pass');
+      const errBox = document.getElementById('admin-login-err');
+      const errText = document.getElementById('admin-login-err-text');
+      const submitBtn = document.getElementById('btn-admin-login-submit');
+
+      const username = userEl ? userEl.value.trim() : '';
+      const password = passEl ? passEl.value.trim() : '';
+
+      // Check if currently locked out
+      if (getLockoutRemaining('admin_login') > 0) {
+        checkAndRunLoginTimer();
+        return;
+      }
+
+      // Record client-side attempt (limit: 2 attempts in 60s)
+      const attemptsInWindow = recordClientAttempt('admin_login');
+      if (attemptsInWindow >= 3) {
+        setLockout('admin_login', 120);
+        checkAndRunLoginTimer();
+        if (errBox) {
+          errBox.style.display = 'flex';
+          errText.textContent = 'Maximum attempts exceeded (2 attempts/minute). Security lockout active for 2 minutes.';
+        }
+        return;
+      }
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Authenticating...';
+      }
+      if (errBox) errBox.style.display = 'none';
+
+      try {
+        const res = await fetch(API_BASE + '/auth/admin-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.status === 429 || data.locked) {
+          const retryAfter = data.retryAfter || 120;
+          setLockout('admin_login', retryAfter);
+          checkAndRunLoginTimer();
+          if (errBox) {
+            errBox.style.display = 'flex';
+            errText.textContent = data.error || 'Security lockout active for 2 minutes.';
+          }
+          return;
+        }
+
+        if (!res.ok) {
+          // If this was the 2nd failed attempt in 1 minute, trigger 2-minute lockout
+          if (attemptsInWindow >= 2) {
+            setLockout('admin_login', 120);
+            checkAndRunLoginTimer();
+            if (errBox) {
+              errBox.style.display = 'flex';
+              errText.textContent = '2 failed attempts reached. Security lockout activated for 2 minutes.';
+            }
+          } else {
+            if (errBox) {
+              errBox.style.display = 'flex';
+              errText.textContent = (data && data.error) || 'Invalid admin credentials. 1 attempt remaining before 2-minute lockout.';
+            }
+          }
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span class="material-icons">lock_open</span> Verify Credentials &amp; Enter';
+          }
+          return;
+        }
+
+        // Login Succeeded!
+        clearLockout('admin_login');
+        clearClientAttempts('admin_login');
+        TOKEN = data.token;
+        localStorage.setItem('admin_token', data.token);
+        localStorage.setItem('pc_admin_token', data.token);
+
+        hideAdminLoginGate();
+        toast('Super Admin Access Granted 🛡️');
+        await loadData();
+        updateSidebarLockBadges();
+
+        const requestedTab = (location.hash && location.hash.replace('#', '')) || 'bookings';
+        switchAdminTab(requestedTab);
+      } catch (err) {
+        if (errBox) {
+          errBox.style.display = 'flex';
+          errText.textContent = err.message || 'Authentication failed. Please try again.';
+        }
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<span class="material-icons">lock_open</span> Verify Credentials &amp; Enter';
+        }
+      }
+    }
+
+    function adminLogout() {
+      TOKEN = '';
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('pc_admin_token');
+      Object.keys(SECTION_DEFS).forEach(secId => {
+        sessionStorage.removeItem('pc_sec_unlocked_' + secId);
+      });
+      toast('Super Admin session ended securely 🔒');
+      showAdminLoginGate();
+    }
+
+    // =========================================================================
+    // Section Password Modal & Real-Time Countdown Controller
+    // =========================================================================
+    let sectionTimerInterval = null;
+
+    function showSectionPasswordModal(section, requestedTab) {
+      if (!section) return;
+      const secKey = 'sec_' + section.id;
+
+      const modalHtml = `
+        <div style="padding:10px 4px">
+          <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:16px 18px;margin-bottom:18px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <span class="material-icons" style="font-size:24px;color:#d99a19">admin_panel_settings</span>
+              <div style="font-size:16px;font-weight:800;color:#2b1103">${esc(section.name)}</div>
+            </div>
+            <div style="font-size:13px;color:#7a5840;margin-bottom:10px">${esc(section.description)}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              ${section.tabLabels.map(l => `<span class="badge amber" style="font-size:11px;padding:3px 8px">${esc(l)}</span>`).join('')}
+            </div>
+          </div>
+
+          <!-- Live Section Lockout Banner (2-Minute Countdown Timer) -->
+          <div id="sec-modal-lockout-box" class="admin-lockout-banner" style="display:none">
+            <div class="lockout-badge">
+              <span class="material-icons" style="font-size:14px">timer</span>
+              <span>Section Lockout Active</span>
+            </div>
+            <div id="sec-modal-timer-val" class="lockout-timer-val">02:00</div>
+            <div class="lockout-timer-desc">
+              Maximum 2 attempts allowed per minute.<br>
+              Please wait before re-entering section password.
+            </div>
+          </div>
+
+          <!-- Section Error Message -->
+          <div id="sec-modal-err" class="admin-auth-error" style="display:none">
+            <span class="material-icons" style="font-size:18px">error_outline</span>
+            <span id="sec-modal-err-text">Incorrect section password.</span>
+          </div>
+
+          <form id="form-section-auth" onsubmit="event.preventDefault();submitSectionAuth('${section.id}', '${requestedTab}');">
+            <div class="admin-form-group">
+              <label for="sec-pass-input">Enter Section Password</label>
+              <input type="password" id="sec-pass-input" class="admin-form-input" placeholder="Enter password to unlock section" required autocomplete="current-password">
+            </div>
+            <div style="font-size:11.5px;color:#7a5840;margin-bottom:16px;line-height:1.4">
+              <span class="material-icons" style="font-size:13px;vertical-align:middle;color:#d99a19">verified_user</span>
+              Rate Limit Policy: Max 2 attempts in 1 min. 2 failed attempts trigger 2-minute lockout.
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end">
+              <button type="button" class="btn btn-outline dark" onclick="closeModal()">Cancel</button>
+              <button type="submit" id="btn-sec-auth-submit" class="btn btn-gold" style="font-weight:800;display:inline-flex;align-items:center;gap:6px">
+                <span class="material-icons">lock_open</span> Unlock Section
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+
+      openModal(`🔒 Security Verification: ${section.name}`, modalHtml, () => {
+        const input = document.getElementById('sec-pass-input');
+        const submitBtn = document.getElementById('btn-sec-auth-submit');
+        const lockoutBox = document.getElementById('sec-modal-lockout-box');
+        const timerVal = document.getElementById('sec-modal-timer-val');
+        const errBox = document.getElementById('sec-modal-err');
+
+        if (sectionTimerInterval) {
+          clearInterval(sectionTimerInterval);
+          sectionTimerInterval = null;
+        }
+
+        function tickSec() {
+          const remaining = getLockoutRemaining(secKey);
+          if (remaining > 0) {
+            if (lockoutBox) lockoutBox.style.display = 'block';
+            if (errBox) errBox.style.display = 'none';
+            const m = String(Math.floor(remaining / 60)).padStart(2, '0');
+            const s = String(remaining % 60).padStart(2, '0');
+            if (timerVal) timerVal.textContent = `${m}:${s}`;
+            if (input) input.disabled = true;
+            if (submitBtn) {
+              submitBtn.disabled = true;
+              submitBtn.innerHTML = `<span class="material-icons spin">hourglass_empty</span> Locked for ${m}:${s}`;
+            }
+            return true;
+          } else {
+            if (lockoutBox) lockoutBox.style.display = 'none';
+            if (input) input.disabled = false;
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = '<span class="material-icons">lock_open</span> Unlock Section';
+            }
+            clearLockout(secKey);
+            if (sectionTimerInterval) {
+              clearInterval(sectionTimerInterval);
+              sectionTimerInterval = null;
+            }
+            return false;
+          }
+        }
+
+        const isSecLocked = tickSec();
+        if (isSecLocked) {
+          sectionTimerInterval = setInterval(tickSec, 1000);
+        } else if (input) {
+          setTimeout(() => input.focus(), 150);
+        }
+      });
+    }
+
+    async function submitSectionAuth(secId, requestedTab) {
+      const section = SECTION_DEFS[secId];
+      if (!section) return;
+      const secKey = 'sec_' + secId;
+
+      const input = document.getElementById('sec-pass-input');
+      const submitBtn = document.getElementById('btn-sec-auth-submit');
+      const errBox = document.getElementById('sec-modal-err');
+      const errText = document.getElementById('sec-modal-err-text');
+      const password = input ? input.value.trim() : '';
+
+      // Check client lockout
+      if (getLockoutRemaining(secKey) > 0) return;
+
+      // Rate limit check: max 2 attempts per 60s
+      const attempts = recordClientAttempt(secKey);
+      if (attempts >= 3) {
+        setLockout(secKey, 120);
+        showSectionPasswordModal(section, requestedTab);
+        return;
+      }
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="material-icons spin">sync</span> Verifying...';
+      }
+      if (errBox) errBox.style.display = 'none';
+
+      try {
+        const res = await fetch(API_BASE + '/admin/verify-section', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {})
+          },
+          body: JSON.stringify({ sectionId: secId, password })
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.status === 429 || data.locked) {
+          const retryAfter = data.retryAfter || 120;
+          setLockout(secKey, retryAfter);
+          showSectionPasswordModal(section, requestedTab);
+          return;
+        }
+
+        if (!res.ok) {
+          if (attempts >= 2) {
+            setLockout(secKey, 120);
+            showSectionPasswordModal(section, requestedTab);
+          } else {
+            if (errBox) {
+              errBox.style.display = 'flex';
+              errText.textContent = data.error || 'Incorrect section password. 1 attempt remaining before 2-minute lockout.';
+            }
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = '<span class="material-icons">lock_open</span> Unlock Section';
+            }
+          }
+          return;
+        }
+
+        // Section Unlocked Successfully!
+        clearLockout(secKey);
+        clearClientAttempts(secKey);
+        setSectionUnlocked(secId);
+        closeModal();
+        toast(`Section "${section.name}" Unlocked Successfully! 🛡️`);
+        openAdminTabDirect(requestedTab);
+      } catch (e) {
+        if (errBox) {
+          errBox.style.display = 'flex';
+          errText.textContent = e.message || 'Verification failed. Please retry.';
+        }
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<span class="material-icons">lock_open</span> Unlock Section';
+        }
+      }
+    }
+
     function switchAdminTab(tab) {
+      const sec = getSectionByTab(tab);
+      if (sec && !isSectionUnlocked(sec.id)) {
+        showSectionPasswordModal(sec, tab);
+        return;
+      }
+      openAdminTabDirect(tab);
+    }
+
+    function openAdminTabDirect(tab) {
       CURRENT_TAB = tab;
       document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
       
@@ -6448,16 +7240,15 @@
         await loadData();
       };
 
-      try {
-        const r = await api('/auth/admin-direct', { method: 'POST' });
-        if (r && r.token) {
-          TOKEN = r.token;
-          localStorage.setItem('admin_token', r.token);
-          localStorage.setItem('pc_admin_token', r.token);
-          toast('Super Admin Access Granted 🛡️');
+      // Verify existing TOKEN validity
+      let isTokenValid = false;
+      if (TOKEN) {
+        try {
+          const test = await api('/admin/stats');
+          if (test) isTokenValid = true;
+        } catch {
+          isTokenValid = false;
         }
-      } catch (e) {
-        console.warn('Direct admin auth notice:', e.message);
       }
 
       const toggleBtn = document.getElementById('btn-toggle-admin-menu');
@@ -6467,12 +7258,20 @@
       const backdrop = document.getElementById('admin-sidebar-backdrop');
       if (backdrop) backdrop.onclick = closeAdminSidebar;
 
-      await loadData();
+      if (!isTokenValid) {
+        TOKEN = '';
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('pc_admin_token');
+        showAdminLoginGate();
+      } else {
+        hideAdminLoginGate();
+        await loadData();
+        updateSidebarLockBadges();
 
-      // Support direct tab opening via URL hash (e.g. /admin.html#settings)
-      if (location.hash && location.hash.replace('#', '')) {
-        switchAdminTab(location.hash.replace('#', ''));
+        const initialTab = (location.hash && location.hash.replace('#', '')) || 'bookings';
+        switchAdminTab(initialTab);
       }
+
       window.addEventListener('hashchange', () => {
         const tab = location.hash.replace('#', '');
         if (tab) switchAdminTab(tab);

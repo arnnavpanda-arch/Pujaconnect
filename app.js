@@ -48,7 +48,7 @@ app.get('/api/health', wrap(async (req, res) => {
 
 // ---- Ensure DB connection for everything else ----
 app.use('/api', wrap(async (req, res, next) => {
-  if (req.path === '/health' || req.path === '/ping' || req.path === '/db-status') {
+  if (req.path === '/health' || req.path === '/ping' || req.path === '/db-status' || req.path === '/auth/admin-login' || req.path === '/admin/verify-section' || req.path === '/admin/sections-info') {
     return next();
   }
   try {
@@ -401,17 +401,316 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   res.json({ user: publicUser(user), token: sign({ email: user.email, role: user.role }) });
 }));
 
-// ---- Direct Passwordless Admin Entry ----
-app.post('/api/auth/admin-direct', wrap(async (req, res) => {
-  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@pujaconnect.com').toLowerCase();
-  let user = await User.findOne({ email: adminEmail });
-  if (!user) {
-    user = await User.create({ name: 'Super Admin', email: adminEmail, phone: '0000000000', password: '', role: 'admin' });
+// ============================================================================
+// ADMIN & SECTION SECURITY: RATE LIMITING & LOCKOUT CONTROLLER
+// Rule: Maximum 2 attempts per 1 minute window.
+// If 2 failed attempts occur, or a 3rd attempt is made within 1 minute:
+// System triggers a strict 2-minute (120 seconds) security lockout with active countdown.
+// ============================================================================
+const adminSecurityAttempts = new Map(); // key -> { attempts: [timestamp], lockoutUntil: timestamp }
+
+function getAdminClientKey(req, scope = 'global') {
+  const forwarded = req.headers['x-forwarded-for'];
+  const ip = (forwarded ? forwarded.split(',')[0].trim() : (req.socket && req.socket.remoteAddress) || '127.0.0.1').replace(/[^a-zA-Z0-9_.-]/g, '_');
+  return `admin_sec_${scope}_${ip}`;
+}
+
+function checkAdminSecurityRateLimit(rateKey) {
+  const now = Date.now();
+  let record = adminSecurityAttempts.get(rateKey);
+  if (!record) {
+    record = { attempts: [], lockoutUntil: 0 };
+    adminSecurityAttempts.set(rateKey, record);
   }
+
+  // 1. Check if currently in an active 2-minute lockout
+  if (record.lockoutUntil && now < record.lockoutUntil) {
+    const remainingSec = Math.ceil((record.lockoutUntil - now) / 1000);
+    return {
+      locked: true,
+      remainingSec,
+      lockoutUntil: record.lockoutUntil,
+      message: `Security lockout active. Please wait ${remainingSec} second(s) before re-entering password.`
+    };
+  }
+
+  // 2. Lockout expired: reset timer and old attempts
+  if (record.lockoutUntil && now >= record.lockoutUntil) {
+    record.lockoutUntil = 0;
+    record.attempts = [];
+  }
+
+  // 3. Keep only attempts made in the last 60 seconds (1 minute window)
+  record.attempts = record.attempts.filter(ts => (now - ts) < 60000);
+
+  // 4. If already reached 2 attempts in the past 60s, trigger 2-minute lockout
+  if (record.attempts.length >= 2) {
+    record.lockoutUntil = now + 120000; // 2 minutes (120,000 ms)
+    return {
+      locked: true,
+      remainingSec: 120,
+      lockoutUntil: record.lockoutUntil,
+      message: 'Maximum attempts exceeded (2 attempts allowed per minute). Security lockout active for 2 minutes.'
+    };
+  }
+
+  return {
+    locked: false,
+    remainingAttempts: 2 - record.attempts.length,
+    remainingSec: 0,
+    lockoutUntil: 0
+  };
+}
+
+function recordAdminSecurityFailure(rateKey) {
+  const now = Date.now();
+  let record = adminSecurityAttempts.get(rateKey);
+  if (!record) {
+    record = { attempts: [], lockoutUntil: 0 };
+    adminSecurityAttempts.set(rateKey, record);
+  }
+
+  record.attempts.push(now);
+  record.attempts = record.attempts.filter(ts => (now - ts) < 60000);
+
+  // 2 failed attempts within 60 seconds triggers a 2-minute (120s) lockout
+  if (record.attempts.length >= 2) {
+    record.lockoutUntil = now + 120000;
+    return {
+      locked: true,
+      remainingSec: 120,
+      lockoutUntil: record.lockoutUntil,
+      remainingAttempts: 0
+    };
+  }
+
+  return {
+    locked: false,
+    remainingSec: 0,
+    lockoutUntil: 0,
+    remainingAttempts: 2 - record.attempts.length
+  };
+}
+
+function clearAdminSecurityAttempts(rateKey) {
+  adminSecurityAttempts.delete(rateKey);
+}
+
+// 4 Protected Sections and their explicit passwords
+const ADMIN_SECTIONS = {
+  section_1: {
+    id: 'section_1',
+    name: 'Bookings & Operations',
+    description: 'Bookings & Assignments, Multi-Day Requests',
+    password: 'unified mentor',
+    tabs: ['bookings', 'longs', 'long']
+  },
+  section_2: {
+    id: 'section_2',
+    name: 'Scholars, Catalog & Settings',
+    description: 'KYC Queue, Pandits Directory & Rates, Puja Catalog, Devotees, System Settings',
+    password: 'unified mentor',
+    tabs: ['kyc', 'pandits', 'pujas', 'users', 'devotees', 'settings']
+  },
+  section_3: {
+    id: 'section_3',
+    name: 'Finance & Payouts',
+    description: 'Payment Verifications, Platform Bank & UPI, Pandit Payment',
+    password: 'pandit',
+    tabs: ['payments', 'platform-bank', 'bank', 'pandit-payouts', 'pandit-settlements']
+  },
+  section_4: {
+    id: 'section_4',
+    name: 'Media & Offers',
+    description: 'Media and Offers',
+    password: 'media',
+    tabs: ['media', 'media-offers']
+  }
+};
+
+// ---- Main Admin Login Endpoint ----
+app.post('/api/auth/admin-login', wrap(async (req, res) => {
+  const rateKey = getAdminClientKey(req, 'login');
+  const rateStatus = checkAdminSecurityRateLimit(rateKey);
+
+  if (rateStatus.locked) {
+    return res.status(429).json({
+      error: rateStatus.message,
+      locked: true,
+      retryAfter: rateStatus.remainingSec,
+      lockoutUntil: rateStatus.lockoutUntil
+    });
+  }
+
+  const { username, password } = req.body || {};
+  const trimmedUser = (username || '').trim().toLowerCase();
+  const trimmedPass = (password || '').trim();
+
+  // Official Admin Credentials:
+  // Username: puja
+  // Password: unified mentor
+  const isValidAdmin = (trimmedUser === 'puja' && trimmedPass === 'unified mentor');
+
+  if (!isValidAdmin) {
+    const failStatus = recordAdminSecurityFailure(rateKey);
+    if (failStatus.locked) {
+      return res.status(429).json({
+        error: 'Incorrect admin credentials. Security lockout activated for 2 minutes.',
+        locked: true,
+        retryAfter: failStatus.remainingSec,
+        lockoutUntil: failStatus.lockoutUntil
+      });
+    }
+    return res.status(401).json({
+      error: 'Invalid admin username or password. 1 attempt remaining before 2-minute lockout.',
+      locked: false,
+      remainingAttempts: failStatus.remainingAttempts
+    });
+  }
+
+  // Clear attempts on successful authentication
+  clearAdminSecurityAttempts(rateKey);
+
+  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@pujaconnect.com').toLowerCase();
+  let user = null;
+  try {
+    if (mongoose.connection.readyState === 1) {
+      user = await User.findOne({ email: adminEmail });
+      if (!user) {
+        user = await User.create({
+          name: 'Super Admin',
+          email: adminEmail,
+          phone: '0000000000',
+          password: '',
+          role: 'admin'
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('DB lookup note in admin-login:', err.message);
+  }
+
+  const adminUser = user ? { name: user.name, email: user.email, phone: user.phone, role: 'admin' } : { name: 'Super Admin', email: adminEmail, phone: '0000000000', role: 'admin' };
+
   res.json({
-    user: { name: user.name, email: user.email, phone: user.phone, role: 'admin' },
-    token: sign({ email: user.email, role: 'admin' })
+    user: adminUser,
+    token: sign({ email: adminEmail, role: 'admin' }),
+    message: 'Super Admin access granted successfully 🛡️'
   });
+}));
+
+// ---- Legacy / direct endpoint (now requires password or returns 401) ----
+app.post('/api/auth/admin-direct', wrap(async (req, res) => {
+  const { username, password } = req.body || {};
+  const rateKey = getAdminClientKey(req, 'login');
+
+  if (username || password) {
+    const rateStatus = checkAdminSecurityRateLimit(rateKey);
+    if (rateStatus.locked) {
+      return res.status(429).json({
+        error: rateStatus.message,
+        locked: true,
+        retryAfter: rateStatus.remainingSec,
+        lockoutUntil: rateStatus.lockoutUntil
+      });
+    }
+    const trimmedUser = (username || '').trim().toLowerCase();
+    const trimmedPass = (password || '').trim();
+    if (trimmedUser === 'puja' && trimmedPass === 'unified mentor') {
+      clearAdminSecurityAttempts(rateKey);
+      const adminEmail = (process.env.ADMIN_EMAIL || 'admin@pujaconnect.com').toLowerCase();
+      let user = await User.findOne({ email: adminEmail });
+      if (!user) {
+        user = await User.create({ name: 'Super Admin', email: adminEmail, phone: '0000000000', password: '', role: 'admin' });
+      }
+      return res.json({
+        user: { name: user.name, email: user.email, phone: user.phone, role: 'admin' },
+        token: sign({ email: user.email, role: 'admin' })
+      });
+    }
+    const failStatus = recordAdminSecurityFailure(rateKey);
+    if (failStatus.locked) {
+      return res.status(429).json({
+        error: 'Incorrect credentials. Security lockout active for 2 minutes.',
+        locked: true,
+        retryAfter: failStatus.remainingSec,
+        lockoutUntil: failStatus.lockoutUntil
+      });
+    }
+    return res.status(401).json({
+      error: 'Invalid admin credentials.',
+      locked: false,
+      remainingAttempts: failStatus.remainingAttempts
+    });
+  }
+
+  return res.status(401).json({
+    error: 'Authentication required. Direct passwordless admin entry is disabled. Please provide admin username and password.',
+    authRequired: true
+  });
+}));
+
+// ---- Section Password Verification Endpoint ----
+app.post('/api/admin/verify-section', wrap(async (req, res) => {
+  const { sectionId, password } = req.body || {};
+  const targetSection = ADMIN_SECTIONS[sectionId];
+  if (!targetSection) {
+    return res.status(400).json({ error: 'Unknown admin section ID: ' + sectionId });
+  }
+
+  const rateKey = getAdminClientKey(req, 'sec_' + sectionId);
+  const rateStatus = checkAdminSecurityRateLimit(rateKey);
+
+  if (rateStatus.locked) {
+    return res.status(429).json({
+      error: rateStatus.message,
+      locked: true,
+      retryAfter: rateStatus.remainingSec,
+      lockoutUntil: rateStatus.lockoutUntil,
+      sectionId
+    });
+  }
+
+  const trimmedPass = (password || '').trim();
+  if (trimmedPass !== targetSection.password) {
+    const failStatus = recordAdminSecurityFailure(rateKey);
+    if (failStatus.locked) {
+      return res.status(429).json({
+        error: `Incorrect password for ${targetSection.description}. Security lockout activated for 2 minutes.`,
+        locked: true,
+        retryAfter: failStatus.remainingSec,
+        lockoutUntil: failStatus.lockoutUntil,
+        sectionId
+      });
+    }
+    return res.status(401).json({
+      error: `Incorrect password for ${targetSection.description}. 1 attempt remaining before 2-minute lockout.`,
+      locked: false,
+      remainingAttempts: failStatus.remainingAttempts,
+      sectionId
+    });
+  }
+
+  // Section password verified successfully!
+  clearAdminSecurityAttempts(rateKey);
+  res.json({
+    success: true,
+    sectionId,
+    name: targetSection.name,
+    description: targetSection.description,
+    message: `Section "${targetSection.name}" unlocked successfully 🛡️`
+  });
+}));
+
+// ---- Admin Sections Metadata ----
+app.get('/api/admin/sections-info', wrap(async (req, res) => {
+  const sections = Object.values(ADMIN_SECTIONS).map(s => ({
+    id: s.id,
+    name: s.name,
+    description: s.description,
+    tabs: s.tabs
+  }));
+  res.json({ sections });
 }));
 
 // ---- Database connection health check ----
