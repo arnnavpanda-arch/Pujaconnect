@@ -9817,6 +9817,7 @@ async function openPanditDecisionModal(arg, initialDecision, pEmail, tokenParam)
 // Syncs data live across all open devices without page refresh
 // ============================================================================
 let pcLastSyncVersion = 0;
+let pcLastSyncFingerprint = '';
 let pcSyncEventSource = null;
 let pcSyncPollInterval = null;
 let isPcSyncUpdating = false;
@@ -9825,8 +9826,7 @@ let isPcSyncUpdating = false;
 const pcSyncChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('pujaconnect_live_sync') : null;
 if (pcSyncChannel) {
   pcSyncChannel.onmessage = (evt) => {
-    if (evt.data && evt.data.version && evt.data.version !== pcLastSyncVersion) {
-      pcLastSyncVersion = evt.data.version;
+    if (evt.data) {
       handleIncomingSyncUpdate(evt.data);
     }
   };
@@ -9835,8 +9835,7 @@ window.addEventListener('storage', (evt) => {
   if (evt.key === 'pc_live_sync_trigger' && evt.newValue) {
     try {
       const d = JSON.parse(evt.newValue);
-      if (d && d.version && d.version !== pcLastSyncVersion) {
-        pcLastSyncVersion = d.version;
+      if (d) {
         handleIncomingSyncUpdate(d);
       }
     } catch (e) {}
@@ -9870,11 +9869,8 @@ function initRealtimeSync() {
       pcSyncEventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data && data.version && data.version !== pcLastSyncVersion) {
-            if (pcLastSyncVersion > 0) {
-              handleIncomingSyncUpdate(data);
-            }
-            pcLastSyncVersion = data.version;
+          if (data) {
+            handleIncomingSyncUpdate(data);
           }
         } catch (err) {
           console.warn('Real-time sync parse notice:', err);
@@ -9903,12 +9899,13 @@ function initRealtimeSync() {
         });
         if (res.ok) {
           const data = await res.json();
-          if (data && data.version && data.version !== pcLastSyncVersion) {
-            if (pcLastSyncVersion > 0) {
-              handleIncomingSyncUpdate(data);
-            }
-            pcLastSyncVersion = data.version;
+          const c = data.counts || {};
+          const fp = `${data.version || 0}_${c.bookings || 0}_${c.longs || 0}_${c.pendingPayments || 0}_${data.latestBookingId || ''}_${data.latestBookingStatus || ''}`;
+          if (pcLastSyncFingerprint && pcLastSyncFingerprint !== fp) {
+            handleIncomingSyncUpdate(data);
           }
+          pcLastSyncFingerprint = fp;
+          pcLastSyncVersion = data.version;
         }
       } catch (e) {}
     }, 2000);
@@ -9932,12 +9929,13 @@ async function checkSyncNow() {
     });
     if (res.ok) {
       const data = await res.json();
-      if (data && data.version && data.version !== pcLastSyncVersion) {
-        if (pcLastSyncVersion > 0) {
-          handleIncomingSyncUpdate(data);
-        }
-        pcLastSyncVersion = data.version;
+      const c = data.counts || {};
+      const fp = `${data.version || 0}_${c.bookings || 0}_${c.longs || 0}_${c.pendingPayments || 0}_${data.latestBookingId || ''}_${data.latestBookingStatus || ''}`;
+      if (pcLastSyncFingerprint && pcLastSyncFingerprint !== fp) {
+        handleIncomingSyncUpdate(data);
       }
+      pcLastSyncFingerprint = fp;
+      pcLastSyncVersion = data.version;
     }
   } catch (e) {}
 }

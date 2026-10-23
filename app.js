@@ -134,6 +134,10 @@ app.get('/api/live-sync/status', wrap(async (req, res) => {
   res.setHeader('Surrogate-Control', 'no-store');
   let ver = globalDataVersion;
   let entity = 'general';
+  let counts = { bookings: 0, longs: 0, pendingPayments: 0, kyc: 0 };
+  let latestBookingId = '';
+  let latestBookingStatus = '';
+
   try {
     if (mongoose.connection && mongoose.connection.readyState !== 1) {
       try { await connectDB(); } catch (e) {}
@@ -142,19 +146,41 @@ app.get('/api/live-sync/status', wrap(async (req, res) => {
       const setting = await AppSetting.findOne({ key: 'live_sync_version' }).lean();
       if (setting && setting.value) {
         const v = typeof setting.value === 'object' ? Number(setting.value.version) : Number(setting.value);
-        if (v && v > ver) {
+        if (v) {
           ver = v;
-          globalDataVersion = ver;
+          globalDataVersion = Math.max(globalDataVersion, v);
         }
         if (typeof setting.value === 'object' && setting.value.entity) {
           entity = setting.value.entity;
         }
       }
+
+      // Live MongoDB collection counts & latest booking fingerprint for bulletproof multi-device sync
+      const [bCount, lCount, pCount, kCount, latestB] = await Promise.all([
+        Booking.countDocuments().catch(() => 0),
+        LongPujaRequest.countDocuments().catch(() => 0),
+        Booking.countDocuments({ paymentStatus: { $in: ['Under Processing', 'Verification Pending'] } }).catch(() => 0),
+        Pandit.countDocuments({ status: 'Pending Review' }).catch(() => 0),
+        Booking.findOne({}, { _id: 1, bookingId: 1, status: 1, paymentStatus: 1 }).sort({ _id: -1 }).lean().catch(() => null)
+      ]);
+
+      counts.bookings = bCount;
+      counts.longs = lCount;
+      counts.pendingPayments = pCount;
+      counts.kyc = kCount;
+      if (latestB) {
+        latestBookingId = String(latestB.bookingId || latestB._id || '');
+        latestBookingStatus = `${latestB.status}_${latestB.paymentStatus}`;
+      }
     }
   } catch (e) {}
+
   res.json({
     version: ver,
     entity,
+    counts,
+    latestBookingId,
+    latestBookingStatus,
     timestamp: Date.now(),
     connectedClients: sseClients.size
   });

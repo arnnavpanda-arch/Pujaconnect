@@ -7405,6 +7405,7 @@
     // Synchronizes all admin tables, badges, and figures live without refresh
     // =========================================================================
     let adminLastSyncVersion = 0;
+    let adminLastSyncFingerprint = '';
     let adminSyncEventSource = null;
     let adminSyncPollInterval = null;
     let isAdminSyncUpdating = false;
@@ -7414,8 +7415,7 @@
     const adminSyncChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('pujaconnect_live_sync') : null;
     if (adminSyncChannel) {
       adminSyncChannel.onmessage = (evt) => {
-        if (evt.data && evt.data.version && evt.data.version !== adminLastSyncVersion) {
-          adminLastSyncVersion = evt.data.version;
+        if (evt.data) {
           handleAdminSyncUpdate(evt.data);
         }
       };
@@ -7424,8 +7424,7 @@
       if (evt.key === 'pc_live_sync_trigger' && evt.newValue) {
         try {
           const d = JSON.parse(evt.newValue);
-          if (d && d.version && d.version !== adminLastSyncVersion) {
-            adminLastSyncVersion = d.version;
+          if (d) {
             handleAdminSyncUpdate(d);
           }
         } catch (e) {}
@@ -7457,11 +7456,8 @@
           adminSyncEventSource.onmessage = (event) => {
             try {
               const data = JSON.parse(event.data);
-              if (data && data.version && data.version !== adminLastSyncVersion) {
-                if (adminLastSyncVersion > 0) {
-                  handleAdminSyncUpdate(data);
-                }
-                adminLastSyncVersion = data.version;
+              if (data) {
+                handleAdminSyncUpdate(data);
               }
             } catch (err) {
               console.warn('Admin real-time sync parse notice:', err);
@@ -7489,12 +7485,13 @@
             });
             if (res.ok) {
               const data = await res.json();
-              if (data && data.version && data.version !== adminLastSyncVersion) {
-                if (adminLastSyncVersion > 0) {
-                  handleAdminSyncUpdate(data);
-                }
-                adminLastSyncVersion = data.version;
+              const c = data.counts || {};
+              const fp = `${data.version || 0}_${c.bookings || 0}_${c.longs || 0}_${c.pendingPayments || 0}_${c.kyc || 0}_${data.latestBookingId || ''}_${data.latestBookingStatus || ''}`;
+              if (adminLastSyncFingerprint && adminLastSyncFingerprint !== fp) {
+                handleAdminSyncUpdate(data);
               }
+              adminLastSyncFingerprint = fp;
+              adminLastSyncVersion = data.version;
             }
           } catch (e) {}
         }, 2000);
@@ -7521,12 +7518,13 @@
         });
         if (res.ok) {
           const data = await res.json();
-          if (data && data.version && data.version !== adminLastSyncVersion) {
-            if (adminLastSyncVersion > 0) {
-              handleAdminSyncUpdate(data);
-            }
-            adminLastSyncVersion = data.version;
+          const c = data.counts || {};
+          const fp = `${data.version || 0}_${c.bookings || 0}_${c.longs || 0}_${c.pendingPayments || 0}_${c.kyc || 0}_${data.latestBookingId || ''}_${data.latestBookingStatus || ''}`;
+          if (adminLastSyncFingerprint && adminLastSyncFingerprint !== fp) {
+            handleAdminSyncUpdate(data);
           }
+          adminLastSyncFingerprint = fp;
+          adminLastSyncVersion = data.version;
         }
       } catch (e) {}
     }
