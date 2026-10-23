@@ -620,6 +620,10 @@ function renderNav() {
 }
 
 function showView(name) {
+  if (name === 'admin' || location.hash === '#admin') {
+    window.location.href = '/admin';
+    return;
+  }
   if (name === 'dashboard' && !S.user) { openAuth(); return; }
   S.view = name;
 
@@ -2675,6 +2679,20 @@ function openAuth(mode = 'login') {
             <span class="muted" style="font-size:12px">Are you a Vedic Pandit?</span><br>
             <a href="#" data-action="panditRegister" style="color:var(--ochre);font-weight:700;font-size:13px;text-decoration:none">Register as Pandit →</a>
           </div>
+        </div>
+
+        <!-- Super Admin Login Access Card -->
+        <div style="grid-column:1/-1;background:rgba(217,154,25,0.08);border:1.5px dashed #d99a19;border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="material-icons" style="font-size:24px;color:#d99a19">admin_panel_settings</span>
+            <div>
+              <div style="font-size:14px;font-weight:700;color:var(--admin-dark)">Super Administrator Gateway</div>
+              <div class="muted" style="font-size:12px">Login with admin username &amp; password to access Executive Operations</div>
+            </div>
+          </div>
+          <a href="/admin" class="btn btn-gold btn-sm" style="text-decoration:none;font-weight:700;display:inline-flex;align-items:center;gap:6px">
+            <span class="material-icons" style="font-size:16px">login</span> Admin Login &rarr;
+          </a>
         </div>
       </div>`, (m) => {
       // Devotee Login Handler (No password, no OTP - Email only)
