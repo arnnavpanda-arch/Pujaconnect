@@ -2093,40 +2093,35 @@
       const realRoot = document.getElementById('admin-view-root');
       if (!realRoot) return;
 
-      if (!isBackgroundSync || !realRoot.hasChildNodes()) {
-        if (CURRENT_TAB === 'overview') renderAdminOverview(realRoot);
-        else if (CURRENT_TAB === 'bookings') renderBookingsAssignments(realRoot);
-        else if (CURRENT_TAB === 'kyc') renderKycQueue(realRoot);
-        else if (CURRENT_TAB === 'pandits') renderPanditsDirectory(realRoot);
-        else if (CURRENT_TAB === 'pujas') renderPujaCatalog(realRoot);
-        else if (CURRENT_TAB === 'longs') renderLongRequests(realRoot);
-        else if (CURRENT_TAB === 'payments') renderPaymentsVerification(realRoot);
-        else if (CURRENT_TAB === 'pandit-payouts') renderPanditPaymentsSection(realRoot);
-        else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(realRoot);
-        else if (CURRENT_TAB === 'users') renderDevoteesDirectory(realRoot);
-        else if (CURRENT_TAB === 'media') renderMediaSection(realRoot);
-        else if (CURRENT_TAB === 'settings') renderSystemSettingsTab(realRoot);
-        else renderAdminOverview(realRoot);
+      // If user is actively typing in a search or form input, don't interrupt active typing
+      const activeEl = document.activeElement;
+      const isInputActive = activeEl && realRoot.contains(activeEl) && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+      if (isBackgroundSync && isInputActive) {
         return;
       }
 
-      // Background synchronization mode: render off-screen & apply morphDom to avoid screen blinking
-      const virtualRoot = document.createElement('div');
-      if (CURRENT_TAB === 'overview') renderAdminOverview(virtualRoot);
-      else if (CURRENT_TAB === 'bookings') renderBookingsAssignments(virtualRoot);
-      else if (CURRENT_TAB === 'kyc') renderKycQueue(virtualRoot);
-      else if (CURRENT_TAB === 'pandits') renderPanditsDirectory(virtualRoot);
-      else if (CURRENT_TAB === 'pujas') renderPujaCatalog(virtualRoot);
-      else if (CURRENT_TAB === 'longs') renderLongRequests(virtualRoot);
-      else if (CURRENT_TAB === 'payments') renderPaymentsVerification(virtualRoot);
-      else if (CURRENT_TAB === 'pandit-payouts') renderPanditPaymentsSection(virtualRoot);
-      else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(virtualRoot);
-      else if (CURRENT_TAB === 'users') renderDevoteesDirectory(virtualRoot);
-      else if (CURRENT_TAB === 'media') renderMediaSection(virtualRoot);
-      else if (CURRENT_TAB === 'settings') renderSystemSettingsTab(virtualRoot);
-      else renderAdminOverview(virtualRoot);
+      // Preserve window and panel scroll positions
+      const scrollY = window.scrollY;
+      const scrollX = window.scrollX;
+      const cScrollTop = realRoot.scrollTop;
 
-      seamlessUpdate(realRoot, virtualRoot.innerHTML);
+      if (CURRENT_TAB === 'overview') renderAdminOverview(realRoot);
+      else if (CURRENT_TAB === 'bookings') renderBookingsAssignments(realRoot);
+      else if (CURRENT_TAB === 'kyc') renderKycQueue(realRoot);
+      else if (CURRENT_TAB === 'pandits') renderPanditsDirectory(realRoot);
+      else if (CURRENT_TAB === 'pujas') renderPujaCatalog(realRoot);
+      else if (CURRENT_TAB === 'longs') renderLongRequests(realRoot);
+      else if (CURRENT_TAB === 'payments') renderPaymentsVerification(realRoot);
+      else if (CURRENT_TAB === 'pandit-payouts') renderPanditPaymentsSection(realRoot);
+      else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(realRoot);
+      else if (CURRENT_TAB === 'users') renderDevoteesDirectory(realRoot);
+      else if (CURRENT_TAB === 'media') renderMediaSection(realRoot);
+      else if (CURRENT_TAB === 'settings') renderSystemSettingsTab(realRoot);
+      else renderAdminOverview(realRoot);
+
+      // Restore scroll seamlessly
+      if (window.scrollY !== scrollY) window.scrollTo(scrollX, scrollY);
+      if (cScrollTop && realRoot.scrollTop !== cScrollTop) realRoot.scrollTop = cScrollTop;
     }
 
     // 0. Bookings & Pandit Assignments
@@ -7493,13 +7488,21 @@
       const backdrop = document.getElementById('admin-sidebar-backdrop');
       if (backdrop) backdrop.onclick = closeAdminSidebar;
 
-      // Always show Admin Login (username & password) first when admin opens the portal
-      TOKEN = '';
-      localStorage.removeItem('admin_token');
-      localStorage.removeItem('pc_admin_token');
-      Object.keys(SECTION_DEFS).forEach(secId => sessionStorage.removeItem('pc_sec_unlocked_' + secId));
-      updateSidebarLockBadges();
-      showAdminLoginGate();
+      // Restore Admin session if token exists in localStorage (no login page on refresh)
+      const savedToken = localStorage.getItem('admin_token') || localStorage.getItem('pc_admin_token');
+      if (savedToken) {
+        TOKEN = savedToken;
+        hideAdminLoginGate();
+        updateSidebarLockBadges();
+        loadData().catch(() => {});
+        const requestedTab = (location.hash && location.hash.replace('#', '')) || 'overview';
+        openAdminTabDirect(requestedTab);
+      } else {
+        TOKEN = '';
+        Object.keys(SECTION_DEFS).forEach(secId => sessionStorage.removeItem('pc_sec_unlocked_' + secId));
+        updateSidebarLockBadges();
+        showAdminLoginGate();
+      }
 
       // Initialize Real-time Multi-Device Synchronization
       initAdminRealtimeSync();

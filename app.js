@@ -156,21 +156,26 @@ app.get('/api/live-sync/status', wrap(async (req, res) => {
       }
 
       // Live MongoDB collection counts & latest booking fingerprint for bulletproof multi-device sync
-      const [bCount, lCount, pCount, kCount, latestB] = await Promise.all([
+      const [bCount, lCount, pCount, lpCount, kCount, latestB, latestL] = await Promise.all([
         Booking.countDocuments().catch(() => 0),
         LongPujaRequest.countDocuments().catch(() => 0),
         Booking.countDocuments({ paymentStatus: { $in: ['Under Processing', 'Verification Pending'] } }).catch(() => 0),
+        LongPujaRequest.countDocuments({ paymentStatus: { $in: ['Under Processing', 'Verification Pending'] } }).catch(() => 0),
         Pandit.countDocuments({ status: 'Pending Review' }).catch(() => 0),
-        Booking.findOne({}, { _id: 1, bookingId: 1, status: 1, paymentStatus: 1 }).sort({ _id: -1 }).lean().catch(() => null)
+        Booking.findOne({}, { _id: 1, bookingId: 1, status: 1, paymentStatus: 1, panditApproval: 1, panditEmail: 1 }).sort({ updatedAt: -1, transactionDate: -1, _id: -1 }).lean().catch(() => null),
+        LongPujaRequest.findOne({}, { _id: 1, id: 1, status: 1, paymentStatus: 1 }).sort({ updatedAt: -1, _id: -1 }).lean().catch(() => null)
       ]);
 
       counts.bookings = bCount;
       counts.longs = lCount;
-      counts.pendingPayments = pCount;
+      counts.pendingPayments = pCount + lpCount;
       counts.kyc = kCount;
       if (latestB) {
         latestBookingId = String(latestB.bookingId || latestB._id || '');
-        latestBookingStatus = `${latestB.status}_${latestB.paymentStatus}`;
+        latestBookingStatus = `${latestB.status}_${latestB.paymentStatus}_${latestB.panditApproval || ''}_${latestB.panditEmail || ''}`;
+      }
+      if (latestL) {
+        latestBookingStatus += `_L:${latestL.id || latestL._id || ''}_${latestL.status}_${latestL.paymentStatus}`;
       }
     }
   } catch (e) {}

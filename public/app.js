@@ -3896,22 +3896,14 @@ async function renderDashboard(isSilentSync = false) {
   try {
     if (S.user.role === 'admin') await adminDash(root);
     else if (S.user.role === 'pandit') {
-      if (isSilentSync && root && root.querySelector('.dash-banner')) {
-        const virtualRoot = document.createElement('div');
-        await panditDash(virtualRoot);
-        seamlessUpdate(root, virtualRoot.innerHTML);
-      } else {
-        await panditDash(root);
-      }
+      const scrollY = window.scrollY;
+      await panditDash(root);
+      if (isSilentSync && window.scrollY !== scrollY) window.scrollTo(window.scrollX, scrollY);
       if (!isSilentSync) setTimeout(() => checkAndShowMediaPopup(), 350);
     } else {
-      if (isSilentSync && root && root.querySelector('.dash-banner')) {
-        const virtualRoot = document.createElement('div');
-        await userDash(virtualRoot);
-        seamlessUpdate(root, virtualRoot.innerHTML);
-      } else {
-        await userDash(root);
-      }
+      const scrollY = window.scrollY;
+      await userDash(root);
+      if (isSilentSync && window.scrollY !== scrollY) window.scrollTo(window.scrollX, scrollY);
       if (!isSilentSync) setTimeout(() => checkAndShowMediaPopup(), 350);
     }
   } catch (e) {
