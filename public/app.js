@@ -3779,14 +3779,14 @@ function closeMediaPopupAndProceed() {
 }
 
 let isDashboardRendering = false;
-async function renderDashboard() {
+async function renderDashboard(isSilentSync = false) {
   const root = $('#dashboard-root');
   if (!S.user) return;
   if (isDashboardRendering) return;
   isDashboardRendering = true;
 
   const isAlreadyLoaded = root && root.querySelector('.dash-banner');
-  if (!isAlreadyLoaded) {
+  if (!isAlreadyLoaded && !isSilentSync) {
     root.innerHTML = `
       <div style="padding:24px 16px;max-width:960px;margin:0 auto">
         <div style="background:#fffcf5;border:1.5px solid #ffe082;border-radius:16px;padding:24px;margin-bottom:20px;display:flex;align-items:center;gap:16px;box-shadow:0 3px 12px rgba(217,154,25,0.06)">
@@ -3805,14 +3805,14 @@ async function renderDashboard() {
     if (S.user.role === 'admin') await adminDash(root);
     else if (S.user.role === 'pandit') {
       await panditDash(root);
-      setTimeout(() => checkAndShowMediaPopup(), 350);
+      if (!isSilentSync) setTimeout(() => checkAndShowMediaPopup(), 350);
     } else {
       await userDash(root);
-      setTimeout(() => checkAndShowMediaPopup(), 350);
+      if (!isSilentSync) setTimeout(() => checkAndShowMediaPopup(), 350);
     }
   } catch (e) {
     if (/Authentication|Admin access/.test(e.message)) { saveSession(null); showView('home'); toast('Session expired. Please log in again.', true); }
-    else root.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    else if (!isSilentSync) root.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   } finally {
     isDashboardRendering = false;
   }
@@ -9940,64 +9940,65 @@ async function checkSyncNow() {
   } catch (e) {}
 }
 
+let pcSyncPending = false;
 async function handleIncomingSyncUpdate(eventData = {}) {
-  // Debounce sync execution by 300ms so concurrent mobile mutations merge cleanly without dropping
-  if (pcSyncDebounceTimer) clearTimeout(pcSyncDebounceTimer);
-  pcSyncDebounceTimer = setTimeout(async () => {
-    if (isPcSyncUpdating) {
+  if (isPcSyncUpdating) {
+    pcSyncPending = true;
+    return;
+  }
+  isPcSyncUpdating = true;
+
+  try {
+    const entity = eventData.entity || 'general';
+
+    // Always invalidate cached data to ensure subsequent views fetch fresh data from MongoDB
+    S.bookings = null;
+    S.longs = null;
+    S._panditBookings = null;
+
+    // Check if a modal is currently open to avoid disrupting active form input
+    const modalRoot = $('#modal-root');
+    const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
+
+    // A. If user is currently on Dashboard, refresh live dashboard data without page reload and without blinking
+    if (S.view === 'dashboard' && S.user && !isModalOpen) {
+      await renderDashboard(true);
+      return; // Cycles conserved
+    }
+
+    // B. If Pujas, Services, or Pricing changed
+    if (!entity || entity === 'pujas' || entity === 'settings' || entity === 'general') {
+      await loadPujas().catch(() => {});
+      if (S.view === 'home') renderHomePujas();
+      if (S.view === 'pujas' && typeof renderPujas === 'function') renderPujas();
+      if (S.view === 'puja-prices' && typeof renderPujaPriceConfig === 'function') {
+        renderPujaPriceConfig(true).catch(() => {});
+      }
+    }
+
+    // C. If Pandits changed (e.g. approved KYC, new rates, coverage)
+    if (!entity || entity === 'pandits' || entity === 'general') {
+      if (S.view === 'home' && typeof renderHomePandits === 'function') renderHomePandits().catch(() => {});
+      if (S.view === 'pandits' && typeof renderPandits === 'function') {
+        renderPandits().catch(() => {});
+      }
+    }
+
+    // D. If System Settings changed (helpline, logo, address)
+    if (!entity || entity === 'settings' || entity === 'general') {
+      if (typeof loadSystemSettings === 'function') {
+        await loadSystemSettings().catch(() => {});
+        renderNav();
+      }
+    }
+  } catch (err) {
+    console.warn('Sync update handler notice:', err);
+  } finally {
+    isPcSyncUpdating = false;
+    if (pcSyncPending) {
+      pcSyncPending = false;
       handleIncomingSyncUpdate(eventData);
-      return;
     }
-    isPcSyncUpdating = true;
-
-    try {
-      const entity = eventData.entity || 'general';
-
-      // Always invalidate cached data to ensure subsequent views fetch fresh data from MongoDB
-      S.bookings = null;
-      S.longs = null;
-      S._panditBookings = null;
-
-      // Check if a modal is currently open to avoid disrupting active form input
-      const modalRoot = $('#modal-root');
-      const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
-
-      // A. If user is currently on Dashboard, refresh live dashboard data without page reload
-      if (S.view === 'dashboard' && S.user && !isModalOpen) {
-        await renderDashboard();
-        return; // Cycles conserved
-      }
-
-      // B. If Pujas, Services, or Pricing changed
-      if (!entity || entity === 'pujas' || entity === 'settings' || entity === 'general') {
-        await loadPujas().catch(() => {});
-        if (S.view === 'home') renderHomePujas();
-        if (S.view === 'pujas' && typeof renderPujas === 'function') renderPujas();
-        if (S.view === 'puja-prices' && typeof renderPujaPriceConfig === 'function') {
-          renderPujaPriceConfig(true).catch(() => {});
-        }
-      }
-
-      // C. If Pandits changed (e.g. approved KYC, new rates, coverage)
-      if (!entity || entity === 'pandits' || entity === 'general') {
-        if (S.view === 'home' && typeof renderHomePandits === 'function') renderHomePandits().catch(() => {});
-        if (S.view === 'pandits' && typeof renderPandits === 'function') {
-          renderPandits().catch(() => {});
-        }
-      }
-
-      // D. If System Settings changed (helpline, logo, address)
-      if (!entity || entity === 'settings' || entity === 'general') {
-        if (typeof loadSystemSettings === 'function') {
-          await loadSystemSettings().catch(() => {});
-          renderNav();
-        }
-      }
-    } catch (err) {
-      console.warn('Sync update handler notice:', err);
-    } finally {
-      isPcSyncUpdating = false;
-    }
-  }, 300);
+  }
 }
 

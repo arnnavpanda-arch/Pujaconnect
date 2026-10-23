@@ -1117,7 +1117,7 @@
 
     let S = { adminPandits: [], adminLongs: [], pujas: [], users: [], bookings: [], stats: {}, commissionPercent: 10, mediaOffers: [], mediaAnnouncements: [], mediaDevotees: null };
 
-    async function loadData() {
+    async function loadData(isBackgroundSync = false) {
       // Run DB status check concurrently in parallel so it never delays data fetching
       checkDb().catch(() => {});
       try {
@@ -1150,10 +1150,17 @@
         }
 
         renderKpis();
-        renderActiveTab();
+
+        const modalRoot = document.getElementById('modal-root');
+        const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
+        if (!isBackgroundSync || !isModalOpen) {
+          renderActiveTab();
+        }
       } catch (e) {
         console.error('loadData error:', e);
-        document.getElementById('admin-view-root').innerHTML = `<div class="empty error">Error loading admin data: ${esc(e.message)}</div>`;
+        if (!isBackgroundSync) {
+          document.getElementById('admin-view-root').innerHTML = `<div class="empty error">Error loading admin data: ${esc(e.message)}</div>`;
+        }
       }
     }
 
@@ -7529,40 +7536,33 @@
       } catch (e) {}
     }
 
+    let adminSyncPending = false;
     async function handleAdminSyncUpdate(eventData = {}) {
-      // Only sync if admin is authenticated and logged in
-      if (!TOKEN) return;
+      if (!TOKEN) {
+        TOKEN = localStorage.getItem('admin_token') || localStorage.getItem('pc_admin_token') || '';
+      }
+      const dashApp = document.getElementById('admin-dashboard-app');
+      if (dashApp && dashApp.style.display === 'none') return; // Skip if admin portal is not currently unlocked
 
-      // Debounce sync execution by 300ms so rapid concurrent updates merge cleanly without dropping
-      if (adminSyncDebounceTimer) clearTimeout(adminSyncDebounceTimer);
-      adminSyncDebounceTimer = setTimeout(async () => {
-        if (isAdminSyncUpdating) {
-          // If already in flight, retry in 300ms so latest mobile data is never missed
+      if (isAdminSyncUpdating) {
+        adminSyncPending = true;
+        return;
+      }
+      isAdminSyncUpdating = true;
+
+      try {
+        // Silently reload latest database records in background (zero blinking, zero flicker)
+        await loadData(true);
+        updateSidebarLockBadges();
+      } catch (err) {
+        console.warn('Admin live sync update notice:', err);
+      } finally {
+        isAdminSyncUpdating = false;
+        if (adminSyncPending) {
+          adminSyncPending = false;
           handleAdminSyncUpdate(eventData);
-          return;
         }
-        isAdminSyncUpdating = true;
-
-        try {
-          // Silently reload latest database records
-          await loadData();
-
-          // Refresh top KPI metrics cards
-          renderKpis();
-
-          // Re-render current tab without refreshing the webpage if no modal is open
-          const modalRoot = document.getElementById('modal-root');
-          const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
-          if (!isModalOpen) {
-            renderActiveTab();
-          }
-          updateSidebarLockBadges();
-        } catch (err) {
-          console.warn('Admin live sync update notice:', err);
-        } finally {
-          isAdminSyncUpdating = false;
-        }
-      }, 300);
+      }
     }
   </script>
 </body>

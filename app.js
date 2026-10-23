@@ -212,49 +212,16 @@ app.use('/api', (req, res, next) => {
         return 'general';
       };
 
-      const doBroadcast = async (status) => {
-        if (!broadcastFired && status >= 200 && status < 300) {
-          broadcastFired = true;
-          try {
-            await broadcastChange({
-              entity: getEntity(),
-              action: req.method.toLowerCase(),
-              path: req.path
-            });
-          } catch (err) {
-            console.warn('[Sync Auto-Broadcast Error]:', err.message);
-          }
-        }
-      };
-
-      const origJson = res.json.bind(res);
-      const origSend = res.send.bind(res);
-
-      res.json = function(data) {
-        const code = res.statusCode || 200;
-        if (code >= 200 && code < 300 && !broadcastFired) {
-          doBroadcast(code).finally(() => {
-            origJson(data);
-          });
-        } else {
-          origJson(data);
-        }
-      };
-
-      res.send = function(data) {
-        const code = res.statusCode || 200;
-        if (code >= 200 && code < 300 && !broadcastFired) {
-          doBroadcast(code).finally(() => {
-            origSend(data);
-          });
-        } else {
-          origSend(data);
-        }
-      };
-
       res.on('finish', () => {
         if (!broadcastFired && res.statusCode >= 200 && res.statusCode < 300) {
-          doBroadcast(res.statusCode);
+          broadcastFired = true;
+          broadcastChange({
+            entity: getEntity(),
+            action: req.method.toLowerCase(),
+            path: req.path
+          }).catch((err) => {
+            console.warn('[Sync Auto-Broadcast Error]:', err.message);
+          });
         }
       });
     }
