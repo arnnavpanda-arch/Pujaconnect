@@ -996,10 +996,99 @@
       let data = null;
       try { data = await res.json(); } catch {}
       if (!res.ok) throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
-      if (m !== 'GET' && typeof broadcastLocalSync === 'function') {
-        broadcastLocalSync({ entity: 'general', action: m.toLowerCase(), path });
-      }
       return data;
+    }
+
+    // =========================================================================
+    // SEAMLESS DOM MORPHING (Zero screen blinking, zero flicker, preserves focus)
+    // =========================================================================
+    function morphDom(fromNode, toNode) {
+      if (!fromNode || !toNode) return;
+      if (fromNode.nodeType !== toNode.nodeType || fromNode.nodeName !== toNode.nodeName) {
+        if (fromNode.parentNode) fromNode.parentNode.replaceChild(toNode.cloneNode(true), fromNode);
+        return;
+      }
+      if (fromNode.nodeType === Node.TEXT_NODE) {
+        if (fromNode.nodeValue !== toNode.nodeValue) {
+          fromNode.nodeValue = toNode.nodeValue;
+        }
+        return;
+      }
+      if (fromNode.nodeType === Node.ELEMENT_NODE) {
+        const isFocused = document.activeElement === fromNode;
+        const fromAttrs = fromNode.attributes;
+        const toAttrs = toNode.attributes;
+        for (let i = 0; i < toAttrs.length; i++) {
+          const attr = toAttrs[i];
+          if (fromNode.getAttribute(attr.name) !== attr.value) {
+            fromNode.setAttribute(attr.name, attr.value);
+          }
+        }
+        for (let i = fromAttrs.length - 1; i >= 0; i--) {
+          const attr = fromAttrs[i];
+          if (!toNode.hasAttribute(attr.name)) {
+            fromNode.removeAttribute(attr.name);
+          }
+        }
+        if (fromNode.tagName === 'INPUT' || fromNode.tagName === 'TEXTAREA') {
+          if (!isFocused && fromNode.value !== toNode.value) {
+            fromNode.value = toNode.value;
+          }
+          if (fromNode.type === 'checkbox' || fromNode.type === 'radio') {
+            fromNode.checked = toNode.checked;
+          }
+        } else if (fromNode.tagName === 'SELECT') {
+          if (!isFocused && fromNode.value !== toNode.value) {
+            fromNode.value = toNode.value;
+          }
+        }
+        const fromChildren = Array.from(fromNode.childNodes);
+        const toChildren = Array.from(toNode.childNodes);
+        const maxLen = Math.max(fromChildren.length, toChildren.length);
+        for (let i = 0; i < maxLen; i++) {
+          const fChild = fromChildren[i];
+          const tChild = toChildren[i];
+          if (!fChild && tChild) {
+            fromNode.appendChild(tChild.cloneNode(true));
+          } else if (fChild && !tChild) {
+            fromNode.removeChild(fChild);
+          } else if (fChild && tChild) {
+            morphDom(fChild, tChild);
+          }
+        }
+      }
+    }
+
+    function seamlessUpdate(container, newHtml) {
+      if (!container) return;
+      if (!container.hasChildNodes()) {
+        container.innerHTML = newHtml;
+        return;
+      }
+      const temp = document.createElement('div');
+      temp.innerHTML = newHtml;
+      if (container.innerHTML === temp.innerHTML) return;
+
+      const scrollY = window.scrollY;
+      const scrollX = window.scrollX;
+      const cScrollTop = container.scrollTop;
+
+      const fromChildren = Array.from(container.childNodes);
+      const toChildren = Array.from(temp.childNodes);
+      const maxLen = Math.max(fromChildren.length, toChildren.length);
+      for (let i = 0; i < maxLen; i++) {
+        const fChild = fromChildren[i];
+        const tChild = toChildren[i];
+        if (!fChild && tChild) {
+          container.appendChild(tChild.cloneNode(true));
+        } else if (fChild && !tChild) {
+          container.removeChild(fChild);
+        } else if (fChild && tChild) {
+          morphDom(fChild, tChild);
+        }
+      }
+      if (window.scrollY !== scrollY) window.scrollTo(scrollX, scrollY);
+      if (cScrollTop && container.scrollTop !== cScrollTop) container.scrollTop = cScrollTop;
     }
 
     function openModal(title, html, onMount) {
@@ -1153,8 +1242,8 @@
 
         const modalRoot = document.getElementById('modal-root');
         const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
-        if (!isBackgroundSync || !isModalOpen) {
-          renderActiveTab();
+        if (!isModalOpen) {
+          renderActiveTab(isBackgroundSync);
         }
       } catch (e) {
         console.error('loadData error:', e);
@@ -1349,7 +1438,7 @@
         { label: 'Custom Mahayajnas', val: `${pendLong}/${s.longRequests || 0}`, icon: 'auto_stories' }
       ];
 
-      document.getElementById('admin-kpi-root').innerHTML = `
+      seamlessUpdate(document.getElementById('admin-kpi-root'), `
         <div class="admin-stats-grid">
           ${kpis.map(k => `
             <div class="kpi-card" ${k.alert ? 'style="border-color:#e65100"' : ''}>
@@ -1361,7 +1450,7 @@
             </div>
           `).join('')}
         </div>
-      `;
+      `);
     }
 
     function openAdminSidebar() {
@@ -2000,21 +2089,44 @@
       `;
     }
 
-    function renderActiveTab() {
-      const root = document.getElementById('admin-view-root');
-      if (CURRENT_TAB === 'overview') renderAdminOverview(root);
-      else if (CURRENT_TAB === 'bookings') renderBookingsAssignments(root);
-      else if (CURRENT_TAB === 'kyc') renderKycQueue(root);
-      else if (CURRENT_TAB === 'pandits') renderPanditsDirectory(root);
-      else if (CURRENT_TAB === 'pujas') renderPujaCatalog(root);
-      else if (CURRENT_TAB === 'longs') renderLongRequests(root);
-      else if (CURRENT_TAB === 'payments') renderPaymentsVerification(root);
-      else if (CURRENT_TAB === 'pandit-payouts') renderPanditPaymentsSection(root);
-      else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(root);
-      else if (CURRENT_TAB === 'users') renderDevoteesDirectory(root);
-      else if (CURRENT_TAB === 'media') renderMediaSection(root);
-      else if (CURRENT_TAB === 'settings') renderSystemSettingsTab(root);
-      else renderAdminOverview(root);
+    function renderActiveTab(isBackgroundSync = false) {
+      const realRoot = document.getElementById('admin-view-root');
+      if (!realRoot) return;
+
+      if (!isBackgroundSync || !realRoot.hasChildNodes()) {
+        if (CURRENT_TAB === 'overview') renderAdminOverview(realRoot);
+        else if (CURRENT_TAB === 'bookings') renderBookingsAssignments(realRoot);
+        else if (CURRENT_TAB === 'kyc') renderKycQueue(realRoot);
+        else if (CURRENT_TAB === 'pandits') renderPanditsDirectory(realRoot);
+        else if (CURRENT_TAB === 'pujas') renderPujaCatalog(realRoot);
+        else if (CURRENT_TAB === 'longs') renderLongRequests(realRoot);
+        else if (CURRENT_TAB === 'payments') renderPaymentsVerification(realRoot);
+        else if (CURRENT_TAB === 'pandit-payouts') renderPanditPaymentsSection(realRoot);
+        else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(realRoot);
+        else if (CURRENT_TAB === 'users') renderDevoteesDirectory(realRoot);
+        else if (CURRENT_TAB === 'media') renderMediaSection(realRoot);
+        else if (CURRENT_TAB === 'settings') renderSystemSettingsTab(realRoot);
+        else renderAdminOverview(realRoot);
+        return;
+      }
+
+      // Background synchronization mode: render off-screen & apply morphDom to avoid screen blinking
+      const virtualRoot = document.createElement('div');
+      if (CURRENT_TAB === 'overview') renderAdminOverview(virtualRoot);
+      else if (CURRENT_TAB === 'bookings') renderBookingsAssignments(virtualRoot);
+      else if (CURRENT_TAB === 'kyc') renderKycQueue(virtualRoot);
+      else if (CURRENT_TAB === 'pandits') renderPanditsDirectory(virtualRoot);
+      else if (CURRENT_TAB === 'pujas') renderPujaCatalog(virtualRoot);
+      else if (CURRENT_TAB === 'longs') renderLongRequests(virtualRoot);
+      else if (CURRENT_TAB === 'payments') renderPaymentsVerification(virtualRoot);
+      else if (CURRENT_TAB === 'pandit-payouts') renderPanditPaymentsSection(virtualRoot);
+      else if (CURRENT_TAB === 'platform-bank') renderPlatformBankTab(virtualRoot);
+      else if (CURRENT_TAB === 'users') renderDevoteesDirectory(virtualRoot);
+      else if (CURRENT_TAB === 'media') renderMediaSection(virtualRoot);
+      else if (CURRENT_TAB === 'settings') renderSystemSettingsTab(virtualRoot);
+      else renderAdminOverview(virtualRoot);
+
+      seamlessUpdate(realRoot, virtualRoot.innerHTML);
     }
 
     // 0. Bookings & Pandit Assignments
@@ -7463,7 +7575,7 @@
           adminSyncEventSource.onmessage = (event) => {
             try {
               const data = JSON.parse(event.data);
-              if (data) {
+              if (data && data.type !== 'connected') {
                 handleAdminSyncUpdate(data);
               }
             } catch (err) {
@@ -7481,7 +7593,13 @@
       // 2. High-frequency heartbeat polling fallback (2.0s) for cross-device synchronization (Mobile <-> Desktop)
       if (!adminSyncPollInterval) {
         adminSyncPollInterval = setInterval(async () => {
+          if (!TOKEN) {
+            TOKEN = localStorage.getItem('admin_token') || localStorage.getItem('pc_admin_token') || '';
+          }
           if (!TOKEN) return; // Only poll live status if admin is authenticated
+          const dashApp = document.getElementById('admin-dashboard-app');
+          if (dashApp && dashApp.style.display === 'none') return;
+
           try {
             const res = await fetch(getSyncEndpoint('/live-sync/status?_t=' + Date.now()), {
               cache: 'no-store',
@@ -7506,15 +7624,20 @@
 
       // 3. Instant sync on tab visibility or window focus
       window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && TOKEN) checkAdminSyncNow();
+        if (document.visibilityState === 'visible') checkAdminSyncNow();
       });
       window.addEventListener('focus', () => {
-        if (TOKEN) checkAdminSyncNow();
+        checkAdminSyncNow();
       });
     }
 
     async function checkAdminSyncNow() {
+      if (!TOKEN) {
+        TOKEN = localStorage.getItem('admin_token') || localStorage.getItem('pc_admin_token') || '';
+      }
       if (!TOKEN) return;
+      const dashApp = document.getElementById('admin-dashboard-app');
+      if (dashApp && dashApp.style.display === 'none') return;
       try {
         const res = await fetch(getSyncEndpoint('/live-sync/status?_t=' + Date.now()), {
           cache: 'no-store',

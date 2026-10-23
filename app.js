@@ -195,7 +195,8 @@ app.use('/api', (req, res, next) => {
       '/auth/pandit-otp',
       '/auth/admin-login',
       '/admin/verify-section',
-      '/live-sync'
+      '/live-sync',
+      '/region-notifications'
     ];
     if (!skipPaths.some(p => req.path.startsWith(p))) {
       let broadcastFired = false;

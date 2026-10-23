@@ -509,10 +509,99 @@ async function api(path, { method = 'GET', body } = {}) {
   let data = null;
   try { data = await res.json(); } catch { /* ignore */ }
   if (!res.ok) throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
-  if (m !== 'GET' && typeof broadcastPcLocalSync === 'function') {
-    broadcastPcLocalSync({ entity: 'general', action: m.toLowerCase(), path });
-  }
   return data;
+}
+
+// =========================================================================
+// SEAMLESS DOM MORPHING (Zero screen blinking, zero flicker, preserves focus)
+// =========================================================================
+function morphDom(fromNode, toNode) {
+  if (!fromNode || !toNode) return;
+  if (fromNode.nodeType !== toNode.nodeType || fromNode.nodeName !== toNode.nodeName) {
+    if (fromNode.parentNode) fromNode.parentNode.replaceChild(toNode.cloneNode(true), fromNode);
+    return;
+  }
+  if (fromNode.nodeType === Node.TEXT_NODE) {
+    if (fromNode.nodeValue !== toNode.nodeValue) {
+      fromNode.nodeValue = toNode.nodeValue;
+    }
+    return;
+  }
+  if (fromNode.nodeType === Node.ELEMENT_NODE) {
+    const isFocused = document.activeElement === fromNode;
+    const fromAttrs = fromNode.attributes;
+    const toAttrs = toNode.attributes;
+    for (let i = 0; i < toAttrs.length; i++) {
+      const attr = toAttrs[i];
+      if (fromNode.getAttribute(attr.name) !== attr.value) {
+        fromNode.setAttribute(attr.name, attr.value);
+      }
+    }
+    for (let i = fromAttrs.length - 1; i >= 0; i--) {
+      const attr = fromAttrs[i];
+      if (!toNode.hasAttribute(attr.name)) {
+        fromNode.removeAttribute(attr.name);
+      }
+    }
+    if (fromNode.tagName === 'INPUT' || fromNode.tagName === 'TEXTAREA') {
+      if (!isFocused && fromNode.value !== toNode.value) {
+        fromNode.value = toNode.value;
+      }
+      if (fromNode.type === 'checkbox' || fromNode.type === 'radio') {
+        fromNode.checked = toNode.checked;
+      }
+    } else if (fromNode.tagName === 'SELECT') {
+      if (!isFocused && fromNode.value !== toNode.value) {
+        fromNode.value = toNode.value;
+      }
+    }
+    const fromChildren = Array.from(fromNode.childNodes);
+    const toChildren = Array.from(toNode.childNodes);
+    const maxLen = Math.max(fromChildren.length, toChildren.length);
+    for (let i = 0; i < maxLen; i++) {
+      const fChild = fromChildren[i];
+      const tChild = toChildren[i];
+      if (!fChild && tChild) {
+        fromNode.appendChild(tChild.cloneNode(true));
+      } else if (fChild && !tChild) {
+        fromNode.removeChild(fChild);
+      } else if (fChild && tChild) {
+        morphDom(fChild, tChild);
+      }
+    }
+  }
+}
+
+function seamlessUpdate(container, newHtml) {
+  if (!container) return;
+  if (!container.hasChildNodes()) {
+    container.innerHTML = newHtml;
+    return;
+  }
+  const temp = document.createElement('div');
+  temp.innerHTML = newHtml;
+  if (container.innerHTML === temp.innerHTML) return;
+
+  const scrollY = window.scrollY;
+  const scrollX = window.scrollX;
+  const cScrollTop = container.scrollTop;
+
+  const fromChildren = Array.from(container.childNodes);
+  const toChildren = Array.from(temp.childNodes);
+  const maxLen = Math.max(fromChildren.length, toChildren.length);
+  for (let i = 0; i < maxLen; i++) {
+    const fChild = fromChildren[i];
+    const tChild = toChildren[i];
+    if (!fChild && tChild) {
+      container.appendChild(tChild.cloneNode(true));
+    } else if (fChild && !tChild) {
+      container.removeChild(fChild);
+    } else if (fChild && tChild) {
+      morphDom(fChild, tChild);
+    }
+  }
+  if (window.scrollY !== scrollY) window.scrollTo(scrollX, scrollY);
+  if (cScrollTop && container.scrollTop !== cScrollTop) container.scrollTop = cScrollTop;
 }
 
 function saveSession(user, token) {
@@ -677,12 +766,15 @@ function showView(name) {
 async function renderHomePandits() {
   const grid = $('#home-pandits-grid');
   if (!grid) return;
-  grid.innerHTML = '<div class="empty">Finding verified Vedic Pandits…</div>';
+  const isAlreadyLoaded = grid.querySelector('.pandit-card');
+  if (!isAlreadyLoaded) {
+    grid.innerHTML = '<div class="empty">Finding verified Vedic Pandits…</div>';
+  }
   try {
     const list = await api('/pandits?verified=true');
-    grid.innerHTML = list.length ? list.slice(0, 6).map(panditCard).join('') : '<div class="empty">No verified Pandits listed yet.</div>';
+    seamlessUpdate(grid, list.length ? list.slice(0, 6).map(panditCard).join('') : '<div class="empty">No verified Pandits listed yet.</div>');
   } catch (e) {
-    grid.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    if (!isAlreadyLoaded) grid.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
 }
 
@@ -898,7 +990,7 @@ function renderHomePujas() {
   const el = $('#home-pujas');
   if (!el) return;
   const list = S.pujas.filter((p) => p.type === 'Short').slice(0, 3);
-  el.innerHTML = list.length ? list.map((p) => pujaCard(p)).join('') : '<div class="empty">Loading pujas…</div>';
+  seamlessUpdate(el, list.length ? list.map((p) => pujaCard(p)).join('') : '<div class="empty">Loading pujas…</div>');
 }
 
 function renderExploreDistrictBar() {
@@ -3804,10 +3896,22 @@ async function renderDashboard(isSilentSync = false) {
   try {
     if (S.user.role === 'admin') await adminDash(root);
     else if (S.user.role === 'pandit') {
-      await panditDash(root);
+      if (isSilentSync && root && root.querySelector('.dash-banner')) {
+        const virtualRoot = document.createElement('div');
+        await panditDash(virtualRoot);
+        seamlessUpdate(root, virtualRoot.innerHTML);
+      } else {
+        await panditDash(root);
+      }
       if (!isSilentSync) setTimeout(() => checkAndShowMediaPopup(), 350);
     } else {
-      await userDash(root);
+      if (isSilentSync && root && root.querySelector('.dash-banner')) {
+        const virtualRoot = document.createElement('div');
+        await userDash(virtualRoot);
+        seamlessUpdate(root, virtualRoot.innerHTML);
+      } else {
+        await userDash(root);
+      }
       if (!isSilentSync) setTimeout(() => checkAndShowMediaPopup(), 350);
     }
   } catch (e) {
@@ -9869,7 +9973,7 @@ function initRealtimeSync() {
       pcSyncEventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data) {
+          if (data && data.type !== 'connected') {
             handleIncomingSyncUpdate(data);
           }
         } catch (err) {
@@ -9967,7 +10071,7 @@ async function handleIncomingSyncUpdate(eventData = {}) {
     }
 
     // B. If Pujas, Services, or Pricing changed
-    if (!entity || entity === 'pujas' || entity === 'settings' || entity === 'general') {
+    if (entity === 'pujas' || entity === 'settings' || (entity === 'general' && S.view !== 'dashboard')) {
       await loadPujas().catch(() => {});
       if (S.view === 'home') renderHomePujas();
       if (S.view === 'pujas' && typeof renderPujas === 'function') renderPujas();
@@ -9977,7 +10081,7 @@ async function handleIncomingSyncUpdate(eventData = {}) {
     }
 
     // C. If Pandits changed (e.g. approved KYC, new rates, coverage)
-    if (!entity || entity === 'pandits' || entity === 'general') {
+    if (entity === 'pandits' || (entity === 'general' && S.view !== 'dashboard')) {
       if (S.view === 'home' && typeof renderHomePandits === 'function') renderHomePandits().catch(() => {});
       if (S.view === 'pandits' && typeof renderPandits === 'function') {
         renderPandits().catch(() => {});
@@ -9985,7 +10089,7 @@ async function handleIncomingSyncUpdate(eventData = {}) {
     }
 
     // D. If System Settings changed (helpline, logo, address)
-    if (!entity || entity === 'settings' || entity === 'general') {
+    if (entity === 'settings') {
       if (typeof loadSystemSettings === 'function') {
         await loadSystemSettings().catch(() => {});
         renderNav();
