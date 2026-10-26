@@ -305,7 +305,18 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 const today = () => new Date().toISOString().slice(0, 10);
-const minBookingDate = () => today();
+const lc = (s) => String(s || '').toLowerCase().trim();
+const minBookingDate = () => {
+  const now = new Date();
+  const minTarget = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+  if (minTarget.getHours() >= 19) {
+    minTarget.setDate(minTarget.getDate() + 1);
+  }
+  const y = minTarget.getFullYear();
+  const m = String(minTarget.getMonth() + 1).padStart(2, '0');
+  const d = String(minTarget.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
 
 const minUnavailDate = () => {
   const now = new Date();
@@ -2129,8 +2140,11 @@ async function openBooking(arg) {
         `}
       </div>
       <div>
-        <label>Ceremony Date *</label>
+        <label>Ceremony Date (Min. 48 Hours in Advance) *</label>
         <input type="date" id="b-date" min="${minBookingDate()}" value="${esc(targetDate || minBookingDate())}">
+        <small class="muted" style="font-size:11px;margin-top:3px;display:block;color:#8d2800">
+          ⏱️ Bookings must be scheduled at least 48 hours in advance
+        </small>
       </div>
     </div>
     <div>
@@ -2487,7 +2501,7 @@ async function openBooking(arg) {
       const box = $('#b-slots', m);
       if (!box) return;
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim().toLowerCase() : '';
-      const p = pEmail ? (S.pandits || []).find((x) => (x.email || '').trim().toLowerCase() === pEmail) : null;
+      const p = (pEmail && pEmail !== 'any') ? (S.pandits || []).find((x) => (x.email || '').trim().toLowerCase() === pEmail) : null;
       selectedPandit = p;
       const activeSlots = (p && Array.isArray(p.timeSlots) && p.timeSlots.length) ? p.timeSlots : standardSlots;
       const now = Date.now();
@@ -2499,15 +2513,18 @@ async function openBooking(arg) {
         return;
       }
 
+      const norm = (str) => String(str || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
       const renderCurrentSlots = () => {
         box.innerHTML = activeSlots.map((s) => {
           const dt = parsePujaStartDateTime(d, s);
           const diffHours = (dt.getTime() - now) / (1000 * 60 * 60);
-          const isLocked = diffHours < 0;
+          const isLocked = diffHours < 48;
           if (isLocked) {
             return `
-              <button type="button" class="slot locked" style="opacity:0.45;cursor:not-allowed;border-style:dashed" title="This ceremony time slot is in the past">
-                ${esc(s)} <small style="display:block;font-size:9.5px;color:#8d2800">Past Slot</small>
+              <button type="button" class="slot locked" style="opacity:0.5;cursor:not-allowed;border-style:dashed;display:inline-flex;align-items:center;justify-content:space-between;gap:8px" title="Ceremonies require minimum 48 hours advance notice. This slot is ${diffHours > 0 ? `${Math.round(diffHours * 10) / 10}h away` : 'in the past'}">
+                <span>${esc(s)}</span>
+                <span class="badge" style="background:#ffebee;color:#c62828;font-size:9.5px;font-weight:700;padding:2px 6px">&lt; 48h Notice</span>
               </button>
             `;
           }
@@ -2519,11 +2536,16 @@ async function openBooking(arg) {
             collidesInterval = (lastBookedIntervals || []).some(inv => Math.max(sStart, inv.start) < Math.min(sEnd, inv.end));
           } catch (e) {}
 
-          const isBooked = lastBookedSlots.includes(s) || lastOverlappingSlots.includes(s) || collidesInterval;
+          const isBooked = lastBookedSlots.some(bs => norm(bs) === norm(s)) ||
+                           lastOverlappingSlots.some(os => norm(os) === norm(s)) ||
+                           collidesInterval;
           if (isBooked) {
             return `
-              <button type="button" class="slot booked" style="opacity:0.55;cursor:not-allowed;background:#fff5f5;border:1px dashed #ef9a9a;color:#c62828" title="Sorry, this time slot has just been booked. Please select another available slot.">
-                ${esc(s)} <small style="display:block;font-size:9.5px;color:#c62828;font-weight:600">● Booked</small>
+              <button type="button" class="slot booked" disabled style="opacity:0.75;cursor:not-allowed;background:#fff5f5;border:1.5px dashed #ef9a9a;color:#c62828;display:inline-flex;align-items:center;justify-content:space-between;gap:8px" title="Sorry, this ceremony time slot has already been booked for this Pandit. Please select another available slot.">
+                <span>${esc(s)}</span>
+                <span class="badge red" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;pointer-events:none">
+                  ● Booked
+                </span>
               </button>
             `;
           }
@@ -2542,7 +2564,10 @@ async function openBooking(arg) {
           } catch (e) {}
 
           const existsInActive = activeSlots.includes(sel.time);
-          if (!existsInActive || (dt.getTime() - now) / (1000 * 60 * 60) < 0 || lastBookedSlots.includes(sel.time) || lastOverlappingSlots.includes(sel.time) || collidesInterval) {
+          const isBooked = lastBookedSlots.some(bs => norm(bs) === norm(sel.time)) ||
+                           lastOverlappingSlots.some(os => norm(os) === norm(sel.time)) ||
+                           collidesInterval;
+          if (!existsInActive || (dt.getTime() - now) / (1000 * 60 * 60) < 48 || isBooked) {
             sel.time = '';
           }
         }
@@ -2552,7 +2577,7 @@ async function openBooking(arg) {
       renderCurrentSlots();
 
       // Live fetch booked slots from server for this Pandit & Date
-      if (pEmail && lc(pEmail) !== 'any' && d) {
+      if (pEmail && pEmail !== 'any' && d) {
         try {
           const res = await api(`/bookings/booked-slots?panditEmail=${encodeURIComponent(pEmail)}&date=${encodeURIComponent(d)}`);
           if (res && res.ok) {
@@ -2582,7 +2607,7 @@ async function openBooking(arg) {
     districtSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
     panditSel.onchange = () => {
       const chosenEmail = panditSel.value ? panditSel.value.trim().toLowerCase() : '';
-      selectedPandit = chosenEmail ? (S.pandits || []).find((x) => (x.email || '').trim().toLowerCase() === chosenEmail) : null;
+      selectedPandit = (chosenEmail && chosenEmail !== 'any') ? (S.pandits || []).find((x) => (x.email || '').trim().toLowerCase() === chosenEmail) : null;
       updatePanditInfo();
       paintFee();
       drawSlots();
@@ -2609,10 +2634,10 @@ async function openBooking(arg) {
       const b = e.target.closest('.slot');
       if (!b) return;
       if (b.classList.contains('locked')) {
-        return toast('This ceremony time slot is in the past. Please select an upcoming slot.', true);
+        return toast('⏱️ Bookings require minimum 48 hours notice. Please choose another slot or select a future date.', true);
       }
       if (b.classList.contains('booked')) {
-        return toast('Sorry, this time slot has just been booked. Please select another available slot.', true);
+        return toast('Sorry, this ceremony time slot has already been booked for this Pandit. Please select another available slot.', true);
       }
       m.querySelectorAll('.slot').forEach((x) => x.classList.remove('selected'));
       b.classList.add('selected');
@@ -2672,8 +2697,8 @@ async function openBooking(arg) {
 
       const startDt = parsePujaStartDateTime(date, sel.time);
       const hoursUntil = (startDt.getTime() - Date.now()) / (1000 * 60 * 60);
-      if (hoursUntil < 0) {
-        return toast('Ceremony date and time cannot be in the past. Please select an upcoming ceremony time slot 🙏', true);
+      if (hoursUntil < 48) {
+        return toast('Puja ceremonies must be scheduled at least 48 hours in advance to allow verified Vedic Pandits to prepare and confirm 🙏', true);
       }
       const address = $('#b-address', m).value.trim();
       if (!address) return toast('Please enter your ceremony venue / address', true);
@@ -3969,6 +3994,7 @@ async function renderDashboard(isSilentSync = false) {
   if (!S.user) return;
   if (isDashboardRendering) return;
   isDashboardRendering = true;
+  const renderGuardTimer = setTimeout(() => { isDashboardRendering = false; }, 8000);
 
   const isAlreadyLoaded = root && root.querySelector('.dash-banner');
   if (!isAlreadyLoaded && !isSilentSync) {
@@ -4003,6 +4029,7 @@ async function renderDashboard(isSilentSync = false) {
     if (/Authentication|Admin access/.test(e.message)) { saveSession(null); showView('home'); toast('Session expired. Please log in again.', true); }
     else if (!isSilentSync) root.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   } finally {
+    clearTimeout(renderGuardTimer);
     isDashboardRendering = false;
   }
 }
@@ -4388,6 +4415,17 @@ function switchDevoteeSubtab(tab) {
 
   const container = document.getElementById('dash-tab-content');
   if (container) {
+    if ((!S.bookings || !S.longs) && S.user && S.user.email) {
+      const e = encodeURIComponent(S.user.email);
+      Promise.all([
+        api('/bookings?userEmail=' + e).catch(() => S.bookings || []),
+        api('/long-puja-requests?userEmail=' + e).catch(() => S.longs || [])
+      ]).then(([bList, lList]) => {
+        S.bookings = bList;
+        S.longs = lList;
+        if (S.dashTab === tab) switchDevoteeSubtab(tab);
+      }).catch(() => {});
+    }
     const bookings = S.bookings || [];
     const longs = S.longs || [];
     if (tab === 'bookings') {
@@ -8177,8 +8215,11 @@ const ACTIONS = {
     if (!b) return toast('Booking record not found', true);
     openModal('Reschedule Ceremony Slot', `
       <div>
-        <label style="font-weight:600">Select New Ceremony Date *</label>
+        <label style="font-weight:600">Select New Ceremony Date (Min. 48h Advance) *</label>
         <input type="date" id="resched-date" min="${minBookingDate()}" value="${esc(b.date || '')}">
+        <small class="muted" style="font-size:11px;display:block;margin-top:3px;color:#8d2800">
+          ⏱️ Rescheduled slot must be at least 48 hours in advance
+        </small>
       </div>
       <div style="margin-top:12px">
         <label style="font-weight:600">Select New Time Slot *</label>
@@ -8199,8 +8240,8 @@ const ACTIONS = {
 
         const startDt = parsePujaStartDateTime(date, time);
         const hoursUntil = (startDt.getTime() - Date.now()) / (1000 * 60 * 60);
-        if (hoursUntil < 0) {
-          return toast('Rescheduled slot cannot be in the past. Please select an upcoming date and time 🙏', true);
+        if (hoursUntil < 48) {
+          return toast('Rescheduled slot must be at least 48 hours in advance to allow Pandit preparation 🙏', true);
         }
 
         try {
@@ -10070,7 +10111,7 @@ function initRealtimeSync() {
     }
   }
 
-  // 2. High-frequency heartbeat polling fallback (2.0s) for cross-device synchronization (Mobile <-> Desktop)
+  // 2. High-frequency heartbeat polling fallback (8.0s) for cross-device synchronization (Mobile <-> Desktop)
   if (!pcSyncPollInterval) {
     pcSyncPollInterval = setInterval(async () => {
       // If browser tab is in background or hidden, skip polling to conserve CPU & battery
@@ -10094,7 +10135,7 @@ function initRealtimeSync() {
           pcLastSyncVersion = data.version;
         }
       } catch (e) {}
-    }, 2000);
+    }, 8000);
   }
 
   // 3. Instant sync on tab visibility or window focus
@@ -10136,11 +10177,6 @@ async function handleIncomingSyncUpdate(eventData = {}) {
 
   try {
     const entity = eventData.entity || 'general';
-
-    // Always invalidate cached data to ensure subsequent views fetch fresh data from MongoDB
-    S.bookings = null;
-    S.longs = null;
-    S._panditBookings = null;
 
     // Check if a modal is currently open to avoid disrupting active form input
     const modalRoot = $('#modal-root');
