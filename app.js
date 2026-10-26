@@ -2454,13 +2454,13 @@ app.post('/api/bookings', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Please submit your UPI ID / Number or Bank Account for refund processing before booking.' });
   }
 
-  // Enforce minimum 48 hours advance notice requirement
+  // Enforce ceremony date/time cannot be in the past
   const requestedSlot = b.time || '08:00 AM - 11:00 AM';
   const ceremonyStartDt = parsePujaStartDateTime(b.date, requestedSlot);
   const hoursUntilCeremony = (ceremonyStartDt.getTime() - Date.now()) / (1000 * 60 * 60);
-  if (hoursUntilCeremony < 48) {
+  if (hoursUntilCeremony < 0) {
     return res.status(400).json({
-      error: 'Ceremony bookings must be scheduled at least 48 hours in advance to allow verified Vedic Pandits to prepare and confirm. Please choose a slot at least 48 hours from now.'
+      error: 'Ceremony date and time cannot be in the past. Please select an upcoming ceremony date and time slot.'
     });
   }
 
@@ -3899,8 +3899,8 @@ app.put('/api/bookings/:id/reschedule', wrap(async (req, res) => {
 
   const ceremonyStartDt = parsePujaStartDateTime(date, time);
   const hoursUntilCeremony = (ceremonyStartDt.getTime() - Date.now()) / (1000 * 60 * 60);
-  if (hoursUntilCeremony < 48) {
-    return res.status(400).json({ error: 'Rescheduled ceremony must be scheduled at least 48 hours in advance.' });
+  if (hoursUntilCeremony < 0) {
+    return res.status(400).json({ error: 'Rescheduled ceremony date and time cannot be in the past. Please select an upcoming slot.' });
   }
 
   const targetPanditEmail = b.panditEmail || b.preferredPanditEmail;
@@ -3980,8 +3980,8 @@ app.put('/api/bookings/:id/rebook', wrap(async (req, res) => {
 
   const ceremonyStartDt = parsePujaStartDateTime(date, time);
   const hoursUntilCeremony = (ceremonyStartDt.getTime() - Date.now()) / (1000 * 60 * 60);
-  if (hoursUntilCeremony < 48) {
-    return res.status(400).json({ error: 'Ceremony bookings must be scheduled at least 48 hours in advance. Please choose a slot at least 48 hours from now.' });
+  if (hoursUntilCeremony < 0) {
+    return res.status(400).json({ error: 'Ceremony date and time cannot be in the past. Please select an upcoming ceremony date and time slot.' });
   }
 
   let preferredPandit = null;
@@ -5263,7 +5263,13 @@ app.use((err, req, res, next) => {
 
 // ---- Static frontend (local mode; Vercel serves /public directly) ----
 const pub = path.join(__dirname, 'public');
-app.use(express.static(pub));
+app.use(express.static(pub, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html') || filePath.endsWith('.js') || filePath.endsWith('.css')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
 app.get('/admin', (req, res) => res.sendFile(path.join(pub, 'admin.html')));
 app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(pub, 'index.html')));
 

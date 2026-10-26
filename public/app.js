@@ -305,21 +305,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 const today = () => new Date().toISOString().slice(0, 10);
-const minBookingDate = () => {
-  const now = Date.now();
-  const noticeMs = 48 * 60 * 60 * 1000;
-  let d = new Date(now + noticeMs);
-  // Latest ceremony slot begins at 19:00 (07:00 PM). If d's hour is >= 19,
-  // then all ceremony slots on that calendar day are less than 48 hours away.
-  // Advance to the next calendar day so devotees have eligible morning & evening slots.
-  if (d.getHours() >= 19) {
-    d.setDate(d.getDate() + 1);
-  }
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
+const minBookingDate = () => today();
 
 const minUnavailDate = () => {
   const now = new Date();
@@ -1845,7 +1831,7 @@ async function openBooking(arg) {
   if (loadPromises.length) await Promise.all(loadPromises);
 
   const allShortPujas = (S.pujas || []).filter(p => p.type === 'Short').map(p => p.name);
-  const selectedPandit = targetPanditId ? (S.pandits || []).find((x) => String(x._id || x.id || '') === String(targetPanditId) || (x.email && x.email.toLowerCase() === String(targetPanditId).toLowerCase())) : null;
+  let selectedPandit = targetPanditId ? (S.pandits || []).find((x) => String(x._id || x.id || '') === String(targetPanditId) || (x.email && x.email.toLowerCase() === String(targetPanditId).toLowerCase())) : null;
   const lockedDistrict = (u && u.district) ? u.district.trim() : '';
   const lockedState = (u && u.state) ? u.state.trim() : 'Odisha';
   const curState = lockedState || S.filters.state || (selectedPandit && (selectedPandit.workingState || selectedPandit.state)) || 'Odisha';
@@ -2143,11 +2129,8 @@ async function openBooking(arg) {
         `}
       </div>
       <div>
-        <label>Ceremony Date (Min. 48 Hours in Advance) *</label>
+        <label>Ceremony Date *</label>
         <input type="date" id="b-date" min="${minBookingDate()}" value="${esc(targetDate || minBookingDate())}">
-        <small class="muted" style="font-size:11px;margin-top:3px;display:block;color:#8d2800">
-          ⏱️ Bookings must be scheduled at least 48 hours in advance
-        </small>
       </div>
     </div>
     <div>
@@ -2504,7 +2487,8 @@ async function openBooking(arg) {
       const box = $('#b-slots', m);
       if (!box) return;
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim().toLowerCase() : '';
-      const p = (pEmail ? (S.pandits || []).find((x) => (x.email || '').trim().toLowerCase() === pEmail) : null) || selectedPandit;
+      const p = pEmail ? (S.pandits || []).find((x) => (x.email || '').trim().toLowerCase() === pEmail) : null;
+      selectedPandit = p;
       const activeSlots = (p && Array.isArray(p.timeSlots) && p.timeSlots.length) ? p.timeSlots : standardSlots;
       const now = Date.now();
 
@@ -2519,11 +2503,11 @@ async function openBooking(arg) {
         box.innerHTML = activeSlots.map((s) => {
           const dt = parsePujaStartDateTime(d, s);
           const diffHours = (dt.getTime() - now) / (1000 * 60 * 60);
-          const isLocked = diffHours < 48;
+          const isLocked = diffHours < 0;
           if (isLocked) {
             return `
-              <button type="button" class="slot locked" style="opacity:0.45;cursor:not-allowed;border-style:dashed" title="Bookings require minimum 48 hours notice. This slot is ${diffHours > 0 ? `${Math.round(diffHours * 10) / 10}h away` : 'past'}">
-                ${esc(s)} <small style="display:block;font-size:9.5px;color:#c62828">&lt; 48h Notice</small>
+              <button type="button" class="slot locked" style="opacity:0.45;cursor:not-allowed;border-style:dashed" title="This ceremony time slot is in the past">
+                ${esc(s)} <small style="display:block;font-size:9.5px;color:#8d2800">Past Slot</small>
               </button>
             `;
           }
@@ -2558,7 +2542,7 @@ async function openBooking(arg) {
           } catch (e) {}
 
           const existsInActive = activeSlots.includes(sel.time);
-          if (!existsInActive || (dt.getTime() - now) / (1000 * 60 * 60) < 48 || lastBookedSlots.includes(sel.time) || lastOverlappingSlots.includes(sel.time) || collidesInterval) {
+          if (!existsInActive || (dt.getTime() - now) / (1000 * 60 * 60) < 0 || lastBookedSlots.includes(sel.time) || lastOverlappingSlots.includes(sel.time) || collidesInterval) {
             sel.time = '';
           }
         }
@@ -2625,7 +2609,7 @@ async function openBooking(arg) {
       const b = e.target.closest('.slot');
       if (!b) return;
       if (b.classList.contains('locked')) {
-        return toast('⏱️ Bookings require minimum 48 hours notice. Please choose another slot or select a future date.', true);
+        return toast('This ceremony time slot is in the past. Please select an upcoming slot.', true);
       }
       if (b.classList.contains('booked')) {
         return toast('Sorry, this time slot has just been booked. Please select another available slot.', true);
@@ -2688,8 +2672,8 @@ async function openBooking(arg) {
 
       const startDt = parsePujaStartDateTime(date, sel.time);
       const hoursUntil = (startDt.getTime() - Date.now()) / (1000 * 60 * 60);
-      if (hoursUntil < 48) {
-        return toast('Puja ceremony must be scheduled at least 48 hours in advance to allow verified Vedic Pandits to prepare and confirm 🙏', true);
+      if (hoursUntil < 0) {
+        return toast('Ceremony date and time cannot be in the past. Please select an upcoming ceremony time slot 🙏', true);
       }
       const address = $('#b-address', m).value.trim();
       if (!address) return toast('Please enter your ceremony venue / address', true);
@@ -8193,11 +8177,8 @@ const ACTIONS = {
     if (!b) return toast('Booking record not found', true);
     openModal('Reschedule Ceremony Slot', `
       <div>
-        <label style="font-weight:600">Select New Ceremony Date (Min. 48h Advance) *</label>
+        <label style="font-weight:600">Select New Ceremony Date *</label>
         <input type="date" id="resched-date" min="${minBookingDate()}" value="${esc(b.date || '')}">
-        <small class="muted" style="font-size:11px;display:block;margin-top:3px;color:#8d2800">
-          ⏱️ Rescheduled slot must be at least 48 hours in advance
-        </small>
       </div>
       <div style="margin-top:12px">
         <label style="font-weight:600">Select New Time Slot *</label>
@@ -8218,8 +8199,8 @@ const ACTIONS = {
 
         const startDt = parsePujaStartDateTime(date, time);
         const hoursUntil = (startDt.getTime() - Date.now()) / (1000 * 60 * 60);
-        if (hoursUntil < 48) {
-          return toast('Rescheduled slot must be at least 48 hours in advance to allow Pandit preparation 🙏', true);
+        if (hoursUntil < 0) {
+          return toast('Rescheduled slot cannot be in the past. Please select an upcoming date and time 🙏', true);
         }
 
         try {
