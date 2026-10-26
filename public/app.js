@@ -2311,9 +2311,13 @@ async function openBooking(arg) {
 
       const currentOffer = findActiveOffer({ service: ritual, district: dist, state: curState, date: chosenDate });
 
+      const currentSelectedEmail = (panditSel && panditSel.value)
+        ? panditSel.value.trim().toLowerCase()
+        : (selectedPandit ? selectedPandit.email.toLowerCase() : (targetPanditId ? String(targetPanditId).toLowerCase() : ''));
+
       let optionsHtml = `<option value="">✨ Any Available Verified Pandit (Auto-assigned by Admin)</option>`;
       allPandits.forEach((p) => {
-        const isSelected = (selectedPandit && selectedPandit.email.toLowerCase() === p.email.toLowerCase()) || (targetPanditId && (p._id === targetPanditId || p.email.toLowerCase() === String(targetPanditId).toLowerCase()));
+        const isSelected = currentSelectedEmail && (p.email.toLowerCase() === currentSelectedEmail || p._id === currentSelectedEmail);
         const pFee = (p.districtPrices && Number(p.districtPrices[dist])) || p.fee || baseDakshina;
         const servesTag = (p.workingDistricts && p.workingDistricts.includes(dist)) || p.district === dist ? `Serves ${dist}` : p.district;
         const spec = p.specialty || 'Vedic Rituals';
@@ -2330,6 +2334,13 @@ async function openBooking(arg) {
         optionsHtml += `<option value="${esc(p.email)}" ${isSelected ? 'selected' : ''} ${!avail.available ? 'style="color:#c62828"' : ''}>Pt. ${esc(p.name)} [Specialty: ${esc(spec)}] · ${esc(servesTag)} — Dakshina: ${feeDisplay}${unavailTag}</option>`;
       });
       panditSel.innerHTML = optionsHtml;
+      if (currentSelectedEmail) {
+        const matched = allPandits.find(p => p.email.toLowerCase() === currentSelectedEmail || p._id === currentSelectedEmail);
+        if (matched) {
+          panditSel.value = matched.email;
+          selectedPandit = matched;
+        }
+      }
       updatePanditInfo();
       paintFee();
     };
@@ -2468,6 +2479,7 @@ async function openBooking(arg) {
     const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
     let lastBookedSlots = [];
     let lastOverlappingSlots = [];
+    let lastBookedIntervals = [];
 
     const drawSlots = async () => {
       const d = dateInp.value;
@@ -2495,7 +2507,15 @@ async function openBooking(arg) {
               </button>
             `;
           }
-          const isBooked = lastBookedSlots.includes(s) || lastOverlappingSlots.includes(s);
+
+          let collidesInterval = false;
+          try {
+            const sStart = parsePujaStartDateTime(d, s).getTime();
+            const sEnd = parsePujaEndDateTime(d, s).getTime();
+            collidesInterval = (lastBookedIntervals || []).some(inv => Math.max(sStart, inv.start) < Math.min(sEnd, inv.end));
+          } catch (e) {}
+
+          const isBooked = lastBookedSlots.includes(s) || lastOverlappingSlots.includes(s) || collidesInterval;
           if (isBooked) {
             return `
               <button type="button" class="slot booked" disabled style="opacity:0.55;cursor:not-allowed;background:#fff5f5;border:1px dashed #ef9a9a;color:#c62828" title="Sorry, this time slot has just been booked. Please select another available slot.">
@@ -2510,7 +2530,14 @@ async function openBooking(arg) {
 
         if (sel.time) {
           const dt = parsePujaStartDateTime(d, sel.time);
-          if ((dt.getTime() - now) / (1000 * 60 * 60) < 48 || lastBookedSlots.includes(sel.time) || lastOverlappingSlots.includes(sel.time)) {
+          let collidesInterval = false;
+          try {
+            const sStart = parsePujaStartDateTime(d, sel.time).getTime();
+            const sEnd = parsePujaEndDateTime(d, sel.time).getTime();
+            collidesInterval = (lastBookedIntervals || []).some(inv => Math.max(sStart, inv.start) < Math.min(sEnd, inv.end));
+          } catch (e) {}
+
+          if ((dt.getTime() - now) / (1000 * 60 * 60) < 48 || lastBookedSlots.includes(sel.time) || lastOverlappingSlots.includes(sel.time) || collidesInterval) {
             sel.time = '';
           }
         }
@@ -2526,6 +2553,7 @@ async function openBooking(arg) {
           if (res && res.ok) {
             lastBookedSlots = res.bookedSlots || [];
             lastOverlappingSlots = res.overlappingSlots || [];
+            lastBookedIntervals = res.bookedIntervals || [];
             renderCurrentSlots();
           }
         } catch (e) {
@@ -2534,6 +2562,7 @@ async function openBooking(arg) {
       } else {
         lastBookedSlots = [];
         lastOverlappingSlots = [];
+        lastBookedIntervals = [];
         renderCurrentSlots();
       }
     };
@@ -2546,7 +2575,13 @@ async function openBooking(arg) {
 
     serviceSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
     districtSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
-    panditSel.onchange = () => { updatePanditInfo(); paintFee(); drawSlots(); };
+    panditSel.onchange = () => {
+      const chosenEmail = panditSel.value ? panditSel.value.trim().toLowerCase() : '';
+      selectedPandit = chosenEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === chosenEmail) : null;
+      updatePanditInfo();
+      paintFee();
+      drawSlots();
+    };
     dateInp.onchange = () => { updatePanditsDropdown(); drawSlots(); paintFee(); };
 
     const viewAreaScholarsBtn = $('#b-view-area-scholars', m);

@@ -2049,15 +2049,18 @@ app.get('/api/bookings/booked-slots', wrap(async (req, res) => {
   const panditEmail = lc(req.query.panditEmail);
   const date = String(req.query.date || '').trim();
   if (!panditEmail || panditEmail === 'any' || !date) {
-    return res.json({ ok: true, bookedSlots: [], overlappingSlots: [] });
+    return res.json({ ok: true, bookedSlots: [], overlappingSlots: [], bookedIntervals: [] });
   }
+
+  const pRegex = new RegExp('^\\s*' + panditEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
+  const dRegex = new RegExp('^\\s*' + date.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
 
   const activeBookings = await Booking.find({
     $or: [
-      { panditEmail },
-      { preferredPanditEmail: panditEmail }
+      { panditEmail: pRegex },
+      { preferredPanditEmail: pRegex }
     ],
-    date,
+    date: dRegex,
     status: { $nin: ['Cancelled', 'Rejected'] },
     panditApproval: { $ne: 'Rejected' }
   });
@@ -2068,35 +2071,55 @@ app.get('/api/bookings/booked-slots', wrap(async (req, res) => {
   for (const b of activeBookings) {
     if (b.time) {
       if (!bookedSlots.includes(b.time)) bookedSlots.push(b.time);
-      bookedIntervals.push({
-        start: parsePujaStartDateTime(b.date, b.time).getTime(),
-        end: parsePujaEndDateTime(b.date, b.time).getTime()
-      });
+      try {
+        const start = parsePujaStartDateTime(b.date, b.time).getTime();
+        const end = parsePujaEndDateTime(b.date, b.time).getTime();
+        if (!isNaN(start) && !isNaN(end)) {
+          bookedIntervals.push({ start, end, slot: b.time });
+        }
+      } catch (err) {
+        console.warn('[booked-slots] Error parsing interval for booking:', b.bookingId, err.message);
+      }
     }
   }
 
-  const activeLocks = await SlotLock.find({ panditEmail, date });
+  const activeLocks = await SlotLock.find({
+    panditEmail: pRegex,
+    date: dRegex
+  });
   for (const lk of activeLocks) {
     if (lk.time && !bookedSlots.includes(lk.time)) {
       bookedSlots.push(lk.time);
-      bookedIntervals.push({
-        start: lk.startMs || parsePujaStartDateTime(lk.date, lk.time).getTime(),
-        end: lk.endMs || parsePujaEndDateTime(lk.date, lk.time).getTime()
-      });
+      try {
+        const start = lk.startMs || parsePujaStartDateTime(lk.date, lk.time).getTime();
+        const end = lk.endMs || parsePujaEndDateTime(lk.date, lk.time).getTime();
+        if (!isNaN(start) && !isNaN(end)) {
+          bookedIntervals.push({ start, end, slot: lk.time });
+        }
+      } catch (err) {
+        console.warn('[booked-slots] Error parsing interval for lock:', lk.lockKey, err.message);
+      }
     }
   }
 
   const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
-  const pandit = await Pandit.findOne({ email: panditEmail });
-  const allSlots = (pandit && Array.isArray(pandit.timeSlots) && pandit.timeSlots.length) ? pandit.timeSlots : standardSlots;
+  const pandit = await Pandit.findOne({ email: pRegex });
+  const allSlots = Array.from(new Set([
+    ...standardSlots,
+    ...((pandit && Array.isArray(pandit.timeSlots) && pandit.timeSlots.length) ? pandit.timeSlots : [])
+  ]));
 
   const overlappingSlots = [];
   for (const s of allSlots) {
-    const sStart = parsePujaStartDateTime(date, s).getTime();
-    const sEnd = parsePujaEndDateTime(date, s).getTime();
-    const isConflict = bookedIntervals.some(inv => Math.max(sStart, inv.start) < Math.min(sEnd, inv.end));
-    if (isConflict && !overlappingSlots.includes(s)) {
-      overlappingSlots.push(s);
+    try {
+      const sStart = parsePujaStartDateTime(date, s).getTime();
+      const sEnd = parsePujaEndDateTime(date, s).getTime();
+      const isConflict = bookedIntervals.some(inv => Math.max(sStart, inv.start) < Math.min(sEnd, inv.end));
+      if (isConflict && !overlappingSlots.includes(s)) {
+        overlappingSlots.push(s);
+      }
+    } catch (e) {
+      // ignore parse error
     }
   }
 
@@ -2105,7 +2128,8 @@ app.get('/api/bookings/booked-slots', wrap(async (req, res) => {
     panditEmail,
     date,
     bookedSlots,
-    overlappingSlots
+    overlappingSlots,
+    bookedIntervals
   });
 }));
 
@@ -2309,12 +2333,15 @@ async function findConflictingPanditBooking(panditEmail, date, requestedSlot, ex
   const reqStart = parsePujaStartDateTime(normDate, requestedSlot).getTime();
   const reqEnd = parsePujaEndDateTime(normDate, requestedSlot).getTime();
 
+  const pRegex = new RegExp('^\\s*' + pEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
+  const dRegex = new RegExp('^\\s*' + normDate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
+
   const query = {
     $or: [
-      { panditEmail: pEmail },
-      { preferredPanditEmail: pEmail }
+      { panditEmail: pRegex },
+      { preferredPanditEmail: pRegex }
     ],
-    date: normDate,
+    date: dRegex,
     status: { $nin: ['Cancelled', 'Rejected'] },
     panditApproval: { $ne: 'Rejected' }
   };
@@ -2333,8 +2360,8 @@ async function findConflictingPanditBooking(panditEmail, date, requestedSlot, ex
 
   // Also check active SlotLocks
   const lockQuery = {
-    panditEmail: pEmail,
-    date: normDate
+    panditEmail: pRegex,
+    date: dRegex
   };
   if (excludeBookingId) {
     lockQuery.bookingId = { $ne: String(excludeBookingId).trim() };
