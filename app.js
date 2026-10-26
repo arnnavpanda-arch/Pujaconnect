@@ -6,7 +6,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { connectDB } = require('./lib/db');
-const { User, Pandit, Booking, LongPujaRequest, Puja, AppSetting, MediaOffer, MediaAnnouncement } = require('./lib/models');
+const { User, Pandit, Booking, LongPujaRequest, Puja, AppSetting, MediaOffer, MediaAnnouncement, SlotLock } = require('./lib/models');
 const { sendTemplate, sendSafe } = require('./lib/mailer');
 
 const app = express();
@@ -693,6 +693,39 @@ function clearAdminSecurityAttempts(rateKey) {
   adminSecurityAttempts.delete(rateKey);
 }
 
+// Send automated security alert email to official inbox (bookpujaconnect@gmail.com) on failed login threshold / lockout
+async function sendAdminSecurityAlertEmail(req, { attemptedUsername, attemptsCount, reason }) {
+  try {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = (forwarded ? forwarded.split(',')[0].trim() : (req.socket && req.socket.remoteAddress) || req.ip || '127.0.0.1').replace(/[^a-zA-Z0-9_.:-]/g, '');
+    const userAgent = req.headers['user-agent'] || 'Unknown Browser';
+    const referer = req.headers['referer'] || req.headers['origin'] || 'Direct Navigation';
+    const timestampIST = new Date().toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'full',
+      timeStyle: 'medium'
+    });
+    const recipient = (process.env.SENDER_EMAIL || process.env.ADMIN_EMAIL || 'bookpujaconnect@gmail.com').trim();
+    const adminUrl = `${req.protocol}://${req.get('host') || 'pujaconnect-one.vercel.app'}/admin`;
+
+    await sendSafe('ADMIN_SECURITY_ALERT', recipient, {
+      ip,
+      attemptsCount: attemptsCount || 2,
+      attemptedUsername: attemptedUsername || '(empty)',
+      userAgent,
+      referer,
+      timestampIST,
+      endpoint: req.originalUrl || req.url || '/api/auth/admin-login',
+      adminUrl,
+      lockoutDuration: '120 seconds (2 minutes)',
+      reason: reason || '2 failed attempts / 3rd attempt lockout threshold reached'
+    });
+    console.log(`[Security Alert] Admin lockout alert dispatched to ${recipient} for IP: ${ip} (Attempts: ${attemptsCount})`);
+  } catch (err) {
+    console.error('[Security Alert Error] Failed to send admin security alert:', err.message);
+  }
+}
+
 // 4 Protected Sections and their explicit passwords
 const ADMIN_SECTIONS = {
   section_1: {
@@ -730,7 +763,24 @@ app.post('/api/auth/admin-login', wrap(async (req, res) => {
   const rateKey = getAdminClientKey(req, 'login');
   const rateStatus = checkAdminSecurityRateLimit(rateKey);
 
+  const { username, password } = req.body || {};
+  const trimmedUser = (username || '').trim().toLowerCase();
+  const trimmedPass = (password || '').trim();
+
+  // If locked out, check if this is an attempted 3rd or subsequent attempt
   if (rateStatus.locked) {
+    const record = adminSecurityAttempts.get(rateKey);
+    if (record) {
+      if (!record.alertSentAttempts) record.alertSentAttempts = new Set();
+      if (!record.alertSentAttempts.has(3)) {
+        record.alertSentAttempts.add(3);
+        sendAdminSecurityAlertEmail(req, {
+          attemptedUsername: trimmedUser,
+          attemptsCount: 3,
+          reason: '3rd attempt blocked by active 2-minute security lockout'
+        });
+      }
+    }
     return res.status(429).json({
       error: rateStatus.message,
       locked: true,
@@ -738,10 +788,6 @@ app.post('/api/auth/admin-login', wrap(async (req, res) => {
       lockoutUntil: rateStatus.lockoutUntil
     });
   }
-
-  const { username, password } = req.body || {};
-  const trimmedUser = (username || '').trim().toLowerCase();
-  const trimmedPass = (password || '').trim();
 
   // Official Admin Credentials:
   // Username: puja
@@ -751,6 +797,18 @@ app.post('/api/auth/admin-login', wrap(async (req, res) => {
   if (!isValidAdmin) {
     const failStatus = recordAdminSecurityFailure(rateKey);
     if (failStatus.locked) {
+      const record = adminSecurityAttempts.get(rateKey);
+      if (record) {
+        if (!record.alertSentAttempts) record.alertSentAttempts = new Set();
+        if (!record.alertSentAttempts.has(2)) {
+          record.alertSentAttempts.add(2);
+          sendAdminSecurityAlertEmail(req, {
+            attemptedUsername: trimmedUser,
+            attemptsCount: 2,
+            reason: '2 consecutive failed login attempts within 1 minute (2-minute lockout activated)'
+          });
+        }
+      }
       return res.status(429).json({
         error: 'Incorrect admin credentials. Security lockout activated for 2 minutes.',
         locked: true,
@@ -803,7 +861,22 @@ app.post('/api/auth/admin-direct', wrap(async (req, res) => {
 
   if (username || password) {
     const rateStatus = checkAdminSecurityRateLimit(rateKey);
+    const trimmedUser = (username || '').trim().toLowerCase();
+    const trimmedPass = (password || '').trim();
+
     if (rateStatus.locked) {
+      const record = adminSecurityAttempts.get(rateKey);
+      if (record) {
+        if (!record.alertSentAttempts) record.alertSentAttempts = new Set();
+        if (!record.alertSentAttempts.has(3)) {
+          record.alertSentAttempts.add(3);
+          sendAdminSecurityAlertEmail(req, {
+            attemptedUsername: trimmedUser,
+            attemptsCount: 3,
+            reason: '3rd attempt blocked by active 2-minute security lockout'
+          });
+        }
+      }
       return res.status(429).json({
         error: rateStatus.message,
         locked: true,
@@ -811,8 +884,7 @@ app.post('/api/auth/admin-direct', wrap(async (req, res) => {
         lockoutUntil: rateStatus.lockoutUntil
       });
     }
-    const trimmedUser = (username || '').trim().toLowerCase();
-    const trimmedPass = (password || '').trim();
+
     if (trimmedUser === 'puja' && trimmedPass === 'unified mentor') {
       clearAdminSecurityAttempts(rateKey);
       const adminEmail = (process.env.ADMIN_EMAIL || 'admin@pujaconnect.com').toLowerCase();
@@ -827,6 +899,18 @@ app.post('/api/auth/admin-direct', wrap(async (req, res) => {
     }
     const failStatus = recordAdminSecurityFailure(rateKey);
     if (failStatus.locked) {
+      const record = adminSecurityAttempts.get(rateKey);
+      if (record) {
+        if (!record.alertSentAttempts) record.alertSentAttempts = new Set();
+        if (!record.alertSentAttempts.has(2)) {
+          record.alertSentAttempts.add(2);
+          sendAdminSecurityAlertEmail(req, {
+            attemptedUsername: trimmedUser,
+            attemptsCount: 2,
+            reason: '2 consecutive failed login attempts within 1 minute (2-minute lockout activated)'
+          });
+        }
+      }
       return res.status(429).json({
         error: 'Incorrect credentials. Security lockout active for 2 minutes.',
         locked: true,
@@ -1960,6 +2044,71 @@ app.get('/api/bookings', wrap(async (req, res) => {
   res.json(updated);
 }));
 
+// Endpoint to query already booked & overlapping slots for a Pandit on a given date (placed before :id route)
+app.get('/api/bookings/booked-slots', wrap(async (req, res) => {
+  const panditEmail = lc(req.query.panditEmail);
+  const date = String(req.query.date || '').trim();
+  if (!panditEmail || panditEmail === 'any' || !date) {
+    return res.json({ ok: true, bookedSlots: [], overlappingSlots: [] });
+  }
+
+  const activeBookings = await Booking.find({
+    $or: [
+      { panditEmail },
+      { preferredPanditEmail: panditEmail }
+    ],
+    date,
+    status: { $nin: ['Cancelled', 'Rejected'] },
+    panditApproval: { $ne: 'Rejected' }
+  });
+
+  const bookedSlots = [];
+  const bookedIntervals = [];
+
+  for (const b of activeBookings) {
+    if (b.time) {
+      if (!bookedSlots.includes(b.time)) bookedSlots.push(b.time);
+      bookedIntervals.push({
+        start: parsePujaStartDateTime(b.date, b.time).getTime(),
+        end: parsePujaEndDateTime(b.date, b.time).getTime()
+      });
+    }
+  }
+
+  const activeLocks = await SlotLock.find({ panditEmail, date });
+  for (const lk of activeLocks) {
+    if (lk.time && !bookedSlots.includes(lk.time)) {
+      bookedSlots.push(lk.time);
+      bookedIntervals.push({
+        start: lk.startMs || parsePujaStartDateTime(lk.date, lk.time).getTime(),
+        end: lk.endMs || parsePujaEndDateTime(lk.date, lk.time).getTime()
+      });
+    }
+  }
+
+  const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
+  const pandit = await Pandit.findOne({ email: panditEmail });
+  const allSlots = (pandit && Array.isArray(pandit.timeSlots) && pandit.timeSlots.length) ? pandit.timeSlots : standardSlots;
+
+  const overlappingSlots = [];
+  for (const s of allSlots) {
+    const sStart = parsePujaStartDateTime(date, s).getTime();
+    const sEnd = parsePujaEndDateTime(date, s).getTime();
+    const isConflict = bookedIntervals.some(inv => Math.max(sStart, inv.start) < Math.min(sEnd, inv.end));
+    if (isConflict && !overlappingSlots.includes(s)) {
+      overlappingSlots.push(s);
+    }
+  }
+
+  res.json({
+    ok: true,
+    panditEmail,
+    date,
+    bookedSlots,
+    overlappingSlots
+  });
+}));
+
 app.get('/api/bookings/:id', wrap(async (req, res) => {
   const b = await Booking.findOne(bookingFindQuery(req.params.id));
   if (!b) {
@@ -2112,8 +2261,149 @@ async function prepareDevoteeLocationReport(district = '', state = '') {
   };
 }
 
+// ============================================================================
+// CONCURRENCY CONTROL & RACE-CONDITION PROTECTION FOR PANDIT BOOKINGS
+// ============================================================================
+
+const SLOT_ALREADY_BOOKED_MSG = 'Sorry, this time slot has just been booked. Please select another available slot.';
+
+// In-process mutex queue per (panditEmail, date) guaranteeing sequential execution of concurrent requests
+const panditDateLocks = new Map();
+
+async function withPanditDateLock(panditEmail, date, asyncFn) {
+  const normPandit = lc(panditEmail || 'any');
+  const normDate = String(date || '').trim();
+  const key = `${normPandit}:${normDate}`;
+
+  const prevPromise = panditDateLocks.get(key) || Promise.resolve();
+  let releaseLock;
+  const newLockPromise = new Promise((resolve) => { releaseLock = resolve; });
+  panditDateLocks.set(key, newLockPromise);
+
+  await prevPromise.catch(() => {});
+  try {
+    return await asyncFn();
+  } finally {
+    releaseLock();
+    if (panditDateLocks.get(key) === newLockPromise) {
+      panditDateLocks.delete(key);
+    }
+  }
+}
+
+// Check if two time slots on a given date overlap in duration: max(startA, startB) < min(endA, endB)
+function arePujaSlotsOverlapping(date, slotA, slotB) {
+  if (!date || !slotA || !slotB) return false;
+  const startA = parsePujaStartDateTime(date, slotA).getTime();
+  const endA = parsePujaEndDateTime(date, slotA).getTime();
+  const startB = parsePujaStartDateTime(date, slotB).getTime();
+  const endB = parsePujaEndDateTime(date, slotB).getTime();
+  return Math.max(startA, startB) < Math.min(endA, endB);
+}
+
+// Find any active booking for a Pandit that conflicts or overlaps with requested date and time slot
+async function findConflictingPanditBooking(panditEmail, date, requestedSlot, excludeBookingId = null) {
+  if (!panditEmail || lc(panditEmail) === 'any') return null;
+  const pEmail = lc(panditEmail);
+  const normDate = String(date || '').trim();
+  const reqStart = parsePujaStartDateTime(normDate, requestedSlot).getTime();
+  const reqEnd = parsePujaEndDateTime(normDate, requestedSlot).getTime();
+
+  const query = {
+    $or: [
+      { panditEmail: pEmail },
+      { preferredPanditEmail: pEmail }
+    ],
+    date: normDate,
+    status: { $nin: ['Cancelled', 'Rejected'] },
+    panditApproval: { $ne: 'Rejected' }
+  };
+  if (excludeBookingId) {
+    query.bookingId = { $ne: String(excludeBookingId).trim() };
+  }
+
+  const existingBookings = await Booking.find(query);
+  for (const b of existingBookings) {
+    const bStart = parsePujaStartDateTime(b.date, b.time).getTime();
+    const bEnd = parsePujaEndDateTime(b.date, b.time).getTime();
+    if (Math.max(reqStart, bStart) < Math.min(reqEnd, bEnd)) {
+      return b; // Conflicting active booking found
+    }
+  }
+
+  // Also check active SlotLocks
+  const lockQuery = {
+    panditEmail: pEmail,
+    date: normDate
+  };
+  if (excludeBookingId) {
+    lockQuery.bookingId = { $ne: String(excludeBookingId).trim() };
+  }
+  const existingLocks = await SlotLock.find(lockQuery);
+  for (const lk of existingLocks) {
+    const lkStart = lk.startMs || parsePujaStartDateTime(lk.date, lk.time).getTime();
+    const lkEnd = lk.endMs || parsePujaEndDateTime(lk.date, lk.time).getTime();
+    if (Math.max(reqStart, lkStart) < Math.min(reqEnd, lkEnd)) {
+      return lk; // Conflicting active lock found
+    }
+  }
+
+  return null;
+}
+
+// Atomic slot lock acquisition: ensures database uniqueness constraint
+async function acquireSlotLock({ panditEmail, date, time, bookingId, userEmail }) {
+  if (!panditEmail || lc(panditEmail) === 'any') return null;
+  const pEmail = lc(panditEmail);
+  const normDate = String(date || '').trim();
+  const normTime = String(time || '').trim();
+  const startMs = parsePujaStartDateTime(normDate, normTime).getTime();
+  const endMs = parsePujaEndDateTime(normDate, normTime).getTime();
+  const lockKey = `pandit:${pEmail}:date:${normDate}:slot:${normTime}`;
+
+  // 1. Verify overlap before inserting
+  const conflict = await findConflictingPanditBooking(pEmail, normDate, normTime, bookingId);
+  if (conflict) {
+    const err = new Error(SLOT_ALREADY_BOOKED_MSG);
+    err.status = 409;
+    throw err;
+  }
+
+  // 2. Atomic insert into SlotLock collection (unique index on lockKey guarantees single winner)
+  try {
+    const lockDoc = await SlotLock.create({
+      lockKey,
+      panditEmail: pEmail,
+      date: normDate,
+      time: normTime,
+      startMs,
+      endMs,
+      bookingId: String(bookingId),
+      userEmail: lc(userEmail)
+    });
+    return lockDoc;
+  } catch (err) {
+    if (err.code === 11000 || (err.message && err.message.includes('duplicate key'))) {
+      const conflictErr = new Error(SLOT_ALREADY_BOOKED_MSG);
+      conflictErr.status = 409;
+      throw conflictErr;
+    }
+    throw err;
+  }
+}
+
+// Release slot lock (when a booking is cancelled, rejected, or reassigned)
+async function releaseSlotLock(bookingId) {
+  if (!bookingId) return;
+  try {
+    await SlotLock.deleteMany({ bookingId: String(bookingId).trim() });
+  } catch (e) {
+    console.warn('[SlotLock] Release error:', e.message);
+  }
+}
+
 // Devotee books a puja: selecting a specific pandit is OPTIONAL.
-// Sends booking request confirmation email with filtered local scholars & rates report.
+// Protected with server-side concurrency control and atomic slot locking.
 app.post('/api/bookings', wrap(async (req, res) => {
   const b = req.body;
   if (!b.userEmail || !b.service || !b.date || !b.district) {
@@ -2138,11 +2428,31 @@ app.post('/api/bookings', wrap(async (req, res) => {
   }
 
   // Enforce minimum 48 hours advance notice requirement
-  const ceremonyStartDt = parsePujaStartDateTime(b.date, b.time);
+  const requestedSlot = b.time || '08:00 AM - 11:00 AM';
+  const ceremonyStartDt = parsePujaStartDateTime(b.date, requestedSlot);
   const hoursUntilCeremony = (ceremonyStartDt.getTime() - Date.now()) / (1000 * 60 * 60);
   if (hoursUntilCeremony < 48) {
     return res.status(400).json({
       error: 'Ceremony bookings must be scheduled at least 48 hours in advance to allow verified Vedic Pandits to prepare and confirm. Please choose a slot at least 48 hours from now.'
+    });
+  }
+
+  // Prevent duplicate bookings caused by repeated button clicks, page refreshes, network retries, or simultaneous API requests
+  const recentCutoff = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes window
+  const existingDuplicate = await Booking.findOne({
+    userEmail: lc(b.userEmail),
+    service: b.service,
+    date: b.date,
+    time: requestedSlot,
+    createdAt: { $gte: recentCutoff },
+    status: { $nin: ['Cancelled', 'Rejected'] }
+  });
+  if (existingDuplicate) {
+    return res.status(200).json({
+      ok: true,
+      booking: existingDuplicate,
+      duplicatePrevented: true,
+      message: 'Booking request already received! Our team will assign a verified Pandit as soon as possible.'
     });
   }
 
@@ -2175,8 +2485,6 @@ app.post('/api/bookings', wrap(async (req, res) => {
   }
 
   const advanceAmount = Number(b.advanceAmount) || 0;
-  const bookingId = await uniqueId(Booking, 'bookingId', 'PUJA');
-
   const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
   const applicableOffer = rawBaseFee > 0 ? await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date }) : null;
   const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
@@ -2184,48 +2492,99 @@ app.post('/api/bookings', wrap(async (req, res) => {
 
   const feeCalc = calculateFeeWithDiscount(rawBaseFee, applicableOffer, commPct);
 
-  const booking = await Booking.create({
-    bookingId,
-    userEmail: lc(b.userEmail),
-    userName: b.userName || 'Devotee',
-    phone: b.phone || '',
-    service: b.service,
-    date: b.date,
-    time: b.time || '08:00 AM - 11:00 AM',
-    district: b.district,
-    address: b.address || '',
-    preferredPanditEmail: preferredPandit ? preferredPandit.email : '',
-    preferredPanditName: preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit',
-    panditEmail: '',
-    panditName: 'To Be Assigned by Admin',
-    status: 'Pending Assignment',
-    panditApproval: 'Pending',
-    adminApproval: 'Pending',
-    rejectedPandits: [],
-    rejectionReason: '',
-    fee: feeCalc.finalFee,
-    originalFee: feeCalc.originalFee,
-    discountPercent: feeCalc.discountPercent,
-    discountAmount: feeCalc.discountAmount,
-    discountOfferId: feeCalc.offerId,
-    discountOfferTitle: feeCalc.offerTitle,
-    adminFeePercent: commPct,
-    adminFeeAmount: feeCalc.adminFeeAmount,
-    panditNetPayout: feeCalc.panditNetPayout,
-    advanceAmount,
-    advancePaid: advanceAmount > 0,
-    paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= feeCalc.finalFee ? 'Paid' : 'Partial',
-    bookingType: b.bookingType || 'Standard',
-    termsAccepted: Boolean(b.termsAccepted !== undefined ? b.termsAccepted : true),
-    refundAccountDetails: {
-      upiId: (b.upiId || (devoteeUser ? devoteeUser.upiId : '') || '').trim(),
-      bankAccount: (b.bankAccount || (devoteeUser ? devoteeUser.bankAccount : '') || '').trim(),
-      ifscCode: (b.ifscCode || (devoteeUser ? devoteeUser.ifscCode : '') || '').trim().toUpperCase(),
-      accountHolder: (b.accountHolder || (devoteeUser ? devoteeUser.accountHolder : '') || b.userName || '').trim(),
-      bankName: (b.bankName || (devoteeUser ? devoteeUser.bankName : '') || '').trim(),
-      qrCode: (b.qrCode || (devoteeUser ? devoteeUser.qrCode : '') || '').trim()
+  // 1. Critical atomic section: acquire lock & persist booking
+  const reserveSlotAndCreate = async () => {
+    const bookingId = await uniqueId(Booking, 'bookingId', 'PUJA');
+    let lockAcquired = false;
+
+    if (preferredPandit) {
+      // Check active booking conflicts
+      const conflict = await findConflictingPanditBooking(preferredPandit.email, b.date, requestedSlot);
+      if (conflict) {
+        return { conflict: true };
+      }
+
+      // Acquire atomic slot lock in MongoDB
+      try {
+        await acquireSlotLock({
+          panditEmail: preferredPandit.email,
+          date: b.date,
+          time: requestedSlot,
+          bookingId,
+          userEmail: b.userEmail
+        });
+        lockAcquired = true;
+      } catch (lockErr) {
+        if (lockErr.status === 409 || lockErr.code === 11000 || (lockErr.message && lockErr.message.includes('duplicate key'))) {
+          return { conflict: true };
+        }
+        throw lockErr;
+      }
     }
-  });
+
+    try {
+      const booking = await Booking.create({
+        bookingId,
+        userEmail: lc(b.userEmail),
+        userName: b.userName || 'Devotee',
+        phone: b.phone || '',
+        service: b.service,
+        date: b.date,
+        time: requestedSlot,
+        district: b.district,
+        address: b.address || '',
+        preferredPanditEmail: preferredPandit ? preferredPandit.email : '',
+        preferredPanditName: preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit',
+        panditEmail: '',
+        panditName: 'To Be Assigned by Admin',
+        status: 'Pending Assignment',
+        panditApproval: 'Pending',
+        adminApproval: 'Pending',
+        rejectedPandits: [],
+        rejectionReason: '',
+        fee: feeCalc.finalFee,
+        originalFee: feeCalc.originalFee,
+        discountPercent: feeCalc.discountPercent,
+        discountAmount: feeCalc.discountAmount,
+        discountOfferId: feeCalc.offerId,
+        discountOfferTitle: feeCalc.offerTitle,
+        adminFeePercent: commPct,
+        adminFeeAmount: feeCalc.adminFeeAmount,
+        panditNetPayout: feeCalc.panditNetPayout,
+        advanceAmount,
+        advancePaid: advanceAmount > 0,
+        paymentStatus: advanceAmount <= 0 ? 'Pending' : advanceAmount >= feeCalc.finalFee ? 'Paid' : 'Partial',
+        paymentMethod: b.paymentMethod || 'UPI/Bank Transfer',
+        bookingType: b.bookingType || 'Standard',
+        termsAccepted: Boolean(b.termsAccepted !== undefined ? b.termsAccepted : true),
+        refundAccountDetails: {
+          upiId: (b.upiId || (devoteeUser ? devoteeUser.upiId : '') || '').trim(),
+          bankAccount: (b.bankAccount || (devoteeUser ? devoteeUser.bankAccount : '') || '').trim(),
+          ifscCode: (b.ifscCode || (devoteeUser ? devoteeUser.ifscCode : '') || '').trim().toUpperCase(),
+          accountHolder: (b.accountHolder || (devoteeUser ? devoteeUser.accountHolder : '') || b.userName || '').trim(),
+          bankName: (b.bankName || (devoteeUser ? devoteeUser.bankName : '') || '').trim(),
+          qrCode: (b.qrCode || (devoteeUser ? devoteeUser.qrCode : '') || '').trim()
+        }
+      });
+
+      return { conflict: false, booking };
+    } catch (createErr) {
+      if (lockAcquired) {
+        await releaseSlotLock(bookingId);
+      }
+      throw createErr;
+    }
+  };
+
+  const reservation = preferredPandit
+    ? await withPanditDateLock(preferredPandit.email, b.date, reserveSlotAndCreate)
+    : await reserveSlotAndCreate();
+
+  if (reservation.conflict) {
+    return res.status(409).json({ error: SLOT_ALREADY_BOOKED_MSG });
+  }
+
+  const booking = reservation.booking;
 
   if (devoteeUser) {
     let changed = false;
@@ -2256,7 +2615,7 @@ app.post('/api/bookings', wrap(async (req, res) => {
   // Broadcast live change across all open devices in real-time
   await broadcastChange({ entity: 'bookings', action: 'create', id: booking.bookingId });
 
-  res.status(201).json({
+  return res.status(201).json({
     ok: true,
     booking,
     emailSent: Boolean(mailResult && mailResult.ok),
@@ -2283,16 +2642,24 @@ app.put('/api/bookings/:id/assign-pandit', adminOnly, wrap(async (req, res) => {
     return res.status(400).json({ error: `Pandit ${pandit.name} is not available on ${b.date} (${avail.reason}). Please select another Pandit.` });
   }
 
-  // Slot clash check
-  const clash = await Booking.findOne({
-    bookingId: { $ne: b.bookingId },
-    panditEmail: pandit.email,
-    date: b.date,
-    time: b.time,
-    status: { $in: ['Confirmed', 'In Progress'] }
-  });
-  if (clash) {
-    return res.status(409).json({ error: `Pandit ${pandit.name} is already booked on ${b.date} at ${b.time}. Please select another Pandit.` });
+  // Slot clash & concurrency check (atomic locking)
+  const conflict = await findConflictingPanditBooking(pandit.email, b.date, b.time, b.bookingId);
+  if (conflict) {
+    return res.status(409).json({ error: `Pandit ${pandit.name} is already booked on ${b.date} for slot ${b.time}. Please select another Pandit.` });
+  }
+
+  // Release any previous lock held by this booking and acquire for assigned pandit
+  await releaseSlotLock(b.bookingId);
+  try {
+    await acquireSlotLock({
+      panditEmail: pandit.email,
+      date: b.date,
+      time: b.time,
+      bookingId: b.bookingId,
+      userEmail: b.userEmail
+    });
+  } catch (lockErr) {
+    return res.status(409).json({ error: `Pandit ${pandit.name} is already booked on ${b.date} for slot ${b.time}. Please select another Pandit.` });
   }
 
   const pujaDoc = await Puja.findOne({ name: new RegExp('^' + String(b.service).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
@@ -2582,6 +2949,7 @@ app.put('/api/bookings/:id/pandit-response', wrap(async (req, res) => {
     b.panditEmail = '';
     b.panditName = 'To Be Assigned by Admin';
     await b.save();
+    await releaseSlotLock(b.bookingId);
   }
 
   res.json({ ok: true, booking: b });
@@ -2940,6 +3308,7 @@ app.post('/api/bookings/:id/cancel', wrap(async (req, res) => {
     b.panditApproval = 'Rejected';
   }
   await b.save();
+  await releaseSlotLock(b.bookingId);
 
   const refundDestSummary = payout.upiId ? `UPI: ${payout.upiId}` : (payout.bankAccount ? `Bank A/c: ${payout.bankAccount} (${payout.ifscCode || ''}, ${payout.accountHolder || ''})` : 'Devotee Registered Account');
 
@@ -3507,10 +3876,39 @@ app.put('/api/bookings/:id/reschedule', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Rescheduled ceremony must be scheduled at least 48 hours in advance.' });
   }
 
-  const clash = await Booking.findOne({ bookingId: { $ne: b.bookingId }, panditEmail: b.panditEmail, date, time, status: { $in: ['Confirmed', 'In Progress'] } });
-  if (clash) return res.status(409).json({ error: 'That slot is already booked.' });
-  b.date = date; b.time = time; b.status = 'Confirmed';
+  const targetPanditEmail = b.panditEmail || b.preferredPanditEmail;
+  if (targetPanditEmail && lc(targetPanditEmail) !== 'any') {
+    return await withPanditDateLock(targetPanditEmail, date, async () => {
+      const conflict = await findConflictingPanditBooking(targetPanditEmail, date, time, b.bookingId);
+      if (conflict) return res.status(409).json({ error: SLOT_ALREADY_BOOKED_MSG });
+
+      await releaseSlotLock(b.bookingId);
+      try {
+        await acquireSlotLock({
+          panditEmail: targetPanditEmail,
+          date,
+          time,
+          bookingId: b.bookingId,
+          userEmail: b.userEmail
+        });
+      } catch (lockErr) {
+        return res.status(409).json({ error: SLOT_ALREADY_BOOKED_MSG });
+      }
+
+      b.date = date;
+      b.time = time;
+      b.status = 'Confirmed';
+      await b.save();
+      await broadcastChange({ entity: 'bookings', action: 'update', id: b.bookingId });
+      return res.json(b);
+    });
+  }
+
+  b.date = date;
+  b.time = time;
+  b.status = 'Confirmed';
   await b.save();
+  await broadcastChange({ entity: 'bookings', action: 'update', id: b.bookingId });
   res.json(b);
 }));
 
@@ -3527,6 +3925,7 @@ app.post('/api/bookings/:id/reject-slot', adminOnly, wrap(async (req, res) => {
   b.panditEmail = '';
   b.panditName = 'No Pandit Available for Slot';
   await b.save();
+  await releaseSlotLock(b.bookingId);
 
   // Generate secure rebooking URL for devotee targeting pujaconnect-one.vercel.app
   const rebookToken = sign({ email: b.userEmail, role: 'user', bookingId: b.bookingId, purpose: 'rebook' });
@@ -3558,75 +3957,109 @@ app.put('/api/bookings/:id/rebook', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Ceremony bookings must be scheduled at least 48 hours in advance. Please choose a slot at least 48 hours from now.' });
   }
 
-  if (service) b.service = service;
-  if (district) b.district = district;
-  if (address) b.address = address;
-  if (phone) b.phone = phone;
-  b.date = date;
-  b.time = time;
-
   let preferredPandit = null;
   if (panditEmail && lc(panditEmail) !== 'any' && lc(panditEmail) !== '') {
     preferredPandit = await Pandit.findOne({ email: lc(panditEmail), verified: true });
+    if (preferredPandit) {
+      const avail = isPanditAvailableOnDate(preferredPandit, date);
+      if (!avail.available) {
+        return res.status(400).json({
+          error: `Pandit ${preferredPandit.name} is not available on ${date} (${avail.reason}). Please choose another date or select 'Any Available Verified Pandit'.`
+        });
+      }
+    }
+  }
+
+  const executeRebook = async () => {
+    if (preferredPandit) {
+      const conflict = await findConflictingPanditBooking(preferredPandit.email, date, time, b.bookingId);
+      if (conflict) return res.status(409).json({ error: SLOT_ALREADY_BOOKED_MSG });
+
+      await releaseSlotLock(b.bookingId);
+      try {
+        await acquireSlotLock({
+          panditEmail: preferredPandit.email,
+          date,
+          time,
+          bookingId: b.bookingId,
+          userEmail: b.userEmail
+        });
+      } catch (lockErr) {
+        return res.status(409).json({ error: SLOT_ALREADY_BOOKED_MSG });
+      }
+    } else {
+      await releaseSlotLock(b.bookingId);
+    }
+
+    if (service) b.service = service;
+    if (district) b.district = district;
+    if (address) b.address = address;
+    if (phone) b.phone = phone;
+    b.date = date;
+    b.time = time;
     b.preferredPanditEmail = preferredPandit ? preferredPandit.email : '';
-    b.preferredPanditName = preferredPandit ? preferredPandit.name : '';
-  } else {
-    b.preferredPanditEmail = '';
-    b.preferredPanditName = 'Any Available Verified Pandit';
-  }
+    b.preferredPanditName = preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit';
 
-  const pujaDoc = await Puja.findOne({ name: new RegExp('^' + String(b.service).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
-  const pujaEstimatedFee = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
+    const pujaDoc = await Puja.findOne({ name: new RegExp('^' + String(b.service).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+    const pujaEstimatedFee = (pujaDoc && (pujaDoc.baseFee || Number(String(pujaDoc.price || '').replace(/[^0-9]/g, '')))) || 1199;
 
-  let rawBaseFee = 0;
+    let rawBaseFee = 0;
+    if (preferredPandit) {
+      rawBaseFee = (preferredPandit.districtPrices && Number(preferredPandit.districtPrices[b.district])) || preferredPandit.fee || Number(req.body && req.body.originalFee ? req.body.originalFee : fee) || pujaEstimatedFee;
+    } else if (Number(req.body && req.body.originalFee)) {
+      rawBaseFee = Number(req.body.originalFee);
+    } else if (Number(fee) > 0) {
+      rawBaseFee = Number(fee);
+    } else {
+      rawBaseFee = pujaEstimatedFee;
+    }
+
+    const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
+    const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
+    const applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
+    const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
+    const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
+
+    const feeCalc = calculateFeeWithDiscount(rawBaseFee, applicableOffer, commPct);
+    b.fee = feeCalc.finalFee;
+    b.originalFee = feeCalc.originalFee;
+    b.discountPercent = feeCalc.discountPercent;
+    b.discountAmount = feeCalc.discountAmount;
+    b.discountOfferId = feeCalc.offerId;
+    b.discountOfferTitle = feeCalc.offerTitle;
+    b.adminFeePercent = commPct;
+    b.adminFeeAmount = feeCalc.adminFeeAmount;
+    b.panditNetPayout = feeCalc.panditNetPayout;
+
+    b.status = 'Pending Assignment';
+    b.adminApproval = 'Pending';
+    b.panditApproval = 'Pending';
+    b.slotUnavailable = false;
+    b.rejectionReason = '';
+    b.rejectedPandits = [];
+    b.panditEmail = '';
+    b.panditName = 'To Be Assigned by Admin';
+    await b.save();
+    await broadcastChange({ entity: 'bookings', action: 'update', id: b.bookingId });
+
+    // Send acknowledgement email to devotee
+    const locationReport = await prepareDevoteeLocationReport(b.district, b.state || 'Odisha');
+    await sendSafe('BOOKING_REQUEST_RECEIVED', b.userEmail, {
+      ...b.toObject(),
+      preferredPanditName: preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit',
+      district: b.district,
+      address: b.address || b.district,
+      locationReport
+    });
+
+    return res.json({ ok: true, booking: b, message: 'Puja rebooked successfully! Our team will assign a verified Pandit for your new slot.' });
+  };
+
   if (preferredPandit) {
-    rawBaseFee = (preferredPandit.districtPrices && Number(preferredPandit.districtPrices[b.district])) || preferredPandit.fee || Number(req.body && req.body.originalFee ? req.body.originalFee : fee) || pujaEstimatedFee;
-  } else if (Number(req.body && req.body.originalFee)) {
-    rawBaseFee = Number(req.body.originalFee);
-  } else if (Number(fee) > 0) {
-    rawBaseFee = Number(fee);
+    return await withPanditDateLock(preferredPandit.email, date, executeRebook);
   } else {
-    rawBaseFee = pujaEstimatedFee;
+    return await executeRebook();
   }
-
-  const devoteeUser = await User.findOne({ email: lc(b.userEmail) });
-  const devoteeState = (devoteeUser && devoteeUser.state) || b.state || 'Odisha';
-  const applicableOffer = await findApplicableOffer({ service: b.service, district: b.district, state: devoteeState, date: b.date });
-  const commSetting = await AppSetting.findOne({ key: 'admin_commission_percent' });
-  const commPct = commSetting && typeof commSetting.value === 'number' ? commSetting.value : (b.adminFeePercent || DEFAULT_PLATFORM_COMMISSION);
-
-  const feeCalc = calculateFeeWithDiscount(rawBaseFee, applicableOffer, commPct);
-  b.fee = feeCalc.finalFee;
-  b.originalFee = feeCalc.originalFee;
-  b.discountPercent = feeCalc.discountPercent;
-  b.discountAmount = feeCalc.discountAmount;
-  b.discountOfferId = feeCalc.offerId;
-  b.discountOfferTitle = feeCalc.offerTitle;
-  b.adminFeePercent = commPct;
-  b.adminFeeAmount = feeCalc.adminFeeAmount;
-  b.panditNetPayout = feeCalc.panditNetPayout;
-
-  b.status = 'Pending Assignment';
-  b.adminApproval = 'Pending';
-  b.panditApproval = 'Pending';
-  b.slotUnavailable = false;
-  b.rejectionReason = '';
-  b.rejectedPandits = [];
-  b.panditEmail = '';
-  b.panditName = 'To Be Assigned by Admin';
-  await b.save();
-
-  // Send acknowledgement email to devotee
-  const locationReport = await prepareDevoteeLocationReport(b.district, b.state || 'Odisha');
-  await sendSafe('BOOKING_REQUEST_RECEIVED', b.userEmail, {
-    ...b.toObject(),
-    preferredPanditName: preferredPandit ? preferredPandit.name : 'Any Available Verified Pandit',
-    district: b.district,
-    address: b.address || b.district,
-    locationReport
-  });
-
-  res.json({ ok: true, booking: b, message: 'Puja rebooked successfully! Our team will assign a verified Pandit for your new slot.' });
 }));
 
 // ---- Long (multi-day) pujas ----

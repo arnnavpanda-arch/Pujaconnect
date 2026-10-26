@@ -2466,9 +2466,13 @@ async function openBooking(arg) {
     };
 
     const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
-    const drawSlots = () => {
+    let lastBookedSlots = [];
+    let lastOverlappingSlots = [];
+
+    const drawSlots = async () => {
       const d = dateInp.value;
       const box = $('#b-slots', m);
+      if (!box) return;
       if (!d) {
         box.innerHTML = '<span class="muted">Select a date to view live slots.</span>';
         sel.time = '';
@@ -2478,28 +2482,63 @@ async function openBooking(arg) {
       const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
       const activeSlots = (p && Array.isArray(p.timeSlots) && p.timeSlots.length) ? p.timeSlots : standardSlots;
       const now = Date.now();
-      box.innerHTML = activeSlots.map((s) => {
-        const dt = parsePujaStartDateTime(d, s);
-        const diffHours = (dt.getTime() - now) / (1000 * 60 * 60);
-        const isLocked = diffHours < 48;
-        if (isLocked) {
+
+      const renderCurrentSlots = () => {
+        box.innerHTML = activeSlots.map((s) => {
+          const dt = parsePujaStartDateTime(d, s);
+          const diffHours = (dt.getTime() - now) / (1000 * 60 * 60);
+          const isLocked = diffHours < 48;
+          if (isLocked) {
+            return `
+              <button type="button" class="slot locked" disabled style="opacity:0.45;cursor:not-allowed;border-style:dashed" title="Bookings require minimum 48 hours notice. This slot is ${diffHours > 0 ? `${Math.round(diffHours * 10) / 10}h away` : 'past'}">
+                ${esc(s)} <small style="display:block;font-size:9.5px;color:#c62828">&lt; 48h Notice</small>
+              </button>
+            `;
+          }
+          const isBooked = lastBookedSlots.includes(s) || lastOverlappingSlots.includes(s);
+          if (isBooked) {
+            return `
+              <button type="button" class="slot booked" disabled style="opacity:0.55;cursor:not-allowed;background:#fff5f5;border:1px dashed #ef9a9a;color:#c62828" title="Sorry, this time slot has just been booked. Please select another available slot.">
+                ${esc(s)} <small style="display:block;font-size:9.5px;color:#c62828;font-weight:600">● Booked</small>
+              </button>
+            `;
+          }
           return `
-            <button type="button" class="slot locked" disabled style="opacity:0.45;cursor:not-allowed;border-style:dashed" title="Bookings require minimum 48 hours notice. This slot is ${diffHours > 0 ? `${Math.round(diffHours * 10) / 10}h away` : 'past'}">
-              ${esc(s)} <small style="display:block;font-size:9.5px;color:#c62828">&lt; 48h Notice</small>
-            </button>
+            <button type="button" class="slot ${sel.time === s ? 'selected' : ''}" data-slot="${esc(s)}">${esc(s)}</button>
           `;
+        }).join('');
+
+        if (sel.time) {
+          const dt = parsePujaStartDateTime(d, sel.time);
+          if ((dt.getTime() - now) / (1000 * 60 * 60) < 48 || lastBookedSlots.includes(sel.time) || lastOverlappingSlots.includes(sel.time)) {
+            sel.time = '';
+          }
         }
-        return `
-          <button type="button" class="slot ${sel.time === s ? 'selected' : ''}" data-slot="${esc(s)}">${esc(s)}</button>
-        `;
-      }).join('');
-      if (sel.time) {
-        const dt = parsePujaStartDateTime(d, sel.time);
-        if ((dt.getTime() - now) / (1000 * 60 * 60) < 48) {
-          sel.time = '';
+      };
+
+      // Initial render with existing data
+      renderCurrentSlots();
+
+      // Live fetch booked slots from server for this Pandit & Date
+      if (pEmail && lc(pEmail) !== 'any' && d) {
+        try {
+          const res = await api(`/bookings/booked-slots?panditEmail=${encodeURIComponent(pEmail)}&date=${encodeURIComponent(d)}`);
+          if (res && res.ok) {
+            lastBookedSlots = res.bookedSlots || [];
+            lastOverlappingSlots = res.overlappingSlots || [];
+            renderCurrentSlots();
+          }
+        } catch (e) {
+          // Gracefully continue with client-side fallback
         }
+      } else {
+        lastBookedSlots = [];
+        lastOverlappingSlots = [];
+        renderCurrentSlots();
       }
     };
+
+    window._activeDrawSlots = drawSlots;
 
     updatePanditsDropdown();
     paintFee();
@@ -2528,7 +2567,7 @@ async function openBooking(arg) {
 
     $('#b-slots', m).onclick = (e) => {
       const b = e.target.closest('.slot');
-      if (!b || b.disabled || b.classList.contains('locked')) return;
+      if (!b || b.disabled || b.classList.contains('locked') || b.classList.contains('booked')) return;
       m.querySelectorAll('.slot').forEach((x) => x.classList.remove('selected'));
       b.classList.add('selected');
       sel.time = b.dataset.slot;
@@ -2572,7 +2611,10 @@ async function openBooking(arg) {
       };
     }
 
+    let isBookingSubmitting = false;
     $('#b-submit', m).onclick = async (e) => {
+      if (isBookingSubmitting) return;
+
       const agreePolicy = $('#b-agree-cancellation-policy', m);
       if (agreePolicy && !agreePolicy.checked) {
         return toast('Please accept the Cancellation & Refund Policy terms to proceed with booking 🙏', true);
@@ -2726,6 +2768,11 @@ async function openBooking(arg) {
         submitBtn.disabled = false;
         submitBtn.innerHTML = `<span class="material-icons">${isRebook ? 'event_repeat' : 'send'}</span> ${isRebook ? 'Submit Rebook Request' : 'Submit Booking Request'}`;
         toast(err.message, true);
+        if (typeof drawSlots === 'function') {
+          drawSlots().catch(() => {});
+        }
+      } finally {
+        isBookingSubmitting = false;
       }
     };
   });
@@ -10055,6 +10102,9 @@ async function handleIncomingSyncUpdate(eventData = {}) {
     // Check if a modal is currently open to avoid disrupting active form input
     const modalRoot = $('#modal-root');
     const isModalOpen = modalRoot && modalRoot.innerHTML.trim().length > 0;
+    if (isModalOpen && typeof window._activeDrawSlots === 'function') {
+      window._activeDrawSlots().catch(() => {});
+    }
 
     // A. If user is currently on Dashboard, refresh live dashboard data without page reload and without blinking
     if (S.view === 'dashboard' && S.user && !isModalOpen) {
