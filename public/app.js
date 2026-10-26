@@ -1807,13 +1807,15 @@ async function openBooking(arg) {
     targetPanditId = arg.panditId || arg.panditEmail || arg.preferredPanditEmail || null;
     targetPujaName = arg.pujaName || arg.service || arg.name || '';
     targetDistrict = arg.district || '';
-    targetDate = arg.date || '';
+    targetDate = arg.date || minBookingDate();
     targetTime = arg.time || '';
     targetAddress = arg.address || '';
     targetPhone = arg.phone || '';
     targetBookingId = arg.bookingId || null;
     isRebook = Boolean(arg.isRebook || targetBookingId);
     skipOverview = Boolean(arg.skipOverview);
+  } else {
+    targetDate = minBookingDate();
   }
 
   if (!requireLogin(() => openBooking(arg))) return;
@@ -1838,7 +1840,7 @@ async function openBooking(arg) {
   const curState = lockedState || S.filters.state || (selectedPandit && (selectedPandit.workingState || selectedPandit.state)) || 'Odisha';
   const availableDistricts = LOCATIONS[curState] || ['Khordha', 'Cuttack', 'Puri', 'Bhadrak', 'Balasore', 'Sambalpur'];
 
-  const sel = { date: targetDate || '', time: targetTime || '' };
+  const sel = { date: targetDate || minBookingDate(), time: targetTime || '' };
   const initialPuja = targetPujaName || S.filters.service || (selectedPandit && selectedPandit.services && selectedPandit.services[0]) || allShortPujas[0] || 'Satyanarayan Puja';
   const initialDistrict = targetDistrict || lockedDistrict || (selectedPandit && ((selectedPandit.workingDistricts && selectedPandit.workingDistricts[0]) || selectedPandit.district)) || S.filters.district || availableDistricts[0];
 
@@ -2101,6 +2103,8 @@ async function openBooking(arg) {
     return;
   }
 
+  const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
+  const initialActiveSlots = (selectedPandit && Array.isArray(selectedPandit.timeSlots) && selectedPandit.timeSlots.length) ? selectedPandit.timeSlots : standardSlots;
   const modalTitle = isRebook ? `Rebook Sacred Ritual – ${esc(targetBookingId || 'Edit Details')}` : 'Book a Sacred Ritual';
 
   openModal(modalTitle, `
@@ -2129,7 +2133,7 @@ async function openBooking(arg) {
       </div>
       <div>
         <label>Ceremony Date (Min. 48 Hours in Advance) *</label>
-        <input type="date" id="b-date" min="${minBookingDate()}" value="${esc(targetDate || '')}">
+        <input type="date" id="b-date" min="${minBookingDate()}" value="${esc(targetDate || minBookingDate())}">
         <small class="muted" style="font-size:11px;margin-top:3px;display:block;color:#8d2800">
           ⏱️ Bookings must be scheduled at least 48 hours in advance
         </small>
@@ -2154,7 +2158,9 @@ async function openBooking(arg) {
     <div>
       <label>Ceremony Time Slot *</label>
       <div id="b-slots" class="checks">
-        <span class="muted">Select a date to view available time slots.</span>
+        ${initialActiveSlots.map((s) => `
+          <button type="button" class="slot ${(targetTime || '') === s ? 'selected' : ''}" data-slot="${esc(s)}">${esc(s)}</button>
+        `).join('')}
       </div>
     </div>
     <div>
@@ -2482,18 +2488,20 @@ async function openBooking(arg) {
     let lastBookedIntervals = [];
 
     const drawSlots = async () => {
-      const d = dateInp.value;
+      const d = dateInp ? dateInp.value : '';
       const box = $('#b-slots', m);
       if (!box) return;
-      if (!d) {
-        box.innerHTML = '<span class="muted">Select a date to view live slots.</span>';
-        sel.time = '';
-        return;
-      }
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim() : '';
       const p = pEmail ? (S.pandits || []).find((x) => x.email.toLowerCase() === pEmail.toLowerCase()) : null;
       const activeSlots = (p && Array.isArray(p.timeSlots) && p.timeSlots.length) ? p.timeSlots : standardSlots;
       const now = Date.now();
+
+      if (!d) {
+        box.innerHTML = activeSlots.map((s) => `
+          <button type="button" class="slot ${sel.time === s ? 'selected' : ''}" data-slot="${esc(s)}">${esc(s)}</button>
+        `).join('');
+        return;
+      }
 
       const renderCurrentSlots = () => {
         box.innerHTML = activeSlots.map((s) => {
@@ -2571,7 +2579,7 @@ async function openBooking(arg) {
 
     updatePanditsDropdown();
     paintFee();
-    if (dateInp.value) drawSlots();
+    drawSlots();
 
     serviceSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
     districtSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
