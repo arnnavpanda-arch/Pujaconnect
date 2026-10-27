@@ -660,6 +660,7 @@ function openModal(title, html, onMount, wide = false) {
   $('#modal-root').innerHTML = `<div class="modal-backdrop" data-action="modalBackdrop"><div class="modal ${wideClass}"><div class="modal-head"><h3>${esc(title)}</h3><button data-action="closeModal" aria-label="Close"><span class="material-icons">close</span></button></div><div class="modal-body">${html}</div></div></div>`;
   if (onMount) onMount($('#modal-root .modal'));
 }
+const modal = openModal;
 const closeModal = () => ($('#modal-root').innerHTML = '');
 
 function appConfirm({
@@ -8121,7 +8122,7 @@ function openPrivacyPolicyModal() {
   const settings = S.systemSettings || DEFAULT_SYSTEM_SETTINGS;
   const content = (settings && settings.privacyPolicy) || DEFAULT_SYSTEM_SETTINGS.privacyPolicy;
   const paragraphs = content.split(/\n\s*\n/).map((p) => `<p style="margin-bottom:12px;line-height:1.6;color:#3b2115">${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
-  modal('Privacy Policy', `
+  openModal('Privacy Policy', `
     <div style="max-height:65vh;overflow-y:auto;padding:6px 4px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #ebd9c2">
         <span class="material-icons" style="color:var(--ochre);font-size:26px">policy</span>
@@ -8142,7 +8143,7 @@ function openTermsConditionsModal() {
   const settings = S.systemSettings || DEFAULT_SYSTEM_SETTINGS;
   const content = (settings && settings.termsConditions) || DEFAULT_SYSTEM_SETTINGS.termsConditions;
   const paragraphs = content.split(/\n\s*\n/).map((p) => `<p style="margin-bottom:12px;line-height:1.6;color:#3b2115">${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
-  modal('Terms &amp; Conditions', `
+  openModal('Terms &amp; Conditions', `
     <div style="max-height:65vh;overflow-y:auto;padding:6px 4px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #ebd9c2">
         <span class="material-icons" style="color:var(--ochre);font-size:26px">gavel</span>
