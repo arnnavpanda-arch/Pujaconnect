@@ -2102,34 +2102,11 @@ app.get('/api/bookings/booked-slots', wrap(async (req, res) => {
     }
   }
 
-  const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
-  const pandit = await Pandit.findOne({ email: pRegex });
-  const allSlots = Array.from(new Set([
-    ...standardSlots,
-    ...((pandit && Array.isArray(pandit.timeSlots) && pandit.timeSlots.length) ? pandit.timeSlots : [])
-  ]));
-
-  const overlappingSlots = [];
-  for (const s of allSlots) {
-    try {
-      const sStart = parsePujaStartDateTime(date, s).getTime();
-      const sEnd = parsePujaEndDateTime(date, s).getTime();
-      const isConflict = bookedIntervals.some(inv => Math.max(sStart, inv.start) < Math.min(sEnd, inv.end));
-      if (isConflict && !overlappingSlots.includes(s)) {
-        overlappingSlots.push(s);
-      }
-    } catch (e) {
-      // ignore parse error
-    }
-  }
-
   res.json({
     ok: true,
     panditEmail,
     date,
-    bookedSlots,
-    overlappingSlots,
-    bookedIntervals
+    bookedSlots
   });
 }));
 
@@ -2349,12 +2326,12 @@ async function findConflictingPanditBooking(panditEmail, date, requestedSlot, ex
     query.bookingId = { $ne: String(excludeBookingId).trim() };
   }
 
+  const normSlot = String(requestedSlot || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const existingBookings = await Booking.find(query);
   for (const b of existingBookings) {
-    const bStart = parsePujaStartDateTime(b.date, b.time).getTime();
-    const bEnd = parsePujaEndDateTime(b.date, b.time).getTime();
-    if (Math.max(reqStart, bStart) < Math.min(reqEnd, bEnd)) {
-      return b; // Conflicting active booking found
+    const bSlot = String(b.time || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (bSlot === normSlot) {
+      return b; // Conflicting active booking found for the exact same slot
     }
   }
 
@@ -2368,10 +2345,9 @@ async function findConflictingPanditBooking(panditEmail, date, requestedSlot, ex
   }
   const existingLocks = await SlotLock.find(lockQuery);
   for (const lk of existingLocks) {
-    const lkStart = lk.startMs || parsePujaStartDateTime(lk.date, lk.time).getTime();
-    const lkEnd = lk.endMs || parsePujaEndDateTime(lk.date, lk.time).getTime();
-    if (Math.max(reqStart, lkStart) < Math.min(reqEnd, lkEnd)) {
-      return lk; // Conflicting active lock found
+    const lkSlot = String(lk.time || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (lkSlot === normSlot) {
+      return lk; // Conflicting active lock found for the exact same slot
     }
   }
 

@@ -2493,8 +2493,6 @@ async function openBooking(arg) {
 
     const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
     let lastBookedSlots = [];
-    let lastOverlappingSlots = [];
-    let lastBookedIntervals = [];
 
     const drawSlots = async () => {
       const d = dateInp ? dateInp.value : '';
@@ -2529,16 +2527,7 @@ async function openBooking(arg) {
             `;
           }
 
-          let collidesInterval = false;
-          try {
-            const sStart = parsePujaStartDateTime(d, s).getTime();
-            const sEnd = parsePujaEndDateTime(d, s).getTime();
-            collidesInterval = (lastBookedIntervals || []).some(inv => Math.max(sStart, inv.start) < Math.min(sEnd, inv.end));
-          } catch (e) {}
-
-          const isBooked = lastBookedSlots.some(bs => norm(bs) === norm(s)) ||
-                           lastOverlappingSlots.some(os => norm(os) === norm(s)) ||
-                           collidesInterval;
+          const isBooked = lastBookedSlots.some(bs => norm(bs) === norm(s));
           if (isBooked) {
             return `
               <button type="button" class="slot booked" disabled style="opacity:0.75;cursor:not-allowed;background:#fff5f5;border:1.5px dashed #ef9a9a;color:#c62828;display:inline-flex;align-items:center;justify-content:space-between;gap:8px" title="Sorry, this ceremony time slot has already been booked for this Pandit. Please select another available slot.">
@@ -2556,17 +2545,8 @@ async function openBooking(arg) {
 
         if (sel.time) {
           const dt = parsePujaStartDateTime(d, sel.time);
-          let collidesInterval = false;
-          try {
-            const sStart = parsePujaStartDateTime(d, sel.time).getTime();
-            const sEnd = parsePujaEndDateTime(d, sel.time).getTime();
-            collidesInterval = (lastBookedIntervals || []).some(inv => Math.max(sStart, inv.start) < Math.min(sEnd, inv.end));
-          } catch (e) {}
-
           const existsInActive = activeSlots.includes(sel.time);
-          const isBooked = lastBookedSlots.some(bs => norm(bs) === norm(sel.time)) ||
-                           lastOverlappingSlots.some(os => norm(os) === norm(sel.time)) ||
-                           collidesInterval;
+          const isBooked = lastBookedSlots.some(bs => norm(bs) === norm(sel.time));
           if (!existsInActive || (dt.getTime() - now) / (1000 * 60 * 60) < 48 || isBooked) {
             sel.time = '';
           }
@@ -2582,8 +2562,6 @@ async function openBooking(arg) {
           const res = await api(`/bookings/booked-slots?panditEmail=${encodeURIComponent(pEmail)}&date=${encodeURIComponent(d)}`);
           if (res && res.ok) {
             lastBookedSlots = res.bookedSlots || [];
-            lastOverlappingSlots = res.overlappingSlots || [];
-            lastBookedIntervals = res.bookedIntervals || [];
             renderCurrentSlots();
           }
         } catch (e) {
@@ -2591,8 +2569,6 @@ async function openBooking(arg) {
         }
       } else {
         lastBookedSlots = [];
-        lastOverlappingSlots = [];
-        lastBookedIntervals = [];
         renderCurrentSlots();
       }
     };
