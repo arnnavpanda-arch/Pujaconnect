@@ -188,7 +188,14 @@ const S = {
 const DEFAULT_SYSTEM_SETTINGS = {
   contactNumber: '+91 94370 12345',
   logo: '/logo.jpg',
-  officeAddress: 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024'
+  officeAddress: 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024',
+  timeSlots: [
+    '06:30 AM - 09:30 AM',
+    '08:00 AM - 11:00 AM',
+    '10:30 AM - 01:30 PM',
+    '04:00 PM - 07:00 PM',
+    '06:30 PM - 09:30 PM'
+  ]
 };
 
 async function loadSystemSettings() {
@@ -2432,67 +2439,43 @@ async function openBooking(arg) {
           `;
         }
       } else {
-        // Any Available Verified Pandit: Calculate on the estimated dakshina rate of the ritual!
+        // Any Available Verified Pandit: Do NOT show Estimated Dakshina Rate or numerical rate
         const rawFee = baseDakshina;
-
+        let finalFee = rawFee;
+        let discPercent = 0;
+        let discAmount = 0;
         if (currentOffer) {
-          const discPercent = currentOffer.discountPercent;
-          const discAmount = Math.round((rawFee * discPercent) / 100);
-          const finalFee = Math.max(0, rawFee - discAmount);
-
-          costBox.innerHTML = `
-            <div style="background:#fff8ed;border:1.5px dashed var(--ochre);border-radius:12px;padding:14px">
-              <div class="row" style="align-items:center;justify-content:space-between;gap:12px">
-                <div style="flex:1">
-                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                    <span style="font-size:14px;font-weight:700;color:var(--mahogany)">Estimated Dakshina Rate</span>
-                    <span class="badge green" style="font-size:11.5px;padding:2px 8px;font-weight:700">
-                      <span class="material-icons" style="font-size:13px;vertical-align:middle">local_offer</span>
-                      ${discPercent}% OFF APPLIED
-                    </span>
-                  </div>
-                  <div id="b-fee-note" style="font-size:12px;color:var(--muted);margin-top:3px">
-                    Estimated standard rate for ${esc(ritual)}: 
-                    <span style="text-decoration:line-through;color:#8a6a55">${inr(rawFee)}</span> 
-                    <strong style="color:#2e7d32">(-${inr(discAmount)} festive offer savings)</strong>
-                  </div>
-                  <div style="font-size:11.5px;color:#2e7d32;margin-top:2px;font-weight:600">
-                    🪔 Festive Offer: ${esc(currentOffer.title)} (${discPercent}% OFF)
-                  </div>
-                </div>
-                <div style="text-align:right">
-                  <div style="font-size:12px;color:var(--muted);text-decoration:line-through">${inr(rawFee)}</div>
-                  <b id="b-fee" style="font-size:26px;color:#2e7d32;font-weight:700" data-raw-fee="${rawFee}" data-final-fee="${finalFee}" data-offer-id="${esc(currentOffer.offerId || '')}" data-offer-title="${esc(currentOffer.title || '')}" data-discount-pct="${discPercent}" data-discount-amt="${discAmount}">${inr(finalFee)}</b>
-                </div>
-              </div>
-              <small class="muted" style="display:block;margin-top:8px;font-size:12px;border-top:1px dashed #ebd9c2;padding-top:6px">
-                Estimated base Dakshina is ${inr(rawFee)}. The ${discPercent}% festive offer discount of ${inr(discAmount)} is deducted (-). Discounted estimated Dakshina is ${inr(finalFee)}. Verified Pandit will be allocated by PujaConnect Admin for ${esc(dist)}.
-              </small>
-            </div>
-          `;
-        } else {
-          costBox.innerHTML = `
-            <div style="background:#fff8ed;border:1.5px dashed var(--ochre);border-radius:12px;padding:14px">
-              <div class="row" style="align-items:center;justify-content:space-between">
-                <div>
-                  <span style="font-size:14px;font-weight:700;color:var(--mahogany)">Estimated Dakshina Rate</span>
-                  <div id="b-fee-note" style="font-size:12px;color:var(--muted);margin-top:2px">
-                    Standard estimated platform rate for ${esc(ritual)} in ${esc(dist)}
-                  </div>
-                </div>
-                <b id="b-fee" style="font-size:24px;color:var(--ochre);font-weight:700" data-raw-fee="${rawFee}" data-final-fee="${rawFee}" data-offer-id="" data-offer-title="" data-discount-pct="0" data-discount-amt="0">${inr(rawFee)}</b>
-              </div>
-              <small class="muted" style="display:block;margin-top:6px;font-size:12px;border-top:1px dashed #ebd9c2;padding-top:6px">
-                Standard estimated platform Dakshina. A verified Vedic Pandit will be allocated by PujaConnect Admin. Payment is completed only after admin confirmation.
-              </small>
-            </div>
-          `;
+          discPercent = currentOffer.discountPercent;
+          discAmount = Math.round((rawFee * discPercent) / 100);
+          finalFee = Math.max(0, rawFee - discAmount);
         }
+
+        costBox.innerHTML = `
+          <div style="background:#fff8ed;border:1.5px dashed var(--ochre);border-radius:12px;padding:16px 18px;text-align:center">
+            <div style="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:#faebd7;color:var(--ochre);margin-bottom:8px">
+              <span class="material-icons" style="font-size:24px">account_balance_wallet</span>
+            </div>
+            <div style="font-size:15px;font-weight:700;color:var(--mahogany);margin-bottom:4px">
+              Dakshina Rate will show in your payment section after Pandit confirmation
+            </div>
+            <div style="font-size:12.5px;color:var(--muted);line-height:1.4">
+              A verified Vedic Pandit will be allocated by PujaConnect Admin. The exact ceremony Dakshina will be visible in your dashboard payment section once the Pandit is confirmed.
+            </div>
+            <span id="b-fee" style="display:none" data-raw-fee="${rawFee}" data-final-fee="${finalFee}" data-offer-id="${esc((currentOffer && currentOffer.offerId) || '')}" data-offer-title="${esc((currentOffer && currentOffer.title) || '')}" data-discount-pct="${discPercent}" data-discount-amt="${discAmount}"></span>
+          </div>
+        `;
       }
     };
 
     const standardSlots = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
     let lastBookedSlots = [];
+
+    const getSystemSlots = () => {
+      if (S.systemSettings && Array.isArray(S.systemSettings.timeSlots) && S.systemSettings.timeSlots.length) {
+        return S.systemSettings.timeSlots;
+      }
+      return standardSlots;
+    };
 
     const drawSlots = async () => {
       const d = dateInp ? dateInp.value : '';
@@ -2501,7 +2484,7 @@ async function openBooking(arg) {
       const pEmail = (panditSel && panditSel.value) ? panditSel.value.trim().toLowerCase() : '';
       const p = (pEmail && pEmail !== 'any') ? (S.pandits || []).find((x) => (x.email || '').trim().toLowerCase() === pEmail) : null;
       selectedPandit = p;
-      const activeSlots = (p && Array.isArray(p.timeSlots) && p.timeSlots.length) ? p.timeSlots : standardSlots;
+      const activeSlots = (p && Array.isArray(p.timeSlots) && p.timeSlots.length) ? p.timeSlots : getSystemSlots();
       const now = Date.now();
 
       if (!d) {
@@ -2578,6 +2561,11 @@ async function openBooking(arg) {
     updatePanditsDropdown();
     paintFee();
     drawSlots();
+    if (!S.systemSettings) {
+      loadSystemSettings().then(() => {
+        if (!selectedPandit) drawSlots();
+      }).catch(() => {});
+    }
 
     serviceSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
     districtSel.onchange = () => { updatePanditsDropdown(); paintFee(); };
@@ -7131,6 +7119,7 @@ async function adminDash(root) {
   const currContact = (S.systemSettings && S.systemSettings.contactNumber) || DEFAULT_SYSTEM_SETTINGS.contactNumber;
   const currLogo = (S.systemSettings && S.systemSettings.logo) || '';
   const currAddress = (S.systemSettings && S.systemSettings.officeAddress) || DEFAULT_SYSTEM_SETTINGS.officeAddress;
+  const currSlots = (S.systemSettings && Array.isArray(S.systemSettings.timeSlots) && S.systemSettings.timeSlots.length) ? S.systemSettings.timeSlots : DEFAULT_SYSTEM_SETTINGS.timeSlots;
 
   const pend = pandits.filter((p) => p.status === 'Pending Review');
   const unassigned = longs.filter((l) => l.status === 'Pending Admin' || ['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status));
@@ -7313,7 +7302,27 @@ async function adminDash(root) {
                 <textarea id="dash-sys-address" rows="3" style="width:100%;font-size:14px;padding:11px 14px;line-height:1.5" placeholder="e.g. PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024">${esc(currAddress)}</textarea>
               </div>
 
-              <!-- 4. Save Button -->
+              <!-- 4. Platform Ceremony Time Slots (For Any Available Pandit) -->
+              <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <span class="material-icons" style="color:#d99a19;font-size:22px">schedule</span>
+                    <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Platform Ceremony Time Slots (For 'Book with Any Available Pandit') *</label>
+                  </div>
+                  <button type="button" class="btn btn-outline dark btn-sm" id="dash-btn-reset-default-slots" style="font-size:12px;padding:5px 12px">
+                    <span class="material-icons" style="font-size:14px">restart_alt</span> Reset Default Slots
+                  </button>
+                </div>
+                <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                  These time slots appear in the Ceremony Time Slot selector when devotees choose <strong>"Book with Any Available Pandit"</strong> (Auto-assigned by Admin). Enter each slot on a new line (e.g. <code>08:00 AM - 11:00 AM</code>).
+                </p>
+                <textarea id="dash-sys-slots" rows="5" style="width:100%;font-size:14px;padding:11px 14px;line-height:1.6;font-family:monospace" placeholder="06:30 AM - 09:30 AM&#10;08:00 AM - 11:00 AM&#10;10:30 AM - 01:30 PM&#10;04:00 PM - 07:00 PM&#10;06:30 PM - 09:30 PM">${esc(currSlots.join('\n'))}</textarea>
+                <div id="dash-sys-slots-preview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+                  ${currSlots.map(s => `<span class="badge" style="background:#fff;border:1px solid #d99a19;color:#3e1f07;font-weight:600;font-size:12px;padding:4px 10px">${esc(s)}</span>`).join('')}
+                </div>
+              </div>
+
+              <!-- 5. Save Button -->
               <div style="display:flex;gap:12px;align-items:center">
                 <button type="button" class="btn btn-gold btn-lg" id="dash-btn-save-system-settings" style="flex:1;padding:14px 28px;font-size:16px;font-weight:800">
                   <span class="material-icons" style="font-size:20px;vertical-align:middle;margin-right:6px">save</span> Save Official System Settings
@@ -7441,6 +7450,29 @@ async function adminDash(root) {
     };
   }
 
+  const dashSlotsInput = document.getElementById('dash-sys-slots');
+  const dashSlotsPreview = document.getElementById('dash-sys-slots-preview');
+  const dashResetSlotsBtn = document.getElementById('dash-btn-reset-default-slots');
+
+  function updateDashSlotsPreview() {
+    if (!dashSlotsInput || !dashSlotsPreview) return;
+    const slots = dashSlotsInput.value.split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
+    dashSlotsPreview.innerHTML = slots.map(s => `<span class="badge" style="background:#fff;border:1px solid #d99a19;color:#3e1f07;font-weight:600;font-size:12px;padding:4px 10px">${esc(s)}</span>`).join('');
+  }
+
+  if (dashSlotsInput) {
+    dashSlotsInput.oninput = updateDashSlotsPreview;
+  }
+  if (dashResetSlotsBtn) {
+    dashResetSlotsBtn.onclick = () => {
+      if (dashSlotsInput) {
+        dashSlotsInput.value = DEFAULT_SYSTEM_SETTINGS.timeSlots.join('\n');
+        updateDashSlotsPreview();
+        toast('Default ceremony time slots restored');
+      }
+    };
+  }
+
   const saveSettingsBtn = document.getElementById('dash-btn-save-system-settings');
   if (saveSettingsBtn) {
     saveSettingsBtn.onclick = async () => {
@@ -7450,16 +7482,18 @@ async function adminDash(root) {
         const contactVal = (document.getElementById('dash-sys-contact').value || '').trim();
         const logoVal = (document.getElementById('dash-sys-logo-url').value || '').trim();
         const addressVal = (document.getElementById('dash-sys-address').value || '').trim();
+        const slotsVal = (document.getElementById('dash-sys-slots') ? document.getElementById('dash-sys-slots').value : '').split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
 
         const updated = await api('/system-settings', {
           method: 'PUT',
           body: {
             contactNumber: contactVal,
             logo: logoVal,
-            officeAddress: addressVal
+            officeAddress: addressVal,
+            timeSlots: slotsVal
           }
         });
-        S.systemSettings = updated || { contactNumber: contactVal, logo: logoVal, officeAddress: addressVal };
+        S.systemSettings = updated || { contactNumber: contactVal, logo: logoVal, officeAddress: addressVal, timeSlots: slotsVal };
         updatePublicFooterSystemInfo();
         toast('Official System Settings saved successfully! 🙏');
         saveSettingsBtn.disabled = false;

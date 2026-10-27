@@ -1749,7 +1749,7 @@
           } else {
             if (errBox) {
               errBox.style.display = 'flex';
-              errText.textContent = (data && data.error) || 'Invalid admin credentials. 1 attempt remaining before 2-minute lockout.';
+              errText.textContent = (data && data.error) || 'Invalid admin username or password';
             }
           }
           if (submitBtn) {
@@ -4802,6 +4802,8 @@
         const contactNumber = settings.contactNumber || '+91 94370 12345';
         const officeAddress = settings.officeAddress || 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024';
         const logo = settings.logo || '';
+        const defaultSlotsList = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
+        const timeSlots = Array.isArray(settings.timeSlots) && settings.timeSlots.length ? settings.timeSlots : defaultSlotsList;
 
         root.innerHTML = `
           <div class="admin-panel" style="max-width:1120px;margin:0 auto;padding:26px 28px">
@@ -4905,7 +4907,8 @@
             </div>
 
             <!-- Main Office Address -->
-            <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:18px 20px;margin-bottom:24px">
+            <!-- Main Office Address -->
+            <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:18px 20px;margin-bottom:20px">
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
                 <span class="material-icons" style="color:var(--admin-gold);font-size:22px">apartment</span>
                 <label style="font-size:15px;font-weight:700;color:var(--admin-dark);margin:0">Main Office Address *</label>
@@ -4914,6 +4917,26 @@
                 Official registered headquarters location, central Ashram, street, district, state, and PIN code.
               </p>
               <textarea id="adm-sys-address" rows="3" style="width:100%;font-size:14px;padding:10px 12px;line-height:1.5" placeholder="e.g. PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024">${esc(officeAddress)}</textarea>
+            </div>
+
+            <!-- Ceremony Time Slots for Any Available Pandit -->
+            <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:18px 20px;margin-bottom:24px">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="material-icons" style="color:var(--admin-gold);font-size:22px">schedule</span>
+                  <label style="font-size:15px;font-weight:700;color:var(--admin-dark);margin:0">Platform Ceremony Time Slots (For 'Book with Any Available Pandit') *</label>
+                </div>
+                <button type="button" class="btn btn-outline dark btn-sm" id="btn-reset-default-slots" style="font-size:12px;padding:5px 12px">
+                  <span class="material-icons" style="font-size:14px">restart_alt</span> Reset Default Slots
+                </button>
+              </div>
+              <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                These time slots appear in the Ceremony Time Slot selector when devotees choose <strong>"Book with Any Available Pandit"</strong> (Auto-assigned by Admin). Enter each slot on a new line (e.g. <code>08:00 AM - 11:00 AM</code>).
+              </p>
+              <textarea id="adm-sys-slots" rows="5" style="width:100%;font-size:14px;padding:10px 12px;line-height:1.6;font-family:monospace" placeholder="06:30 AM - 09:30 AM&#10;08:00 AM - 11:00 AM&#10;10:30 AM - 01:30 PM&#10;04:00 PM - 07:00 PM&#10;06:30 PM - 09:30 PM">${esc(timeSlots.join('\n'))}</textarea>
+              <div id="adm-sys-slots-preview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+                ${timeSlots.map(s => `<span class="badge" style="background:#fff;border:1px solid #d99a19;color:#3e1f07;font-weight:600;font-size:12px;padding:4px 10px">${esc(s)}</span>`).join('')}
+              </div>
             </div>
 
             <!-- Save Action Button -->
@@ -4997,6 +5020,29 @@
           };
         }
 
+        const slotsInput = document.getElementById('adm-sys-slots');
+        const slotsPreview = document.getElementById('adm-sys-slots-preview');
+        const resetSlotsBtn = document.getElementById('btn-reset-default-slots');
+
+        function updateSlotsPreview() {
+          if (!slotsInput || !slotsPreview) return;
+          const slots = slotsInput.value.split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
+          slotsPreview.innerHTML = slots.map(s => `<span class="badge" style="background:#fff;border:1px solid #d99a19;color:#3e1f07;font-weight:600;font-size:12px;padding:4px 10px">${esc(s)}</span>`).join('');
+        }
+
+        if (slotsInput) {
+          slotsInput.oninput = updateSlotsPreview;
+        }
+        if (resetSlotsBtn) {
+          resetSlotsBtn.onclick = () => {
+            if (slotsInput) {
+              slotsInput.value = defaultSlotsList.join('\n');
+              updateSlotsPreview();
+              toast('Default ceremony time slots restored');
+            }
+          };
+        }
+
         // Save logic
         const saveBtn = document.getElementById('btn-save-system-settings');
         if (saveBtn) {
@@ -5010,12 +5056,14 @@
                   if (authRes && authRes.token) TOKEN = authRes.token;
                 } catch {}
               }
+              const slotsVal = (document.getElementById('adm-sys-slots') ? document.getElementById('adm-sys-slots').value : '').split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
               await api('/system-settings', {
                 method: 'PUT',
                 body: {
                   contactNumber: document.getElementById('adm-sys-contact').value.trim(),
                   logo: document.getElementById('adm-sys-logo-url').value.trim(),
-                  officeAddress: document.getElementById('adm-sys-address').value.trim()
+                  officeAddress: document.getElementById('adm-sys-address').value.trim(),
+                  timeSlots: slotsVal
                 }
               });
               toast('Official System Settings saved successfully! 🙏');
@@ -5027,12 +5075,14 @@
                   const authRes = await api('/auth/admin-direct', { method: 'POST' });
                   if (authRes && authRes.token) {
                     TOKEN = authRes.token;
+                    const slotsVal = (document.getElementById('adm-sys-slots') ? document.getElementById('adm-sys-slots').value : '').split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
                     await api('/system-settings', {
                       method: 'PUT',
                       body: {
                         contactNumber: document.getElementById('adm-sys-contact').value.trim(),
                         logo: document.getElementById('adm-sys-logo-url').value.trim(),
-                        officeAddress: document.getElementById('adm-sys-address').value.trim()
+                        officeAddress: document.getElementById('adm-sys-address').value.trim(),
+                        timeSlots: slotsVal
                       }
                     });
                     toast('Official System Settings saved successfully! 🙏');

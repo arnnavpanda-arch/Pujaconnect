@@ -817,7 +817,7 @@ app.post('/api/auth/admin-login', wrap(async (req, res) => {
       });
     }
     return res.status(401).json({
-      error: 'Invalid admin username or password. 1 attempt remaining before 2-minute lockout.',
+      error: 'Invalid admin username or password',
       locked: false,
       remainingAttempts: failStatus.remainingAttempts
     });
@@ -1963,11 +1963,18 @@ app.put('/api/platform-bank-details', adminOnly, wrap(async (req, res) => {
   res.json(s.value);
 }));
 
-// Centralized System Settings (Official Contact, Logo, Office Address) Managed by Admin
+// Centralized System Settings (Official Contact, Logo, Office Address, Default Time Slots) Managed by Admin
 const DEFAULT_SYSTEM_SETTINGS = {
   contactNumber: '+91 94370 12345',
   logo: '/logo.jpg',
-  officeAddress: 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024'
+  officeAddress: 'PujaConnect Central Headquarters, Plot No. 108, Vedic Marg, Chandrasekharpur, Bhubaneswar, Odisha – 751024',
+  timeSlots: [
+    '06:30 AM - 09:30 AM',
+    '08:00 AM - 11:00 AM',
+    '10:30 AM - 01:30 PM',
+    '04:00 PM - 07:00 PM',
+    '06:30 PM - 09:30 PM'
+  ]
 };
 
 app.get('/api/system-settings', wrap(async (req, res) => {
@@ -1976,14 +1983,27 @@ app.get('/api/system-settings', wrap(async (req, res) => {
 }));
 
 app.put('/api/system-settings', adminOnly, wrap(async (req, res) => {
-  const { contactNumber, logo, officeAddress } = req.body;
+  const { contactNumber, logo, officeAddress, timeSlots } = req.body;
   const currentDoc = await AppSetting.findOne({ key: 'system_settings' });
   const current = currentDoc && currentDoc.value ? currentDoc.value : DEFAULT_SYSTEM_SETTINGS;
+
+  let sanitizedSlots = current.timeSlots || DEFAULT_SYSTEM_SETTINGS.timeSlots;
+  if (timeSlots !== undefined) {
+    if (Array.isArray(timeSlots)) {
+      const parsed = timeSlots.map(s => String(s || '').trim()).filter(Boolean);
+      if (parsed.length) sanitizedSlots = parsed;
+    } else if (typeof timeSlots === 'string') {
+      const parsed = timeSlots.split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
+      if (parsed.length) sanitizedSlots = parsed;
+    }
+  }
+
   const updated = {
     ...current,
     contactNumber: contactNumber !== undefined ? String(contactNumber).trim() : current.contactNumber,
     logo: logo !== undefined ? String(logo).trim() : current.logo,
-    officeAddress: officeAddress !== undefined ? String(officeAddress).trim() : current.officeAddress
+    officeAddress: officeAddress !== undefined ? String(officeAddress).trim() : current.officeAddress,
+    timeSlots: sanitizedSlots
   };
   const s = await AppSetting.findOneAndUpdate(
     { key: 'system_settings' },
