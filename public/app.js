@@ -8115,6 +8115,8 @@ async function openPanditCancellationModal(bookingId) {
       }
     };
   });
+}
+
 function openPrivacyPolicyModal() {
   const settings = S.systemSettings || DEFAULT_SYSTEM_SETTINGS;
   const content = (settings && settings.privacyPolicy) || DEFAULT_SYSTEM_SETTINGS.privacyPolicy;
