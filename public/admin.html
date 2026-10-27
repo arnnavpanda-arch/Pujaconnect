@@ -763,7 +763,7 @@
             <span class="admin-tab-label">Dashboard Overview</span>
           </button>
 
-          <!-- Section 1: Bookings & Operations (Pass: unified mentor) -->
+          <!-- Section 1: Bookings & Operations -->
           <div class="admin-sidebar-section">
             <div class="admin-sidebar-section-header">
               <span>Section 1: Operations</span>
@@ -783,7 +783,7 @@
             </button>
           </div>
 
-          <!-- Section 2: Scholars, Catalog & Settings (Pass: unified mentor) -->
+          <!-- Section 2: Scholars, Catalog & Settings -->
           <div class="admin-sidebar-section">
             <div class="admin-sidebar-section-header">
               <span>Section 2: Scholars &amp; Catalog</span>
@@ -814,7 +814,7 @@
             </button>
           </div>
 
-          <!-- Section 3: Finance & Payouts (Pass: pandit) -->
+          <!-- Section 3: Finance & Payouts -->
           <div class="admin-sidebar-section">
             <div class="admin-sidebar-section-header">
               <span>Section 3: Finance &amp; Payouts</span>
@@ -838,7 +838,7 @@
             </button>
           </div>
 
-          <!-- Section 4: Media & Offers (Pass: media) -->
+          <!-- Section 4: Media & Offers -->
           <div class="admin-sidebar-section">
             <div class="admin-sidebar-section-header">
               <span>Section 4: Media &amp; Offers</span>
@@ -1480,11 +1480,8 @@
     }
 
     // =========================================================================
-    // 4 PROTECTED SECTIONS & SECURITY CONFIGURATION
-    // 1: Bookings & Assignments, Multi-Day Requests (unified mentor)
-    // 2: KYC Queue, Pandits Directory & Rates, Puja Catalog, Devotees, System Settings (unified mentor)
-    // 3: Payment Verifications, Platform Bank & UPI, Pandit Payment (pandit)
-    // 4: Media & Offers (media)
+    // 4 PROTECTED SECTIONS CONFIGURATION
+    // Gated by server-side verification with 2-minute lockout protection
     // =========================================================================
     const SECTION_DEFS = {
       section_1: {
