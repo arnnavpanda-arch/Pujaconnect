@@ -185,6 +185,30 @@ const S = {
   view: 'home'
 };
 
+const DEFAULT_PRIVACY_POLICY = `At PujaConnect, your privacy and trust are sacred to us. We are committed to safeguarding the personal and spiritual information of devotees and verified Vedic Pandits.
+
+1. Information Collection: We collect essential devotee details including name, contact phone number, ceremony address, and chosen ritual preferences solely to facilitate authentic Vedic ceremonies and coordination with verified Purohits.
+
+2. Confidentiality & Security: Devotee phone numbers and ceremony addresses are shared exclusively with the assigned Purohit for ceremony preparation and execution. We do not sell, rent, or trade personal data to third parties.
+
+3. Transactional Security: Bank account and UPI details submitted for ceremony Dakshina payments or refund processing are handled with end-to-end security and administrative verification.
+
+4. Communications: Devotees receive booking confirmation updates, Purohit assignment alerts, and transactional receipts via email and SMS.
+
+For any privacy questions or data requests, contact our Central Headquarters at bookpujaconnect@gmail.com.`;
+
+const DEFAULT_TERMS_CONDITIONS = `Welcome to PujaConnect. By booking sacred Vedic ceremonies through our platform, devotees and Purohits agree to the following terms and conditions:
+
+1. Ceremony Bookings & Advance Notice: All ceremony bookings require a minimum of 48 hours advance notice to enable proper Vedic preparation and verified Pandit assignment.
+
+2. Purohit Allocation & Verification: All Pandits on PujaConnect are verified for Vedic lineage, credentials, and conduct. Admin assigns verified Pandits based on district availability and ritual specialization.
+
+3. Dakshina & Payments: Dakshina rates are fixed district-wise according to the official rate card or agreed Pandit Dakshina. Payment is completed upon Pandit confirmation and admin assignment.
+
+4. Cancellation & Refund Policy: Devotees may cancel ceremonies subject to standard platform cancellation terms. Refund amounts are credited directly to the devotee's registered UPI ID or bank account.
+
+5. Code of Conduct: Both devotees and Purohits are expected to maintain the utmost sanctity, respect, and punctuality during all sacred rituals.`;
+
 const DEFAULT_SYSTEM_SETTINGS = {
   contactNumber: '+91 94370 12345',
   logo: '/logo.jpg',
@@ -195,7 +219,9 @@ const DEFAULT_SYSTEM_SETTINGS = {
     '10:30 AM - 01:30 PM',
     '04:00 PM - 07:00 PM',
     '06:30 PM - 09:30 PM'
-  ]
+  ],
+  privacyPolicy: DEFAULT_PRIVACY_POLICY,
+  termsConditions: DEFAULT_TERMS_CONDITIONS
 };
 
 async function loadSystemSettings() {
@@ -7120,6 +7146,8 @@ async function adminDash(root) {
   const currLogo = (S.systemSettings && S.systemSettings.logo) || '';
   const currAddress = (S.systemSettings && S.systemSettings.officeAddress) || DEFAULT_SYSTEM_SETTINGS.officeAddress;
   const currSlots = (S.systemSettings && Array.isArray(S.systemSettings.timeSlots) && S.systemSettings.timeSlots.length) ? S.systemSettings.timeSlots : DEFAULT_SYSTEM_SETTINGS.timeSlots;
+  const currPrivacy = (S.systemSettings && S.systemSettings.privacyPolicy) || DEFAULT_SYSTEM_SETTINGS.privacyPolicy;
+  const currTerms = (S.systemSettings && S.systemSettings.termsConditions) || DEFAULT_SYSTEM_SETTINGS.termsConditions;
 
   const pend = pandits.filter((p) => p.status === 'Pending Review');
   const unassigned = longs.filter((l) => l.status === 'Pending Admin' || ['Rejected', 'Declined', 'Rejected by Pandit'].includes(l.status));
@@ -7322,7 +7350,41 @@ async function adminDash(root) {
                 </div>
               </div>
 
-              <!-- 5. Save Button -->
+              <!-- 5. Platform Privacy Policy Configuration -->
+              <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <span class="material-icons" style="color:#d99a19;font-size:22px">policy</span>
+                    <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Platform Privacy Policy *</label>
+                  </div>
+                  <button type="button" class="btn btn-outline dark btn-sm" id="dash-btn-reset-default-privacy" style="font-size:12px;padding:5px 12px">
+                    <span class="material-icons" style="font-size:14px">restart_alt</span> Reset Default Policy
+                  </button>
+                </div>
+                <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                  Official privacy guidelines shown to devotees when they click <strong>Privacy Policy</strong> in the website footer.
+                </p>
+                <textarea id="dash-sys-privacy" rows="7" style="width:100%;font-size:13.5px;padding:11px 14px;line-height:1.6">${esc(currPrivacy)}</textarea>
+              </div>
+
+              <!-- 6. Platform Terms & Conditions Configuration -->
+              <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <span class="material-icons" style="color:#d99a19;font-size:22px">gavel</span>
+                    <label style="font-size:15px;font-weight:700;color:#351605;margin:0">Terms &amp; Conditions *</label>
+                  </div>
+                  <button type="button" class="btn btn-outline dark btn-sm" id="dash-btn-reset-default-terms" style="font-size:12px;padding:5px 12px">
+                    <span class="material-icons" style="font-size:14px">restart_alt</span> Reset Default Terms
+                  </button>
+                </div>
+                <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                  Platform terms, cancellation rules, and ceremony standards shown to devotees when clicking <strong>Terms &amp; Conditions</strong> in the website footer.
+                </p>
+                <textarea id="dash-sys-terms" rows="7" style="width:100%;font-size:13.5px;padding:11px 14px;line-height:1.6">${esc(currTerms)}</textarea>
+              </div>
+
+              <!-- 7. Save Button -->
               <div style="display:flex;gap:12px;align-items:center">
                 <button type="button" class="btn btn-gold btn-lg" id="dash-btn-save-system-settings" style="flex:1;padding:14px 28px;font-size:16px;font-weight:800">
                   <span class="material-icons" style="font-size:20px;vertical-align:middle;margin-right:6px">save</span> Save Official System Settings
@@ -7473,6 +7535,28 @@ async function adminDash(root) {
     };
   }
 
+  const dashResetPrivacyBtn = document.getElementById('dash-btn-reset-default-privacy');
+  if (dashResetPrivacyBtn) {
+    dashResetPrivacyBtn.onclick = () => {
+      const el = document.getElementById('dash-sys-privacy');
+      if (el) {
+        el.value = DEFAULT_PRIVACY_POLICY;
+        toast('Default Privacy Policy restored');
+      }
+    };
+  }
+
+  const dashResetTermsBtn = document.getElementById('dash-btn-reset-default-terms');
+  if (dashResetTermsBtn) {
+    dashResetTermsBtn.onclick = () => {
+      const el = document.getElementById('dash-sys-terms');
+      if (el) {
+        el.value = DEFAULT_TERMS_CONDITIONS;
+        toast('Default Terms & Conditions restored');
+      }
+    };
+  }
+
   const saveSettingsBtn = document.getElementById('dash-btn-save-system-settings');
   if (saveSettingsBtn) {
     saveSettingsBtn.onclick = async () => {
@@ -7483,6 +7567,8 @@ async function adminDash(root) {
         const logoVal = (document.getElementById('dash-sys-logo-url').value || '').trim();
         const addressVal = (document.getElementById('dash-sys-address').value || '').trim();
         const slotsVal = (document.getElementById('dash-sys-slots') ? document.getElementById('dash-sys-slots').value : '').split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
+        const privVal = document.getElementById('dash-sys-privacy') ? document.getElementById('dash-sys-privacy').value.trim() : '';
+        const termsVal = document.getElementById('dash-sys-terms') ? document.getElementById('dash-sys-terms').value.trim() : '';
 
         const updated = await api('/system-settings', {
           method: 'PUT',
@@ -7490,10 +7576,12 @@ async function adminDash(root) {
             contactNumber: contactVal,
             logo: logoVal,
             officeAddress: addressVal,
-            timeSlots: slotsVal
+            timeSlots: slotsVal,
+            privacyPolicy: privVal,
+            termsConditions: termsVal
           }
         });
-        S.systemSettings = updated || { contactNumber: contactVal, logo: logoVal, officeAddress: addressVal, timeSlots: slotsVal };
+        S.systemSettings = updated || { contactNumber: contactVal, logo: logoVal, officeAddress: addressVal, timeSlots: slotsVal, privacyPolicy: privVal, termsConditions: termsVal };
         updatePublicFooterSystemInfo();
         toast('Official System Settings saved successfully! 🙏');
         saveSettingsBtn.disabled = false;
@@ -8027,11 +8115,53 @@ async function openPanditCancellationModal(bookingId) {
       }
     };
   });
+function openPrivacyPolicyModal() {
+  const settings = S.systemSettings || DEFAULT_SYSTEM_SETTINGS;
+  const content = (settings && settings.privacyPolicy) || DEFAULT_SYSTEM_SETTINGS.privacyPolicy;
+  const paragraphs = content.split(/\n\s*\n/).map((p) => `<p style="margin-bottom:12px;line-height:1.6;color:#3b2115">${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+  modal('Privacy Policy', `
+    <div style="max-height:65vh;overflow-y:auto;padding:6px 4px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #ebd9c2">
+        <span class="material-icons" style="color:var(--ochre);font-size:26px">policy</span>
+        <div>
+          <div style="font-weight:700;font-size:16px;color:var(--mahogany)">PujaConnect Official Privacy Policy</div>
+          <div class="muted" style="font-size:12px">Platform policy regarding devotee and pandit data protection</div>
+        </div>
+      </div>
+      <div style="font-size:14px">${paragraphs}</div>
+      <div style="margin-top:20px;text-align:right">
+        <button class="btn btn-gold btn-sm" data-action="closeModal">Understood &amp; Close</button>
+      </div>
+    </div>
+  `);
+}
+
+function openTermsConditionsModal() {
+  const settings = S.systemSettings || DEFAULT_SYSTEM_SETTINGS;
+  const content = (settings && settings.termsConditions) || DEFAULT_SYSTEM_SETTINGS.termsConditions;
+  const paragraphs = content.split(/\n\s*\n/).map((p) => `<p style="margin-bottom:12px;line-height:1.6;color:#3b2115">${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+  modal('Terms &amp; Conditions', `
+    <div style="max-height:65vh;overflow-y:auto;padding:6px 4px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #ebd9c2">
+        <span class="material-icons" style="color:var(--ochre);font-size:26px">gavel</span>
+        <div>
+          <div style="font-weight:700;font-size:16px;color:var(--mahogany)">PujaConnect Terms &amp; Conditions</div>
+          <div class="muted" style="font-size:12px">Platform agreement for devotee sacred ceremony bookings</div>
+        </div>
+      </div>
+      <div style="font-size:14px">${paragraphs}</div>
+      <div style="margin-top:20px;text-align:right">
+        <button class="btn btn-gold btn-sm" data-action="closeModal">I Agree &amp; Close</button>
+      </div>
+    </div>
+  `);
 }
 
 /* ---------- action dispatcher ---------- */
 const ACTIONS = {
   nav: (d) => showView(d.view),
+  openPrivacyPolicy: () => openPrivacyPolicyModal(),
+  openTermsConditions: () => openTermsConditionsModal(),
   toggleMenu: () => {
     const drawer = $('#nav-drawer');
     if (!drawer) return;

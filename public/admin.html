@@ -4804,6 +4804,32 @@
         const logo = settings.logo || '';
         const defaultSlotsList = ['06:30 AM - 09:30 AM', '08:00 AM - 11:00 AM', '10:30 AM - 01:30 PM', '04:00 PM - 07:00 PM', '06:30 PM - 09:30 PM'];
         const timeSlots = Array.isArray(settings.timeSlots) && settings.timeSlots.length ? settings.timeSlots : defaultSlotsList;
+        const defaultPrivacyPolicy = `At PujaConnect, your privacy and trust are sacred to us. We are committed to safeguarding the personal and spiritual information of devotees and verified Vedic Pandits.
+
+1. Information Collection: We collect essential devotee details including name, contact phone number, ceremony address, and chosen ritual preferences solely to facilitate authentic Vedic ceremonies and coordination with verified Purohits.
+
+2. Confidentiality & Security: Devotee phone numbers and ceremony addresses are shared exclusively with the assigned Purohit for ceremony preparation and execution. We do not sell, rent, or trade personal data to third parties.
+
+3. Transactional Security: Bank account and UPI details submitted for ceremony Dakshina payments or refund processing are handled with end-to-end security and administrative verification.
+
+4. Communications: Devotees receive booking confirmation updates, Purohit assignment alerts, and transactional receipts via email and SMS.
+
+For any privacy questions or data requests, contact our Central Headquarters at bookpujaconnect@gmail.com.`;
+
+        const defaultTermsConditions = `Welcome to PujaConnect. By booking sacred Vedic ceremonies through our platform, devotees and Purohits agree to the following terms and conditions:
+
+1. Ceremony Bookings & Advance Notice: All ceremony bookings require a minimum of 48 hours advance notice to enable proper Vedic preparation and verified Pandit assignment.
+
+2. Purohit Allocation & Verification: All Pandits on PujaConnect are verified for Vedic lineage, credentials, and conduct. Admin assigns verified Pandits based on district availability and ritual specialization.
+
+3. Dakshina & Payments: Dakshina rates are fixed district-wise according to the official rate card or agreed Pandit Dakshina. Payment is completed upon Pandit confirmation and admin assignment.
+
+4. Cancellation & Refund Policy: Devotees may cancel ceremonies subject to standard platform cancellation terms. Refund amounts are credited directly to the devotee's registered UPI ID or bank account.
+
+5. Code of Conduct: Both devotees and Purohits are expected to maintain the utmost sanctity, respect, and punctuality during all sacred rituals.`;
+
+        const privacyPolicy = settings.privacyPolicy || defaultPrivacyPolicy;
+        const termsConditions = settings.termsConditions || defaultTermsConditions;
 
         root.innerHTML = `
           <div class="admin-panel" style="max-width:1120px;margin:0 auto;padding:26px 28px">
@@ -4939,6 +4965,40 @@
               </div>
             </div>
 
+            <!-- Platform Privacy Policy Configuration -->
+            <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:18px 20px;margin-bottom:20px">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="material-icons" style="color:var(--admin-gold);font-size:22px">policy</span>
+                  <label style="font-size:15px;font-weight:700;color:var(--admin-dark);margin:0">Platform Privacy Policy *</label>
+                </div>
+                <button type="button" class="btn btn-outline dark btn-sm" id="btn-reset-default-privacy" style="font-size:12px;padding:5px 12px">
+                  <span class="material-icons" style="font-size:14px">restart_alt</span> Reset Default Policy
+                </button>
+              </div>
+              <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                Official privacy guidelines shown to devotees when they click <strong>Privacy Policy</strong> in the website footer.
+              </p>
+              <textarea id="adm-sys-privacy" rows="7" style="width:100%;font-size:13.5px;padding:10px 12px;line-height:1.6">${esc(privacyPolicy)}</textarea>
+            </div>
+
+            <!-- Platform Terms & Conditions Configuration -->
+            <div style="background:#fffcf5;border:1.5px solid #ebd9c2;border-radius:12px;padding:18px 20px;margin-bottom:24px">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="material-icons" style="color:var(--admin-gold);font-size:22px">gavel</span>
+                  <label style="font-size:15px;font-weight:700;color:var(--admin-dark);margin:0">Terms &amp; Conditions *</label>
+                </div>
+                <button type="button" class="btn btn-outline dark btn-sm" id="btn-reset-default-terms" style="font-size:12px;padding:5px 12px">
+                  <span class="material-icons" style="font-size:14px">restart_alt</span> Reset Default Terms
+                </button>
+              </div>
+              <p class="muted" style="font-size:12.5px;margin:0 0 10px">
+                Platform terms, cancellation rules, and ceremony standards shown to devotees when clicking <strong>Terms &amp; Conditions</strong> in the website footer.
+              </p>
+              <textarea id="adm-sys-terms" rows="7" style="width:100%;font-size:13.5px;padding:10px 12px;line-height:1.6">${esc(termsConditions)}</textarea>
+            </div>
+
             <!-- Save Action Button -->
             <div style="display:flex;gap:12px;align-items:center">
               <button class="btn btn-gold btn-lg" id="btn-save-system-settings" style="flex:1;padding:13px 24px;font-size:15px;font-weight:700">
@@ -5043,6 +5103,28 @@
           };
         }
 
+        const resetPrivacyBtn = document.getElementById('btn-reset-default-privacy');
+        if (resetPrivacyBtn) {
+          resetPrivacyBtn.onclick = () => {
+            const el = document.getElementById('adm-sys-privacy');
+            if (el) {
+              el.value = defaultPrivacyPolicy;
+              toast('Default Privacy Policy restored');
+            }
+          };
+        }
+
+        const resetTermsBtn = document.getElementById('btn-reset-default-terms');
+        if (resetTermsBtn) {
+          resetTermsBtn.onclick = () => {
+            const el = document.getElementById('adm-sys-terms');
+            if (el) {
+              el.value = defaultTermsConditions;
+              toast('Default Terms & Conditions restored');
+            }
+          };
+        }
+
         // Save logic
         const saveBtn = document.getElementById('btn-save-system-settings');
         if (saveBtn) {
@@ -5057,13 +5139,17 @@
                 } catch {}
               }
               const slotsVal = (document.getElementById('adm-sys-slots') ? document.getElementById('adm-sys-slots').value : '').split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
+              const privVal = document.getElementById('adm-sys-privacy') ? document.getElementById('adm-sys-privacy').value.trim() : '';
+              const termsVal = document.getElementById('adm-sys-terms') ? document.getElementById('adm-sys-terms').value.trim() : '';
               await api('/system-settings', {
                 method: 'PUT',
                 body: {
                   contactNumber: document.getElementById('adm-sys-contact').value.trim(),
                   logo: document.getElementById('adm-sys-logo-url').value.trim(),
                   officeAddress: document.getElementById('adm-sys-address').value.trim(),
-                  timeSlots: slotsVal
+                  timeSlots: slotsVal,
+                  privacyPolicy: privVal,
+                  termsConditions: termsVal
                 }
               });
               toast('Official System Settings saved successfully! 🙏');
@@ -5076,13 +5162,17 @@
                   if (authRes && authRes.token) {
                     TOKEN = authRes.token;
                     const slotsVal = (document.getElementById('adm-sys-slots') ? document.getElementById('adm-sys-slots').value : '').split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
+                    const privVal = document.getElementById('adm-sys-privacy') ? document.getElementById('adm-sys-privacy').value.trim() : '';
+                    const termsVal = document.getElementById('adm-sys-terms') ? document.getElementById('adm-sys-terms').value.trim() : '';
                     await api('/system-settings', {
                       method: 'PUT',
                       body: {
                         contactNumber: document.getElementById('adm-sys-contact').value.trim(),
                         logo: document.getElementById('adm-sys-logo-url').value.trim(),
                         officeAddress: document.getElementById('adm-sys-address').value.trim(),
-                        timeSlots: slotsVal
+                        timeSlots: slotsVal,
+                        privacyPolicy: privVal,
+                        termsConditions: termsVal
                       }
                     });
                     toast('Official System Settings saved successfully! 🙏');

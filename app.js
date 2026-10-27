@@ -389,30 +389,9 @@ app.post('/api/auth/devotee-login', wrap(async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Please enter your registered email' });
   const e = lc(email);
-  let user = await User.findOne({ email: e });
+  const user = await User.findOne({ email: e });
   if (!user) {
-    // If user account is not found, check existing bookings or create new devotee profile
-    const b = await Booking.findOne({ userEmail: { $regex: new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }).sort({ createdAt: -1 });
-    const longB = !b ? await LongPuja.findOne({ userEmail: { $regex: new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }).sort({ createdAt: -1 }) : null;
-    
-    let fallbackName = (b && b.userName) || (longB && longB.userName) || '';
-    if (!fallbackName) {
-      const uname = (e.split('@')[0] || 'Devotee');
-      fallbackName = uname.replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    }
-    const phone = (b && b.phone) || (longB && longB.phone) || '';
-    const district = (b && b.district) || (longB && longB.district) || 'Khordha';
-    const state = (b && b.state) || (longB && longB.state) || 'Odisha';
-
-    user = await User.create({
-      name: fallbackName,
-      email: e,
-      phone,
-      state,
-      district,
-      password: '',
-      role: 'user'
-    });
+    return res.status(404).json({ error: 'This email is not registered. Please create an account.' });
   }
   res.json({ user: publicUser(user), token: sign({ email: user.email, role: user.role }) });
 }));
@@ -547,7 +526,7 @@ app.post('/api/auth/pandit/send-otp', wrap(async (req, res) => {
   const e = lc(email);
   const p = await Pandit.findOne({ email: e });
   if (!p) {
-    return res.status(404).json({ error: 'No Pandit registered with this email. Please click "Pandit Registration" first.' });
+    return res.status(404).json({ error: 'This email is not registered. Please create an account.' });
   }
   const code = String(Math.floor(100000 + Math.random() * 900000));
   PANDIT_OTPS.set(e, { code, expires: Date.now() + 10 * 60 * 1000 });
@@ -573,7 +552,7 @@ app.post('/api/auth/pandit/verify-otp', wrap(async (req, res) => {
   }
   PANDIT_OTPS.delete(e);
   const p = await Pandit.findOne({ email: e });
-  if (!p) return res.status(404).json({ error: 'Pandit not found' });
+  if (!p) return res.status(404).json({ error: 'This email is not registered. Please create an account.' });
   res.json({
     user: { name: p.name, email: p.email, phone: p.phone, role: 'pandit', panditId: String(p._id), status: p.status },
     token: sign({ email: p.email, role: 'pandit' })
@@ -587,14 +566,14 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   const e = lc(email);
   if (role === 'pandit') {
     const p = await Pandit.findOne({ email: e });
-    if (!p) return res.status(404).json({ error: 'Pandit account not found' });
+    if (!p) return res.status(404).json({ error: 'This email is not registered. Please create an account.' });
     return res.json({
       user: { name: p.name, email: p.email, phone: p.phone, role: 'pandit', panditId: String(p._id), status: p.status },
       token: sign({ email: p.email, role: 'pandit' })
     });
   }
   const user = await User.findOne({ email: e });
-  if (!user) return res.status(404).json({ error: 'No account found. Please register first.' });
+  if (!user) return res.status(404).json({ error: 'This email is not registered. Please create an account.' });
   res.json({ user: publicUser(user), token: sign({ email: user.email, role: user.role }) });
 }));
 
@@ -1963,7 +1942,31 @@ app.put('/api/platform-bank-details', adminOnly, wrap(async (req, res) => {
   res.json(s.value);
 }));
 
-// Centralized System Settings (Official Contact, Logo, Office Address, Default Time Slots) Managed by Admin
+// Centralized System Settings (Official Contact, Logo, Office Address, Default Time Slots, Privacy & Terms) Managed by Admin
+const DEFAULT_PRIVACY_POLICY = `At PujaConnect, your privacy and trust are sacred to us. We are committed to safeguarding the personal and spiritual information of devotees and verified Vedic Pandits.
+
+1. Information Collection: We collect essential devotee details including name, contact phone number, ceremony address, and chosen ritual preferences solely to facilitate authentic Vedic ceremonies and coordination with verified Purohits.
+
+2. Confidentiality & Security: Devotee phone numbers and ceremony addresses are shared exclusively with the assigned Purohit for ceremony preparation and execution. We do not sell, rent, or trade personal data to third parties.
+
+3. Transactional Security: Bank account and UPI details submitted for ceremony Dakshina payments or refund processing are handled with end-to-end security and administrative verification.
+
+4. Communications: Devotees receive booking confirmation updates, Purohit assignment alerts, and transactional receipts via email and SMS.
+
+For any privacy questions or data requests, contact our Central Headquarters at bookpujaconnect@gmail.com.`;
+
+const DEFAULT_TERMS_CONDITIONS = `Welcome to PujaConnect. By booking sacred Vedic ceremonies through our platform, devotees and Purohits agree to the following terms and conditions:
+
+1. Ceremony Bookings & Advance Notice: All ceremony bookings require a minimum of 48 hours advance notice to enable proper Vedic preparation and verified Pandit assignment.
+
+2. Purohit Allocation & Verification: All Pandits on PujaConnect are verified for Vedic lineage, credentials, and conduct. Admin assigns verified Pandits based on district availability and ritual specialization.
+
+3. Dakshina & Payments: Dakshina rates are fixed district-wise according to the official rate card or agreed Pandit Dakshina. Payment is completed upon Pandit confirmation and admin assignment.
+
+4. Cancellation & Refund Policy: Devotees may cancel ceremonies subject to standard platform cancellation terms. Refund amounts are credited directly to the devotee's registered UPI ID or bank account.
+
+5. Code of Conduct: Both devotees and Purohits are expected to maintain the utmost sanctity, respect, and punctuality during all sacred rituals.`;
+
 const DEFAULT_SYSTEM_SETTINGS = {
   contactNumber: '+91 94370 12345',
   logo: '/logo.jpg',
@@ -1974,7 +1977,9 @@ const DEFAULT_SYSTEM_SETTINGS = {
     '10:30 AM - 01:30 PM',
     '04:00 PM - 07:00 PM',
     '06:30 PM - 09:30 PM'
-  ]
+  ],
+  privacyPolicy: DEFAULT_PRIVACY_POLICY,
+  termsConditions: DEFAULT_TERMS_CONDITIONS
 };
 
 app.get('/api/system-settings', wrap(async (req, res) => {
@@ -1983,7 +1988,7 @@ app.get('/api/system-settings', wrap(async (req, res) => {
 }));
 
 app.put('/api/system-settings', adminOnly, wrap(async (req, res) => {
-  const { contactNumber, logo, officeAddress, timeSlots } = req.body;
+  const { contactNumber, logo, officeAddress, timeSlots, privacyPolicy, termsConditions } = req.body;
   const currentDoc = await AppSetting.findOne({ key: 'system_settings' });
   const current = currentDoc && currentDoc.value ? currentDoc.value : DEFAULT_SYSTEM_SETTINGS;
 
@@ -2003,7 +2008,9 @@ app.put('/api/system-settings', adminOnly, wrap(async (req, res) => {
     contactNumber: contactNumber !== undefined ? String(contactNumber).trim() : current.contactNumber,
     logo: logo !== undefined ? String(logo).trim() : current.logo,
     officeAddress: officeAddress !== undefined ? String(officeAddress).trim() : current.officeAddress,
-    timeSlots: sanitizedSlots
+    timeSlots: sanitizedSlots,
+    privacyPolicy: privacyPolicy !== undefined ? String(privacyPolicy).trim() : (current.privacyPolicy || DEFAULT_SYSTEM_SETTINGS.privacyPolicy),
+    termsConditions: termsConditions !== undefined ? String(termsConditions).trim() : (current.termsConditions || DEFAULT_SYSTEM_SETTINGS.termsConditions)
   };
   const s = await AppSetting.findOneAndUpdate(
     { key: 'system_settings' },
